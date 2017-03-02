@@ -20,3 +20,6 @@ Retrieves an assortment of settings from the device.
 
 ### SetTest.py
 Retrieves Firmware and FPGA revision, then sets and checks the integration time, gain, and offset of the CCD.
+
+### WriteSpectraToFile.py
+Continually runs the GetSpectra.py script once every two seconds. Then saves this information into a CSV file. Time period can be changed by adjusting the sleep function call. 
