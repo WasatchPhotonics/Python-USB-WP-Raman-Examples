@@ -3,7 +3,12 @@ import datetime
 import time
 from time import sleep
 
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+# Newer ARM based products
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+
+# Legacy products
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+
 print dev
 H2D=0x40
 D2H=0xC0

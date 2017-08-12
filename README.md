@@ -23,3 +23,21 @@ Retrieves Firmware and FPGA revision, then sets and checks the integration time,
 
 ### WriteSpectraToFile.py
 Continually runs the GetSpectra.py script once every two seconds. Then saves this information into a CSV file. Time period can be changed by adjusting the sleep function call. 
+
+### ExtTrigger.py
+Waits for an external trigger to occur on the connected spectrometer and prints the frame number to the console
+
+### ExtTriggerToFile.py
+Waits for an external trigger to occur and then writes each spectra collected into a csv file in the local directory. The optional frame counter must be commented out when opperating at a sampling frequency > 100Hz.
+
+### WriteADCToFile.py
+Pulls the raw temperature values of the CCD and the Laser thermistors, displays them in the console, and stores them in a local CSV file. 
+
+### LaserOn.py
+Enables the light source on supported devices
+
+### LaserOff.py
+Disables the light source on supported devices
+
+### LaserOn_Set_PWR_###.py
+Enables the laser and sets the output power to a specified percentage.
