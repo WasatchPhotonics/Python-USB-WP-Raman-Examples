@@ -39,5 +39,13 @@ Enables the light source on supported devices
 ### LaserOff.py
 Disables the light source on supported devices
 
-### LaserOn_Set_PWR_###.py
+### LaserOn_Set_PWR_X.py
 Enables the laser and sets the output power to a specified percentage.
+
+### InGaAs Spectrometer Specific
+
+### InGaAs_SetHighGain.py
+Places the InGaAs sensor into HIGH_GAIN mode
+
+### InGaAs_SetLowGain.py
+Places the InGaAs sensor into LOW_GAIN mode

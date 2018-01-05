@@ -3,7 +3,7 @@ import datetime
 from time import sleep
 
 # Newer ARM based products
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 
 # Legacy products
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)

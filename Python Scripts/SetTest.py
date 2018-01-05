@@ -39,8 +39,8 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 	
 
 # get ARM firmware version
-ARMVer = dev.ctrl_transfer(D2H, 0xc0, 0,0,5,TIMEOUT)   
-print ('ARM Ver 		{3:}{4:}.{2:}.{1:}.{0:}'.format(chr(ARMVer[0]+48), chr(ARMVer[1]+48),chr(ARMVer[2]+48), chr(ARMVer[3]+48-9),chr(ARMVer[3]+48-10)))
+#ARMVer = dev.ctrl_transfer(D2H, 0xc0, 0,0,5,TIMEOUT)   
+#print ('ARM Ver 		{3:}{4:}.{2:}.{1:}.{0:}'.format(chr(ARMVer[0]+48), chr(ARMVer[1]+48),chr(ARMVer[2]+48), chr(ARMVer[3]+48-9),chr(ARMVer[3]+48-10)))
 
 # get fpga rev
 FPGAVer = dev.ctrl_transfer(D2H, 0xb4, 0,0,7,TIMEOUT)   

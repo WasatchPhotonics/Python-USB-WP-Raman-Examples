@@ -6,10 +6,10 @@ OUTPUT_TYPE = "NUMERIC"
 #OUTPUT_TYPE = "ARRAY"
 
 # Newer ARM based products
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 # Legacy products
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 
 print dev
 H2D=0x40
@@ -45,6 +45,7 @@ else:
 	print "CCD Offset		", 	Get_Value(0xc4, 2),	"		", 	dev.ctrl_transfer(D2H, 0xc4, 0,0,2,TIMEOUT)
 	print "CCD Gain		        ", 	Get_Value(0xc5, 2),	"		", 	dev.ctrl_transfer(D2H, 0xc5, 0,0,2,TIMEOUT)
 	print "CCD Temp SP		", 	Get_Value(0xd9, 2),	"		", 	dev.ctrl_transfer(D2H, 0xd9, 0,0,2,TIMEOUT)
+	print "CCD Temp ENABLE		", 	Get_Value(0xda, 1),	"		", 	dev.ctrl_transfer(D2H, 0xda, 0,0,1,TIMEOUT)
 	print "Laser Mod Duration	",	Get_Value(0xc3, 5),	"		",	dev.ctrl_transfer(D2H, 0xc3, 0,0,5,TIMEOUT)
 	print "Laser Mod Delay		",	Get_Value(0xca, 5),	"		",	dev.ctrl_transfer(D2H, 0xca, 0,0,5,TIMEOUT)
 	print "Laser Mod Period	        ",	Get_Value(0xcb, 5),	"		", 	dev.ctrl_transfer(D2H, 0xcb, 0,0,5,TIMEOUT)
