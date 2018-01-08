@@ -10,7 +10,8 @@ We have published a new USB API to make OEM development and instrumentation as e
 ## Drivers
 These examples require the use of the libusb drivers found either in your Dash3 installation directory or [right here on Github](https://github.com/WasatchPhotonics/WP_Raman_USB_Drivers).
 
-## Supported Examples
+## General Examples
+----
 
 ### GetSpectra.py
 Retrieves one line of spectra from the instrument. This sends the USB command 0xAD to the device to trigger an acquistion based on the device's current settings.
@@ -33,6 +34,9 @@ Waits for an external trigger to occur and then writes each spectra collected in
 ### WriteADCToFile.py
 Pulls the raw temperature values of the CCD and the Laser thermistors, displays them in the console, and stores them in a local CSV file. 
 
+## Laser Module Examples
+----
+
 ### LaserOn.py
 Enables the light source on supported devices
 
@@ -42,7 +46,8 @@ Disables the light source on supported devices
 ### LaserOn_Set_PWR_X.py
 Enables the laser and sets the output power to a specified percentage.
 
-### InGaAs Spectrometer Specific
+## InGaAs Examples
+----
 
 ### InGaAs_SetHighGain.py
 Places the InGaAs sensor into HIGH_GAIN mode
