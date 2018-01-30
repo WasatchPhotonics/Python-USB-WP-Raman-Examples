@@ -1,12 +1,12 @@
 import usb.core
 import datetime
+import time
 from time import sleep
 
-# Newer ARM based products
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
-
-# Legacy products
+# Select product
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print dev
 H2D=0x40
@@ -14,10 +14,13 @@ D2H=0xC0
 BUFFER_SIZE=8
 ZZ = [0,0,0,0,0,0,0,0]
 TIMEOUT=1000
-PixelCount=1024
 frameCounter = 0
 
-print dev
+# select pixel count
+PixelCount=512
+#PixelCount=1024
+#PixelCount=2048
+
 
 file = open("data.csv","w")
 
@@ -44,14 +47,17 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 			return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
 
 
-# Set the integration time
-print "Integration Time	",		Test_Set(0xb2, 0xbf, 1, 6)
-
-print "Waiting for data"
+# Set the Integration time to 1ms
+print "Turn OFF Continuous Read	",		Test_Set(0xc8, 0xcc, 0, 1)
+print "Set the Number of Frames	",		Test_Set(0xc9, 0xcd, 1, 1)
+print "Capturing... (60 second timeout)"
 while(1):
         stringBuffer = ""
         frameCounter = frameCounter + 1
         Data = dev.read(0x82,PixelCount*2,60000)
+        ts = time.time()
+        stringBuffer = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S %f')
+        stringBuffer = stringBuffer + ","
         for j in range (0, (PixelCount*2)/32, 1):
 		for i in range (0, 31, 2):
 			NewData = Data[j*32+i+1]*256+Data[j*32+i]

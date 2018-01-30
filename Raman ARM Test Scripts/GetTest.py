@@ -5,11 +5,11 @@ from time import sleep
 OUTPUT_TYPE = "NUMERIC"
 #OUTPUT_TYPE = "ARRAY"
 
-# Newer ARM based products
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+# select product
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-# Legacy products
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 
 print dev
 H2D=0x40

@@ -2,8 +2,10 @@ import usb.core
 import datetime
 from time import sleep
 
-# Select connected 1064 or NIR1 instrument
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+# select product
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print dev
 H2D=0x40
@@ -34,5 +36,11 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 		else:
 			return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
 	
+# Get FPGA Revision
+FPGAVer = dev.ctrl_transfer(D2H, 0xb4, 0,0,7,TIMEOUT)   
+print ('FPGA Ver {0:}{1:}{2:}{3:}{4:}{5:}{6:}'.format(chr(FPGAVer[0]), chr(FPGAVer[1]), chr(FPGAVer[2]), chr(FPGAVer[3]), chr(FPGAVer[4]), chr(FPGAVer[5]), chr(FPGAVer[6])))
 
-print "Set CF Select LOW	",		Test_Set(0xeb, 0xec, 0, 1)
+print '\nTesting Set Commands'
+print "Integration Time	",		Test_Set(0xb2, 0xbf, 1, 6)
+print "CCD Offset	", 		Test_Set(0xb6, 0xc4, 0, 2)
+print "CCD Gain		",		Test_Set(0xb7, 0xc5, 487, 2)

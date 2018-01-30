@@ -3,10 +3,9 @@ import datetime
 from time import sleep
 
 # Newer ARM based products
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
-
-# Legacy products
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+#dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print dev
 H2D=0x40
@@ -35,4 +34,7 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 		else:
 			return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
 			
-print "Laser On", 		Test_Set(0xbe, 0xe2, 1, 1)
+print "Laser Mod Period",	Test_Set(0xc7, 0xcb, 25000, 5)    # Sets the modulation period to 25,000us
+print "Laser Mod PW", 		Test_Set(0xdb, 0xdc, 4000, 5)     # Sets the modulation pulse-width to 4,000us
+print "Laser Mod Enable", 	Test_Set(0xbd, 0xe3, 1, 1)        # Enables laser modulation
+print "Laser ON", 		Test_Set(0xbe, 0xe2, 1, 1)        # Turn the laser ON
