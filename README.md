@@ -12,7 +12,6 @@ These examples require the use of the libusb drivers found either in your Dash3 
 
 ## General Examples
 ----
-<<<<<<< HEAD
 
 ### ExtTrigger.py
 Places the spectrometer into External Triggering Mode, if needed, and waits up to 60 seconds before timing out. When a trigger occurs a frame count is displayed in the prompt and the script will wait for the next trigger.
@@ -29,8 +28,6 @@ Retrieves the raw ADC value for the sensor and streams it into the prompt.
 ### GetFPGARev.py
 Retrieves the revision code for the FPGA.
 **Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-=======
->>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
 
 ### GetSpectra.py
 Retrieves one line of spectra from the instrument. This sends the USB command 0xAD to the device to trigger an acquistion based on the device's current settings.
@@ -44,37 +41,13 @@ Retrieves an assortment of settings from the device.
 Retrieves the current triggering mode from the device.
 **Supported Platforms:** WP Raman FX2, WP InGaAs
 
-### SetTest.py
-Retrieves Firmware and FPGA revision, then sets and checks the integration time, gain, and offset of the CCD.
-**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-
-### WriteSpectraToFile.py
-Continually runs the GetSpectra.py script once every two seconds. Then saves this information into a CSV file. Time period can be changed by adjusting the sleep function call. 
-**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-
-### ExtTrigger.py
-Waits for an external trigger to occur on the connected spectrometer and prints the frame number to the console
-**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-
-### ExtTriggerToFile.py
-Waits for an external trigger to occur and then writes each spectra collected into a csv file in the local directory. The optional frame counter must be commented out when opperating at a sampling frequency > 100Hz.
-**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-
-### WriteADCToFile.py
-Pulls the raw temperature values of the CCD and the Laser thermistors, displays them in the console, and stores them in a local CSV file. 
-**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-
-<<<<<<< HEAD
 ### SetIntegrationTime1ms.py
 Sets the integration time to 1ms.
 **Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
-=======
-## Laser Module Examples
-----
 
-### LaserOn.py
-Enables the light source on supported devices
->>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
+### SetTest.py
+Retrieves Firmware and FPGA revision, then sets and checks the integration time, gain, and offset of the CCD.
+**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
 
 ### SetTriggerMode_External.py
 Places the spectrometer into External Triggering mode
@@ -83,6 +56,14 @@ Places the spectrometer into External Triggering mode
 ### SetTriggerMode_Internal.py
 Places the spectrometer into Internal Triggering mode
 **Supported Platforms:** WP Raman FX2, WP InGaAs
+
+### WriteSpectraToFile.py
+Continually runs the GetSpectra.py script once every two seconds. Then saves this information into a CSV file. Time period can be changed by adjusting the sleep function call. 
+**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
+
+### WriteADCToFile.py
+Pulls the raw temperature values of the CCD and the Laser thermistors, displays them in the console, and stores them in a local CSV file. 
+**Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
 
 
 ## Laser Module Examples
@@ -107,21 +88,11 @@ This is a more complex laser modulation example. This configures the laser to a 
 ## InGaAs Specific Examples
 ----
 
-<<<<<<< HEAD
 ### SetGainHigh.py
 Places the InGaAs sensor into HIGH_GAIN mode.
-=======
-## InGaAs Examples
-----
->>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
 
 ### SetGainLow.py
 Places the InGaAs sensor into LOW_GAIN mode
 
-<<<<<<< HEAD
 ### GetGain.py
 Requests the current gain setting
-=======
-### InGaAs_SetLowGain.py
-Places the InGaAs sensor into LOW_GAIN mode
->>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
