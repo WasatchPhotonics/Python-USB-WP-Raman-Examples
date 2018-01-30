@@ -12,6 +12,7 @@ These examples require the use of the libusb drivers found either in your Dash3 
 
 ## General Examples
 ----
+<<<<<<< HEAD
 
 ### ExtTrigger.py
 Places the spectrometer into External Triggering Mode, if needed, and waits up to 60 seconds before timing out. When a trigger occurs a frame count is displayed in the prompt and the script will wait for the next trigger.
@@ -28,6 +29,8 @@ Retrieves the raw ADC value for the sensor and streams it into the prompt.
 ### GetFPGARev.py
 Retrieves the revision code for the FPGA.
 **Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
+=======
+>>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
 
 ### GetSpectra.py
 Retrieves one line of spectra from the instrument. This sends the USB command 0xAD to the device to trigger an acquistion based on the device's current settings.
@@ -61,9 +64,17 @@ Waits for an external trigger to occur and then writes each spectra collected in
 Pulls the raw temperature values of the CCD and the Laser thermistors, displays them in the console, and stores them in a local CSV file. 
 **Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
 
+<<<<<<< HEAD
 ### SetIntegrationTime1ms.py
 Sets the integration time to 1ms.
 **Supported Platforms:** WP Raman FX2, WP Raman ARM, WP InGaAs
+=======
+## Laser Module Examples
+----
+
+### LaserOn.py
+Enables the light source on supported devices
+>>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
 
 ### SetTriggerMode_External.py
 Places the spectrometer into External Triggering mode
@@ -96,11 +107,21 @@ This is a more complex laser modulation example. This configures the laser to a 
 ## InGaAs Specific Examples
 ----
 
+<<<<<<< HEAD
 ### SetGainHigh.py
 Places the InGaAs sensor into HIGH_GAIN mode.
+=======
+## InGaAs Examples
+----
+>>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
 
 ### SetGainLow.py
 Places the InGaAs sensor into LOW_GAIN mode
 
+<<<<<<< HEAD
 ### GetGain.py
 Requests the current gain setting
+=======
+### InGaAs_SetLowGain.py
+Places the InGaAs sensor into LOW_GAIN mode
+>>>>>>> cec014e25cd085ebb3fb541b61cbccd149bf8761
