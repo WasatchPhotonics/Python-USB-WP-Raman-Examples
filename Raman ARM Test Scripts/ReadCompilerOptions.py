@@ -62,7 +62,7 @@ class FPGAOptions(object):
         v = self.data_header
         return "modulation" if v == 0 else "transition" if v == 1 else "ramping" if v == 2 else "unknown"
 
-junk = [0] * 8
+junk = [0] * 8    # bReqType bReq  wValue  wIndex  buf
 buf = dev.ctrl_transfer(D2H, 0xff, 0x0004, 0x0000, junk, TIMEOUT)
 word = buf[0] | (buf[1] << 8)
 

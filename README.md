@@ -1,6 +1,12 @@
 # Python-USB-WP-Raman-Examples
 Python USB examples to demonstrate how to set parameters and retrieve spectra from your WP Raman spectrometer
 
+For more elaborate and complex examples of how to control Wasatch
+spectroneters from Python, please also see our 
+[Wasatch.PY](https://github.com/WasatchPhotonics/Wasatch.PY) repository,
+which contains the same back-end driver code used to support our own 
+ENLIGHTEN&trade; spectroscopy application.
+
 ## Getting Started with Python
 The recommended Python environment setup is to install Python XY. Python XY is a free scientific and engineering development software for computations, analysis, and data visualization. And it could not be simplier to setup! Simply download the installer found on [http://python-xy.github.io/](http://python-xy.github.io/) and you will be up and running in minutes! Just be sure to check all of the available plugins during installation.
 
