@@ -2,15 +2,12 @@ import usb.core
 import datetime
 from time import sleep
 
-# Select Product
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print dev
-H2D = 0x40
-D2H = 0xC0
-TIMEOUT = 1000
+HOST_TO_DEVICE = 0x40
+DEVICE_TO_HOST = 0xC0
+TIMEOUT_MS = 1000
 
 class FPGAOptions(object):
 
@@ -55,15 +52,28 @@ class FPGAOptions(object):
         return "none" if v == 0 else "ocean" if v == 1 else "wasatch" if v == 2 else "unknown"
 
     def stringify_laser_type(self):
-        v = self.data_header
+        v = self.laser_type
         return "none" if v == 0 else "internal" if v == 1 else "external" if v == 2 else "unknown"
 
     def stringify_laser_control(self):
-        v = self.data_header
+        v = self.laser_control
         return "modulation" if v == 0 else "transition" if v == 1 else "ramping" if v == 2 else "unknown"
 
-junk = [0] * 8    # bReqType bReq  wValue  wIndex  buf
-buf = dev.ctrl_transfer(D2H, 0xff, 0x0004, 0x0000, junk, TIMEOUT)
+# Note: the following seems to violate the PyUSB documentation:
+# 
+# "The first four parameters are the bmRequestType, bmRequest, wValue and wIndex 
+#  fields of the standard control transfer structure. The fifth parameter is 
+#  either the data payload for an OUT transfer or the number of bytes to read in 
+#  an IN transfer."
+#  https://github.com/pyusb/pyusb/blob/master/docs/tutorial.rst#talk-to-me-honey
+# 
+# The 5th parameter in the following code is clearly sending a data payload 
+# buffer rather than an integral count of expected bytes, even though it is
+# clearly an IN transfer.  Note that in other DEVICE_TO_HOST transfers (see
+# GetModelConfig.py), an expected integral count is correctly sent.
+
+fake_buf = [0] * 8    # bReqType        bReq  wValue  wIndex  buf/cnt   timeout
+buf = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x0004, 0x0000, fake_buf, TIMEOUT_MS)
 word = buf[0] | (buf[1] << 8)
 
 print("FPGA Compilation Options: 0x%04x" % word)
