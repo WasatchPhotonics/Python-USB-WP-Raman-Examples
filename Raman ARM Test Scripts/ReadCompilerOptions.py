@@ -1,10 +1,10 @@
+import sys
 import usb.core
 import datetime
 from time import sleep
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print dev
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 1000
@@ -78,3 +78,10 @@ word = buf[0] | (buf[1] << 8)
 
 print("FPGA Compilation Options: 0x%04x" % word)
 options = FPGAOptions(word)
+
+# This comes back empty...
+#
+# sys.stdout.write("fake_buf:")
+# for i in range(len(fake_buf)):
+#     sys.stdout.write(" %02x" % fake_buf[i])
+# print
