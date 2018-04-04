@@ -1,20 +1,28 @@
-#!/usr/bin/env python
+#!/usr/bin/env python -u
+################################################################################
+#                                BatchTest.py                                  #
+################################################################################
+#                                                                              #
+#  DESCRIPTION:  An extended version of SetTest.py which runs a set of simple  #
+#                commands repeatedly against the spectrometer to generate      #
+#                conditions of high traffic, for purposes of characterizing    #
+#                communication issues under high load.                         #
+#                                                                              #
+################################################################################
 
+import sys
 import usb.core
 import datetime
 from time import sleep
 
 # select product
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
-dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
-
-print dev
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 BUFFER_SIZE = 8
 ZZ = [0] * BUFFER_SIZE
 TIMEOUT = 1000
+VID = 0x24aa
+PID = 0x4000  # 0x1000 = Silicon FX2, 0x2000 = InGaAs FX2, 0x4000 = ARM
 
 def Get_Value(Command, ByteCount):
     throttle_usb()
@@ -61,8 +69,49 @@ def throttle_usb():
         throttle_usb.last_usb_timestamp = datetime.datetime.now()
     throttle_usb.count += 1
 throttle_usb.last_usb_timestamp = None
-throttle_usb.delay_ms = 5
+throttle_usb.delay_ms = 0
 throttle_usb.count = 0
+
+# MZ: possibly relevant: https://bitbucket.org/benallard/galileo/issues/251/usbcoreusberror-errno-5-input-output-error
+def attempt_recovery():
+    global dev
+
+    print "resetting device"
+    dev.reset()
+    sleep(2)
+
+    if True:
+        dev = None
+        sleep(2)
+        
+        print "re-enumerating USB"
+        dev = usb.core.find(idVendor=VID, idProduct=PID)
+        sleep(2)
+
+        if dev is None:
+            print "Failed to re-enumerate device"
+            sys.exit()
+
+def reset_fpga():
+    print "resetting FPGA"
+    buf = [0] * 8
+    dev.ctrl_transfer(HOST_TO_DEVICE, 0xb5, 0, 0, buf, TIMEOUT)
+    sleep(2)
+
+################################################################################
+# main()
+################################################################################
+
+dev = usb.core.find(idVendor=VID, idProduct=PID)
+if dev is None:
+    print "No spectrometers found."
+    sys.exit()
+
+print dev
+
+if dev.is_kernel_driver_active(0):
+    print "detaching kernel driver"
+    dev.detach_kernel_driver(0) 
 
 fpga_rev = Get_FPGA_Revision()
 print 'FPGA Ver %s' % fpga_rev
@@ -70,15 +119,18 @@ print 'Testing Set Commands'
 print "\nPress Ctrl-C to exit..."
 
 iterations = 0
+errors = 0
 while True:
     try:
-        print "Iteration %d:" % iterations
+        print "Iteration %d: (%d errors)" % (iterations, errors)
         print "  Integration Time ", Test_Set(0xb2, 0xbf, 100, 6)
         print "  CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2)
         print "  CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2)
         print "  CCD TEC Enable   ", Test_Set(0xd6, 0xda,   1, 1)
         print "  CCD TEC Disable  ", Test_Set(0xd6, 0xda,   0, 1)
         iterations += 1
-    except Exception:
+    except Exception as ex:
         print "Caught exception after %d USB calls" % throttle_usb.count 
-        raise
+        print ex
+        errors += 1
+        attempt_recovery()
