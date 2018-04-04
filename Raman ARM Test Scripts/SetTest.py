@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 
 import usb.core
-import datetime
 from time import sleep
 
 # select product
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print dev
 HOST_TO_DEVICE = 0x40
@@ -19,6 +18,8 @@ TIMEOUT = 1000
 def Get_Value(Command, ByteCount):
     RetVal = 0
     RetArray = dev.ctrl_transfer(DEVICE_TO_HOST, Command, 0, 0, ByteCount, TIMEOUT)
+    if RetArray is None or len(RetArray) < ByteCount:
+        return None
     for i in range (0, ByteCount):
         RetVal = RetVal*256 + RetArray[ByteCount - i - 1]
     return RetVal
@@ -33,23 +34,23 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
         return ('Set {0:x}  Fail'.format(SetCommand))
     else:
         RetValue = Get_Value(GetCommand, RetLen)
-        if SetValue == RetValue:
-            return ('Get {0:x} Success. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))    
+        if RetValue is not None and SetValue == RetValue:
+            return ('Get 0x%04x Success: Txd:0x%04x == Rxd:0x%04x' % (GetCommand, SetValue, RetValue))    
         else:
-            return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))    
+            return ('Get 0x%04x Failure: Txd:0x%04x != Rxd: %s' % (GetCommand, SetValue, RetValue))    
 
 def Get_FPGA_Revision():
-    buf = Get_Value(0xb4, 7)
+    buf = dev.ctrl_transfer(DEVICE_TO_HOST, 0xb4, 0, 0, 7, TIMEOUT)
     s = ""
     for c in buf:
-        s += chr(buf[i])
+        s += chr(c)
     return s
-    
-# Get FPGA Revision
-fpga_rev = Get_FPGA_Revision()
-print 'FPGA Ver %s\n' % fpga_rev
 
+fpga_rev = Get_FPGA_Revision()
+print 'FPGA Ver %s' % fpga_rev
 print 'Testing Set Commands'
-print "Integration Time ", Test_Set(0xb2, 0xbf,   1, 6)
-print "CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2)
-print "CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2)
+print "  Integration Time ", Test_Set(0xb2, 0xbf, 100, 6)
+print "  CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2)
+print "  CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2)
+print "  CCD TEC Enable   ", Test_Set(0xd6, 0xda,   1, 1)
+print "  CCD TEC Disable  ", Test_Set(0xd6, 0xda,   0, 1)
