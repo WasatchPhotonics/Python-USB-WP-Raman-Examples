@@ -22,7 +22,7 @@ BUFFER_SIZE = 8
 ZZ = [0] * BUFFER_SIZE
 TIMEOUT = 1000
 VID = 0x24aa
-PID = 0x4000  # 0x1000 = Silicon FX2, 0x2000 = InGaAs FX2, 0x4000 = ARM
+PID = 0x1000  # 0x1000 = Silicon FX2, 0x2000 = InGaAs FX2, 0x4000 = ARM
 
 def Get_Value(Command, ByteCount):
     throttle_usb()
