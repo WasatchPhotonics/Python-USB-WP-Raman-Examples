@@ -29,9 +29,9 @@ SET_LASER_MOD_PULSE_WIDTH = 0xdb
 GET_LASER_MOD_PULSE_WIDTH = 0xdc
 GET_LASER_TEMPERATURE     = 0xd5
 
-SAMPLES_PER_PULSE   = 100   # Amount of samples to acquire per stage/increment
+SAMPLES_PER_PULSE   = 150   # Amount of samples to acquire per stage/increment
 SAMPLING_PERIOD_SEC = 0.2   # Time in between each sample
-NUMBER_OF_PULSES    = 3     # Number of test pulses 
+NUMBER_OF_PULSES    = 2     # Number of test pulses 
 RAMP_SKIP_PERCENT   = 0.80  # skip (don't ramp) first 80% of the delta in power (don't increase this)
 
 def Get_Value(Command, ByteCount, index=0):
@@ -63,71 +63,42 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
     return False
 
 def Ramp_Laser(current_laser_setpoint, target_laser_setpoint, increments):
-    timeStart = datetime.datetime.now()
-    laser_setpoint = current_laser_setpoint + 0.0
 
-    # Determine laser stepsize based on inputs
-    if current_laser_setpoint < target_laser_setpoint:
-        counter_laser_stepsize = (float(target_laser_setpoint) - float(current_laser_setpoint)) / float(increments)
-    else:
-        counter_laser_stepsize = (float(current_laser_setpoint) - float(target_laser_setpoint)) / float(increments)                
-    print "Ramp_Laser: counter_laser_stepsize = %.2f" % counter_laser_stepsize
+    timeStart = datetime.datetime.now()
+
+    LUT = []
+    MAX_X3 = increments * increments * increments 
+    for x in range(increments, 0, -1):
+        LUT.append(float(MAX_X3 - (x * x * x)) / 1000000.0)
 
     # Setup our modulation scheme and start at current point
     Test_Set(SET_LASER_MOD_PERIOD,      GET_LASER_MOD_PERIOD, 100, 5) # Sets the modulation period to 100us
     Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, int(current_laser_setpoint), 5)
     Test_Set(SET_LASER_ENABLE,          GET_LASER_ENABLE, 1, 1)
 
-    # Apply first x% of the jumpjump. Bounding is not needed, but done anyway
-    if (current_laser_setpoint < target_laser_setpoint):
-        laser_setpoint = min(target_laser_setpoint, (float(laser_setpoint) + (RAMP_SKIP_PERCENT * increments * float(counter_laser_stepsize))))
+    # apply first 80% jump
+    if current_laser_setpoint < target_laser_setpoint:
+        laser_setpoint = ((float(target_laser_setpoint) - float(current_laser_setpoint)) / 100.0) * 80.0
+        laser_setpoint += float(current_laser_setpoint)
+        eighty_percent_start = laser_setpoint
     else:
-        laser_setpoint = max(target_laser_setpoint, (float(laser_setpoint) - (RAMP_SKIP_PERCENT * increments * float(counter_laser_stepsize))))
+        laser_setpoint = ((float(laser_setpoint)-float(target_laser_setpoint)) / 100.0) * 80.0
+        laser_setpoint = float(current_laser_setpoint) - laser_setpoint
+        eighty_percent_start = laser_setpoint
 
-    # Skip the first portion and start at RAMP_SKIP_PERCENT% of the way through the increments
-    initial_step = int(RAMP_SKIP_PERCENT * increments)
-    step = initial_step
-    while step < increments:
+    Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, int(eighty_percent_start), 5)
+    sleep(0.02)
 
-        # Increment ramping counter
-        step += 1
+    for counter_laser_setpoint in range(increments):
+        lut_value = LUT[counter_laser_setpoint]
+        target_loop_setpoint = eighty_percent_start \
+                             + (lut_value * (float(target_laser_setpoint) - eighty_percent_start))
 
-        # Apply based on direction and bound based on inputs
-        if current_laser_setpoint < target_laser_setpoint:
-            laser_setpoint = min(target_laser_setpoint, float(laser_setpoint) + float(counter_laser_stepsize))
-        else:
-            laser_setpoint = max(target_laser_setpoint, float(laser_setpoint) - float(counter_laser_stepsize))
+        width = int(target_loop_setpoint)
+        Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, width, 5)
 
-        # Apply value to system
-        Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, int(laser_setpoint), 5)
-
-        # This first part of the IF statement is never reached.
-        # testing has shown that the lead-in to 80% can be instantaneous.
-        # Only the last ~20% needs rounding
-        if step + 1 > increments:
-            delay_sec = 0
-        else:                        
-            # pro-rate delay such that it starts short, and lengthens as you approach the final step
-            steps_undertaken = step - initial_step
-            # delay_sec = 0.01 + 0.02 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 2.00) # 10.4sec
-            # delay_sec = 0.01 + 0.20 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.50) # 27.3 sec
-            # delay_sec = 0.01 + 0.10 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.30) # 8.5 sec
-            # delay_sec = 0.01 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.20) # 5.5sec, overshoot
-            # delay_sec = 0.01 + 0.05 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.30) # 4.5sec, overshoot
-            # delay_sec = 0.01 + 0.03 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.40) # 3.6sec, overshoot
-            # delay_sec = 0.00 + 0.09 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.25) # 6.7sec
-            # delay_sec = 0.00 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.25) # 6.0sec, decent?
-            # delay_sec = 0.00 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.25) # 4.7sec w/90, small overshoot? 
-            # delay_sec = 0.00 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.30) # 4.0sec w/80, small overshoot (points 146-182 = 3.6 sec...this may be okay?)
-            # delay_sec = 0.00 + 0.10 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.50) # 3.8sec w/60, overshoot
-            # delay_sec = 0.00 + 0.10 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.40) # 4.5sec w/70, overshoot
-            # delay_sec = 0.00 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.30) # 6.8sec w/100
-            # delay_sec = 0.00 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.30) # 4.1sec w/80, 125-215 = 9sec?
-
-            delay_sec = 0.00 + 0.08 * (1 - RAMP_SKIP_PERCENT) * pow(steps_undertaken, 1.30) 
-
-        print "Ramp_Laser: step = %3d, laser_setpoint = %8.2f, delay_sec = %8.3f" % (step, laser_setpoint, delay_sec)
-        sleep(delay_sec)
+        print "Ramp_Laser: step = %3d, width = 0x%04x, target_loop_setpoint = %8.2f" % (counter_laser_setpoint, width, target_loop_setpoint)
+        sleep(0.01)
 
     timeEnd = datetime.datetime.now()
     print "Ramp_Laser: ramp time %.3f sec" % (timeEnd - timeStart).total_seconds()
@@ -150,9 +121,9 @@ for PulseCounter in range(NUMBER_OF_PULSES):
     print "sleeping %.2f" % delay_sec
     time.sleep(delay_sec)
 
-    start = 1
+    start = 0
     end   = 100
-    steps = 80
+    steps = 100
     print "Ramping laser from %d to %d in %d steps" % (start, end, steps)
     Ramp_Laser(start, end, steps)
 
