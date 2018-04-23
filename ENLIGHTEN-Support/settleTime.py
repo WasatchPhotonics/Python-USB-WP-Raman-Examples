@@ -10,9 +10,8 @@
 #                                                                              #
 ################################################################################
 
-import sys
-import csv
 import argparse
+import sys
 
 def report(power, readings, secs):
     count = len(readings)
@@ -20,16 +19,19 @@ def report(power, readings, secs):
         return
 
     elements = args.mean_elements
-    mean = sum(readings[-elements:]) / float(elements)
+    last = readings[-elements:]
+    mean = sum(last) / float(len(last))
 
-    sec = secs[count - 1]
+    sec = 9999 # indicate "never settled"
+    stable_count = 0
     for i in range(count - 1, -1, -1):
         value = readings[i]
         delta = abs(value - mean) / mean
         if delta < (args.stability_percentage / 100.0):
             sec = secs[i]
+            stable_count += 1
 
-    print "Laser Power %d took %.2f sec to stabilize to %.2f within %s%%" % (power, sec, mean, args.stability_percentage)
+    print "Laser Power %d took %.2f sec to stabilize to %.2f within %s%% (%3d of %3d readings)" % (power, sec, mean, args.stability_percentage, stable_count, len(readings))
         
     del readings[:]
     del secs[:]
@@ -50,8 +52,9 @@ def main():
 
     for line in sys.stdin:
         values = line.strip().split(',')
-        if values[0] == 'time':
-            continue
+
+        if values[0] == 'time': 
+            continue # skip header row
 
         time                     =       values[ 0]
         ramp_sec                 = float(values[ 1])
@@ -80,5 +83,6 @@ def main():
 
     print "\nMax %8.2f, Avg %8.2f" % (max(settle_times), (sum(settle_times) / len(settle_times)))
 
+# script begins here
 args = parse_args()
 main()
