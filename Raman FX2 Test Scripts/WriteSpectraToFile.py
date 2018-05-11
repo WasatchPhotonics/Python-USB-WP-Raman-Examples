@@ -1,3 +1,5 @@
+#!/usr/bin/env python -u
+
 import usb.core
 import datetime
 import time
