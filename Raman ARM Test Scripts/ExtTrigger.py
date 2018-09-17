@@ -1,59 +1,78 @@
 #!/usr/bin/env python -u
 
+import sys
 import usb.core
-import datetime
 from time import sleep
 
-# select product
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+################################################################################
+# Constants
+################################################################################
 
-print dev
-H2D=0x40
-D2H=0xC0
-BUFFER_SIZE=8
-ZZ = [0,0,0,0,0,0,0,0]
-TIMEOUT=1000
-frameCounter = 0
+VID            = 0x24aa
+PID            = 0x4000
+HOST_TO_DEVICE = 0x40
+DEVICE_TO_HOST = 0xC0
+ZZ             = [0] * 8
+TIMEOUT_MS     = 1000
+PIXELS         = 1024
+INTEG_TIME_MS  = 10
+SW_TRIGGERING  = 0
+HW_TRIGGERING  = 1
 
-# select pixel count 
-#PixelCount=512
-PixelCount=1024
-#PixelCount=2048
+################################################################################
+# Functions
+################################################################################
 
-print dev
-
-def Get_Value(Command, ByteCount):
-	RetVal = 0
-	RetArray = dev.ctrl_transfer(0xC0, Command, 0,0,ByteCount,1000)
-	for i in range (0, ByteCount):
-		RetVal = RetVal*256 + RetArray[ByteCount - i - 1]
-	return RetVal
+def Get_Value(Command, ByteCount, raw=False):
+    RetArray = dev.ctrl_transfer(DEVICE_TO_HOST, Command, 0, 0, ByteCount, TIMEOUT_MS)
+    if raw:
+        RetVal = RetArray
+    else:
+        RetVal = 0
+        for i in range(len(RetArray)):
+            RetVal = (RetVal << 8) | RetArray[ByteCount - i - 1]
+    return RetVal
 
 def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
-	SetValueHigh = SetValue/0x10000
-	SetValueLow = SetValue & 0xFFFF
-	FifthByte = (SetValue >> 32) & 0xFF
-	ZZ[0] = FifthByte
-	Ret = dev.ctrl_transfer(H2D, SetCommand, SetValueLow, SetValueHigh, ZZ, TIMEOUT)# set configuration
-	if BUFFER_SIZE != Ret:
-		return ('Set {0:x}	Fail'.format(SetCommand))
-	else:
-		RetValue = Get_Value(GetCommand, RetLen)
-		if SetValue == RetValue:
-			return ('Get {0:x} Success. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
-		else:
-			return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
+    lsb   =  SetValue        & 0xffff
+    msb   = (SetValue >> 16) & 0xffff
+    ZZ[0] = (SetValue >> 32) & 0xff
+    result = dev.ctrl_transfer(HOST_TO_DEVICE, SetCommand, lsb, msb, ZZ, TIMEOUT_MS)
+    if result != len(ZZ):
+        return 'Set %02x failed' % SetCommand
+    else:
+        RetValue = Get_Value(GetCommand, RetLen)
+        if SetValue == RetValue:
+            return 'Get %02x Success. Txd:0x%05x Rxd:0x%05x' % (GetCommand, SetValue, RetValue)
+        else:
+            return 'Get %02x Failure. Txd:0x%05x Rxd:0x%05x' % (GetCommand, SetValue, RetValue)
 
-# Set the Integration time to 1ms
-print "Integration Time	",		Test_Set(0xb2, 0xbf, 1, 6)
-print "Waiting for data... (60 second timeout)"
+def getFirmwareRev():
+    return ".".join(reversed([str(int(x)) for x in Get_Value(0xc0, 4, raw=True)]))
 
-while(1):        
-        frameCounter = frameCounter + 1
-        Data = dev.read(0x82,PixelCount*2,60000)
-        print("Frame : {}".format(frameCounter)) # Print frame number to console
+def getFPGARev():
+    return "".join(chr(x) for x in Get_Value(0xb4, 7, raw=True))
 
+################################################################################
+# main()
+################################################################################
 
+dev = usb.core.find(idVendor=VID, idProduct=PID)
+if not dev:
+    print "No ARM spectrometers found."
+    sys.exit(0)
 
+print "uC Revision:      ", getFirmwareRev()
+print "FPGA Revision:    ", getFPGARev()
+print "Integration Time: ", Test_Set(0xb2, 0xbf, INTEG_TIME_MS, 6)
+#print "Trigger Source:   ", Test_Set(0xd2, 0xd3, HW_TRIGGERING, 1) # per https://github.com/WasatchPhotonics/WasatchUSB/issues/2, not needed on ARM?
+print "\nstart sending incoming trigger signals..."
+sleep(5)
+
+# loop over acquisitions
+print "Waiting for data... (60 second timeout, ctrl-C to exit)"
+frames = 0
+while True:
+    frames += 1
+    Data = dev.read(0x82, 2 * PIXELS, 60000) # 60sec timeout
+    print("Read frame %d" % frame)
