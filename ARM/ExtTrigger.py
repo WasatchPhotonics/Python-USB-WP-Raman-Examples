@@ -2,6 +2,7 @@
 
 import sys
 import usb.core
+import argparse
 from time import sleep
 
 ################################################################################
@@ -57,11 +58,18 @@ def getFPGARev():
 # main()
 ################################################################################
 
+# support SW triggering just so we can confirm the script is otherwise working
+parser = argparse.ArgumentParser()
+parser.add_argument("--trigger-source", default="SW", choices=['SW', 'HW'], help="specify trigger source")
+args = parser.parse_args()
+
+# claim USB device
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if not dev:
     print "No ARM spectrometers found."
     sys.exit(0)
 
+# initialize test
 print "uC Revision:      ", getFirmwareRev()
 print "FPGA Revision:    ", getFPGARev()
 print "Integration Time: ", Test_Set(0xb2, 0xbf, INTEG_TIME_MS, 6)
@@ -73,6 +81,10 @@ sleep(5)
 print "Waiting for data... (60 second timeout, ctrl-C to exit)"
 frames = 0
 while True:
+    if args.trigger_source == "SW":
+        dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, TIMEOUT_MS)
+        
+    data = dev.read(0x82, 2 * PIXELS, 60000) # 60sec timeout
+    print("Read frame %d" % frames)
+
     frames += 1
-    Data = dev.read(0x82, 2 * PIXELS, 60000) # 60sec timeout
-    print("Read frame %d" % frame)
