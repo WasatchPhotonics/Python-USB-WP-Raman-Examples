@@ -1,5 +1,13 @@
 #!/usr/bin/env python -u
 
+################################################################################
+# This worked:
+#
+# $ ./ExtTrigger.py --trigger-source HW --continuous-acquisition --frames-per-trigger 3 --reset 
+# uC Revision:       10.0.0.3
+# FPGA Revision:     008-007
+################################################################################
+
 import sys
 import usb.core
 import argparse
@@ -14,9 +22,8 @@ PID            = 0x4000
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 ZZ             = [0] * 8
-TIMEOUT_MS     = 1000
+TIMEOUT_MS     = 10000
 PIXELS         = 1024
-INTEG_TIME_MS  = 10
 
 ################################################################################
 # Functions
@@ -52,43 +59,78 @@ def getFirmwareRev():
 def getFPGARev():
     return "".join(chr(x) for x in Get_Value(0xb4, 7, raw=True))
 
+def reset():
+    print "Integration Time: ", Test_Set(0xb2, 0xbf, args.integration_time_ms, 6) 
+
+    # configure trigger source
+    if PID != 0x4000: # not needed on ARM, per https://github.com/WasatchPhotonics/WasatchUSB/issues/2
+
+        print "Continuous Acq:   ", Test_Set(0xc8, 0xcc, (1 if args.continuous_acquisition else 0), 1) 
+        print "Continuous Frames:", Test_Set(0xc9, 0xcd, args.frames_per_trigger, 1) 
+
+        if args.trigger_source == "SW":
+            print "Trigger Source:   ", Test_Set(0xd2, 0xd3, 0, 1)
+        elif args.trigger_source == "HW":
+            print "Trigger Source:   ", Test_Set(0xd2, 0xd3, 1, 1) 
+
+
 ################################################################################
 # main()
 ################################################################################
 
 # support SW triggering just so we can confirm the script is otherwise working
 parser = argparse.ArgumentParser()
-parser.add_argument("--trigger-source", default="NONE", choices=['NONE', 'SW', 'HW'], help="specify trigger source")
+parser.add_argument("--integration-time-ms",    type=int, default=100,    help="integration time (ms)")
+parser.add_argument("--trigger-source",         type=str, default='NONE', help="specify trigger source", choices=['NONE', 'SW', 'HW'])
+parser.add_argument("--frames-per-trigger",     type=int, default=1,      help="how many frames to collect per trigger")
+parser.add_argument("--max-errors",             type=int, default=3,      help="number of permitted USB read errors")
+parser.add_argument("--continuous-acquisition", action='store_true',      help="whether to collect multiple spectra per trigger")
+parser.add_argument("--reset",                  action='store_true',      help="forcibly reset continuous acquisition after each trigger")
 args = parser.parse_args()
 
 # claim USB device
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if not dev:
-    print "No ARM spectrometers found."
+    print "No {0} spectrometers found." % PID
     sys.exit(0)
 
 # initialize test
 print "uC Revision:      ", getFirmwareRev()
 print "FPGA Revision:    ", getFPGARev()
-print "Integration Time: ", Test_Set(0xb2, 0xbf, INTEG_TIME_MS, 6)
-
-# configure trigger source
-if args.trigger_source == "SW":
-    print "Trigger Source:   ", Test_Set(0xd2, 0xd3, 0, 1)
-elif args.trigger_source == "HW":
-    print "Trigger Source:   ", Test_Set(0xd2, 0xd3, 1, 1) # not needed on ARM, per https://github.com/WasatchPhotonics/WasatchUSB/issues/2
+reset()
 
 print "\nstart sending incoming trigger signals..."
 sleep(5)
 
 # loop over acquisitions
-print "Waiting for data... (20 second timeout, ctrl-C to exit)"
-frames = 0
+frame_count = 0
+error_count = 0
 while True:
+    print "expecting next trigger"
+
     if args.trigger_source == "SW":
+        print "sending SW trigger"
         dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, TIMEOUT_MS)
         
-    data = dev.read(0x82, 2 * PIXELS, 20000) # 20sec timeout
-    print("Read frame %d" % frames)
+    for i in range(args.frames_per_trigger):
+        print "Waiting for data...(20 second timeout)"
 
-    frames += 1
+        # this try-catch block doesn't help anything
+        try:
+            data = dev.read(0x82, 2 * PIXELS, 20000) # 20sec timeout
+        except Exception as exc:
+            if error_count < args.max_errors:
+                print "  (ignoring USB error)"
+                error_count += 1
+            else:
+                raise exc
+
+        print("Read frame %d" % frame_count)
+        frame_count += 1
+
+    # this reset doesn't seem to help anything
+    if args.reset:
+        print "Continuous Acq:   ", Test_Set(0xc8, 0xcc, 0, 1) # disable
+        sleep(1)
+        reset() # re-enable, if configured
+        sleep(1)
