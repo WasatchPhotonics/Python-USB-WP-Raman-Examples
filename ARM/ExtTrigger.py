@@ -1,9 +1,17 @@
 #!/usr/bin/env python -u
 
 ################################################################################
-# Worked with no arguments on S-00247 ARM:
+# This script worked with no arguments on the S-00247 ARM unit.
+#
 # uC Revision:       10.0.0.3
 # FPGA Revision:     008-007
+#
+# A Koolertron DDS Signal Generator was used to generate a 0-3.3V square wave
+# at 0.2Hz. The trigger was hooked to pin 10 of J8 on the USB board (GND pin 9).
+#
+# The USB command sequence is provided in ENG-0073.  Since we were on an ARM, 
+# there was no need to set the external trigger source, nor were continuous
+# acquisition or frames-per-trigger specified.
 ################################################################################
 
 import sys
@@ -19,7 +27,7 @@ from time import sleep
 VID            = 0x24aa
 PID            = 0x4000
 HOST_TO_DEVICE = 0x40
-DEVICE_TO_HOST = 0xC0
+DEVICE_TO_HOST = 0xc0
 ZZ             = [0] * 8
 PIXELS         = 1024
 
@@ -58,17 +66,15 @@ def getFPGARev():
     return "".join(chr(x) for x in Get_Value(0xb4, 7, raw=True))
 
 def display(msg):
-    now = datetime.datetime.now()
-    print "%s: %s" % (now, msg)
+    print "%s: %s" % (datetime.datetime.now(), msg)
 
 ################################################################################
 # main()
 ################################################################################
 
-# support SW triggering just so we can confirm the script is otherwise working
+# parse cmd-liner args
 parser = argparse.ArgumentParser()
 parser.add_argument ("--integration-time-ms", type=int, default=100,    help="integration time (ms)")
-parser.add_argument ("--trigger-source",      type=str, default='NONE', help="specify trigger source", choices=['NONE', 'SW', 'HW'])
 parser.add_argument ("--timeout-sec",         type=int, default=20,     help="USB timeout (sec)")
 args = parser.parse_args()
 args.timeout_ms = args.timeout_sec * 1000
@@ -83,20 +89,12 @@ if not dev:
 print "uC Revision:      ", getFirmwareRev()
 print "FPGA Revision:    ", getFPGARev()
 print "Integration Time: ", Test_Set(0xb2, 0xbf, args.integration_time_ms, 6) 
-print "Timeout MS:       ", args.timeout_ms
 
 # loop over trigger signals
 print "\nstart sending incoming trigger signals...\n"
-sleep(5)
 
 frames = 0
 while True:
-    if args.trigger_source == "SW":
-        display("sending SW trigger")
-        dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, args.timeout_ms)
-        
-    display("waiting for data")
     data = dev.read(0x82, 2 * PIXELS, args.timeout_ms) 
-
-    display("read frame %d" % frames)
+    display("  read frame %d" % frames)
     frames += 1
