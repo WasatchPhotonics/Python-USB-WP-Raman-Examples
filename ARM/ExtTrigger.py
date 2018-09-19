@@ -17,8 +17,6 @@ ZZ             = [0] * 8
 TIMEOUT_MS     = 1000
 PIXELS         = 1024
 INTEG_TIME_MS  = 10
-SW_TRIGGERING  = 0
-HW_TRIGGERING  = 1
 
 ################################################################################
 # Functions
@@ -60,7 +58,7 @@ def getFPGARev():
 
 # support SW triggering just so we can confirm the script is otherwise working
 parser = argparse.ArgumentParser()
-parser.add_argument("--trigger-source", default="SW", choices=['SW', 'HW'], help="specify trigger source")
+parser.add_argument("--trigger-source", default="NONE", choices=['NONE', 'SW', 'HW'], help="specify trigger source")
 args = parser.parse_args()
 
 # claim USB device
@@ -73,18 +71,24 @@ if not dev:
 print "uC Revision:      ", getFirmwareRev()
 print "FPGA Revision:    ", getFPGARev()
 print "Integration Time: ", Test_Set(0xb2, 0xbf, INTEG_TIME_MS, 6)
-#print "Trigger Source:   ", Test_Set(0xd2, 0xd3, HW_TRIGGERING, 1) # per https://github.com/WasatchPhotonics/WasatchUSB/issues/2, not needed on ARM?
+
+# configure trigger source
+if args.trigger_source == "SW":
+    print "Trigger Source:   ", Test_Set(0xd2, 0xd3, 0, 1)
+elif args.trigger_source == "HW":
+    print "Trigger Source:   ", Test_Set(0xd2, 0xd3, 1, 1) # not needed on ARM, per https://github.com/WasatchPhotonics/WasatchUSB/issues/2
+
 print "\nstart sending incoming trigger signals..."
 sleep(5)
 
 # loop over acquisitions
-print "Waiting for data... (60 second timeout, ctrl-C to exit)"
+print "Waiting for data... (20 second timeout, ctrl-C to exit)"
 frames = 0
 while True:
     if args.trigger_source == "SW":
         dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, TIMEOUT_MS)
         
-    data = dev.read(0x82, 2 * PIXELS, 60000) # 60sec timeout
+    data = dev.read(0x82, 2 * PIXELS, 20000) # 20sec timeout
     print("Read frame %d" % frames)
 
     frames += 1
