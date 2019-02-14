@@ -23,19 +23,30 @@ def send_cmd(cmd, uint40, RetLen):
 def get_spectrum():
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, TIMEOUT_MS)
     data = dev.read(0x82, args.pixels*2)
+    spectrum = []
     for j in range (0, (args.pixels*2)/32, 1):
         for i in range (0, 31, 2):
-            spectrum = data[j*32+i+1]*256+data[j*32+i]
+            spectrum.append(data[j*32+i+1] << 8 | data[j*32+i])
+    return spectrum
 
 def timing_test():
     print "setting integration time to %d ms" % args.integration_time_ms
     send_cmd(0xb2, args.integration_time_ms, 6) # set integration time 1ms
 
+    last_total = 0
     start = datetime.datetime.now()
     for i in range(args.count):
         spectrum = get_spectrum()
+
+        # make sure we're really reading distinct spectra
+        total = sum(spectrum)
+        if total == last_total:
+            print "Warning: consecutive spectra summed to %d" % total
+        last_total = total
+
         if i % 100 == 0:
             print "%s read %d spectra" % (datetime.datetime.now(), i)
+
     end = datetime.datetime.now()
 
     elapsed_sec = (end - start).total_seconds()
@@ -49,13 +60,13 @@ def timing_test():
     print "comms latency = %.2f ms" % comms_average_ms
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--pid", type=int, default=0x1000, choices=[0x1000, 0x2000, 0x4000], help="USB Product ID")
+parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex)")
 parser.add_argument("--count", type=int, default=1000, help="how many spectra to read")
 parser.add_argument("--pixels", type=int, default=1024, help="spectrometer pixels (default 1024)")
 parser.add_argument("--integration-time-ms", type=int, default=1, help="integration time (ms)")
 args = parser.parse_args()
 
-dev = usb.core.find(idVendor=0x24aa, idProduct=args.pid)
+dev = usb.core.find(idVendor=0x24aa, idProduct=int(args.pid, 16))
 if not dev:
     print "No spectrometers found"
     sys.exit()
