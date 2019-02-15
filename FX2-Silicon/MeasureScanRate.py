@@ -15,18 +15,17 @@ args = None
 dev = None
 
 def send_cmd(cmd, uint40):
-    lsb   = (uint40      ) & 0xffff
-    msb   = (uint40 >> 16) & 0xffff
+    lsw   = (uint40      ) & 0xffff
+    msw   = (uint40 >> 16) & 0xffff
     ZZ[0] = (uint40 >> 32) & 0xff
-    dev.ctrl_transfer(HOST_TO_DEVICE, cmd, lsb, msb, ZZ, TIMEOUT_MS)
+    dev.ctrl_transfer(HOST_TO_DEVICE, cmd, lsw, msw, ZZ, TIMEOUT_MS)
 
 def get_spectrum():
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, TIMEOUT_MS)
     data = dev.read(0x82, args.pixels * 2)
     spectrum = []
-    for i in range (0, (args.pixels * 2) / 32, 1):
-        for j in range (0, 31, 2):
-            spectrum.append(data[i*32+j+1] << 8 | data[i*32+j])
+    for i in range(0, len(data), 2):
+        spectrum.append(data[i] | (data[i+1] << 8)) # LSB-MSB
     return spectrum
 
 def timing_test():
