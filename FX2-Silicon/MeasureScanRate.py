@@ -14,24 +14,24 @@ ZZ = [0] * BUFFER_SIZE
 args = None
 dev = None
 
-def send_cmd(cmd, uint40, RetLen):
-    lsb  = (uint40 & 0xffff)
-    msb  = (uint40 >> 16) & 0xffff
+def send_cmd(cmd, uint40):
+    lsb   = (uint40      ) & 0xffff
+    msb   = (uint40 >> 16) & 0xffff
     ZZ[0] = (uint40 >> 32) & 0xff
     dev.ctrl_transfer(HOST_TO_DEVICE, cmd, lsb, msb, ZZ, TIMEOUT_MS)
 
 def get_spectrum():
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, ZZ, TIMEOUT_MS)
-    data = dev.read(0x82, args.pixels*2)
+    data = dev.read(0x82, args.pixels * 2)
     spectrum = []
-    for j in range (0, (args.pixels*2)/32, 1):
-        for i in range (0, 31, 2):
-            spectrum.append(data[j*32+i+1] << 8 | data[j*32+i])
+    for i in range (0, (args.pixels * 2) / 32, 1):
+        for j in range (0, 31, 2):
+            spectrum.append(data[i*32+j+1] << 8 | data[i*32+j])
     return spectrum
 
 def timing_test():
-    print "setting integration time to %d ms" % args.integration_time_ms
-    send_cmd(0xb2, args.integration_time_ms, 6) # set integration time 1ms
+    # set integration time
+    send_cmd(0xb2, args.integration_time_ms)
 
     last_total = 0
     start = datetime.datetime.now()
@@ -44,20 +44,25 @@ def timing_test():
             print "Warning: consecutive spectra summed to %d" % total
         last_total = total
 
-        if i % 100 == 0:
+        if i and i % 100 == 0:
             print "%s read %d spectra" % (datetime.datetime.now(), i)
 
     end = datetime.datetime.now()
 
+    # measure observed time
     elapsed_sec = (end - start).total_seconds()
     scan_rate = float(args.count) / elapsed_sec
 
-    integration_total_sec = 0.001 * args.count * args.integration_time_ms
+    # compare vs theoretical time
+    integration_total_sec = args.count * args.integration_time_ms * 0.001
     comms_total_sec = elapsed_sec - integration_total_sec
     comms_average_ms = (comms_total_sec / args.count) * 1000.0
 
-    print "read %d spectra in %.2f sec (%.2f spectra/sec)" % (args.count, elapsed_sec, scan_rate)
-    print "comms latency = %.2f ms" % comms_average_ms
+    print "\nread %d spectra at %d ms in %.2f sec\n" % (args.count, args.integration_time_ms, elapsed_sec)
+    print "scan rate              = %6.2f spectra/sec" % scan_rate
+    print "cumulative integration = %6.2f sec" % integration_total_sec
+    print "cumulative overhead    = %6.2f sec" % comms_total_sec
+    print "comms latency          = %6.2f ms/spectrum" % comms_average_ms
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex)")
