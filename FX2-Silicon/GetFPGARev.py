@@ -1,15 +1,22 @@
 #!/usr/bin/env python -u
 
+import sys
 import usb.core
 import datetime
 from time import sleep
 
 # Select Product
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+if dev is None:
+    print "No spectrometers found"
+    sys.exit(1)
 
 print dev
+print "VID = 0x%04x" % dev.idVendor
+print "PID = 0x%04x" % dev.idProduct
+print "Bus = %s" % dev.bus
+print "Address = %s" % dev.address
+
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8

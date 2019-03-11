@@ -64,10 +64,10 @@ def timing_test():
     print "comms latency          = %6.2f ms/spectrum" % comms_average_ms
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex)")
-parser.add_argument("--count", type=int, default=1000, help="how many spectra to read")
+parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex) (default 1000)")
+parser.add_argument("--count", type=int, default=1000, help="how many spectra to read (default 1000)")
 parser.add_argument("--pixels", type=int, default=1024, help="spectrometer pixels (default 1024)")
-parser.add_argument("--integration-time-ms", type=int, default=1, help="integration time (ms)")
+parser.add_argument("--integration-time-ms", type=int, default=1, help="integration time (ms) (default 1)")
 args = parser.parse_args()
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=int(args.pid, 16))
