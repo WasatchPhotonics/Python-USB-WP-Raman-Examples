@@ -7,8 +7,6 @@ import time
 from time import sleep
 
 # select product
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print dev
@@ -19,9 +17,8 @@ Z=[0] * BUFFER_SIZE
 TIMEOUT=1000
 
 # select pixel count
-#PixelCount=512
 PixelCount=1024
-#PixelCount=2048
+PixelCount=1952
 
 print "Start Data Acquisition"
 dev.ctrl_transfer(H2D, 0xad, 0,0,Z,TIMEOUT)   # trigger an acquisition

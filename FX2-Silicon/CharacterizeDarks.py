@@ -33,37 +33,52 @@ def log(msg=""):
     print "%s %s" % (now, msg)
 
 def characterize_dark():
+    step = 0
     with open("characterized_darks.csv", "w") as f:
-        for exp in range(args.bits):
-            integration_time_ms = 2 ** (exp + 1) - 1
+        while True:
+            if args.exponential:
+                integration_time_ms = 2 ** (step + 1) - 1
+            else:
+                integration_time_ms = args.min + args.incr * step
 
-            log("setting integration time = %d ms (%d bits)" % (integration_time_ms, exp + 1))
-            send_cmd(0xb2, integration_time_ms)
+            if integration_time_ms > args.max:
+                break
 
-            timeout_ms = integration_time_ms * 2 + 100
-            log("  starting acquisition (timeout_ms %d)" % timeout_ms)
+            step += 1
 
-            start = datetime.datetime.now()
-            spectrum = get_spectrum(timeout_ms=timeout_ms)
-            end = datetime.datetime.now()
+            for i in range(args.reps):
 
-            elapsed_sec = (end - start).total_seconds()
-            log("  acquisition completed in %.3f sec" % elapsed_sec)
+                log("setting integration time = %d ms" % integration_time_ms)
+                send_cmd(0xb2, integration_time_ms)
 
-            log("  min = %.2f" % min(spectrum))
-            log("  avg = %.2f" % (sum(spectrum) / len(spectrum)))
-            log("  max = %.2f" % max(spectrum))
-            log()
+                timeout_ms = integration_time_ms * 2 + 100
+                log("  starting acquisition (timeout_ms %d)" % timeout_ms)
 
-            f.write("%d," % integration_time_ms)
-            f.write(",".join(["%.2f" % x for x in spectrum]))
-            f.write("\n")
+                start = datetime.datetime.now()
+                spectrum = get_spectrum(timeout_ms=timeout_ms)
+                end = datetime.datetime.now()
+
+                elapsed_sec = (end - start).total_seconds()
+                log("  acquisition completed in %.3f sec" % elapsed_sec)
+
+                log("  min = %.2f" % min(spectrum))
+                log("  avg = %.2f" % (sum(spectrum) / len(spectrum)))
+                log("  max = %.2f" % max(spectrum))
+                log()
+
+                f.write("%d," % integration_time_ms)
+                f.write(",".join(["%.2f" % x for x in spectrum]))
+                f.write("\n")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex) (default 1000)")
 parser.add_argument("--count", type=int, default=1000, help="how many spectra to read (default 1000)")
 parser.add_argument("--pixels", type=int, default=1024, help="spectrometer pixels (default 1024)")
-parser.add_argument("--bits", type=int, default=10, help="max integration time in bits (default 10, max 24)")
+parser.add_argument("--min", type=int, default=1, help="min integration time (ms) (default 1)")
+parser.add_argument("--max", type=int, default=1000, help="max integration time (ms) (default 1000)")
+parser.add_argument("--reps", type=int, default=1, help="repeats per integration time (default 1)")
+parser.add_argument("--incr", type=int, default=100, help="integration time increment (default 1)")
+parser.add_argument("--exponential", action='store_true', help="increase integration time exponentially (2^n - 1)")
 args = parser.parse_args()
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=int(args.pid, 16))
