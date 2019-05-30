@@ -11,6 +11,9 @@ BUFFER_SIZE = 8
 TIMEOUT_MS = 1000
 ZZ = [0] * BUFFER_SIZE
 
+MAX_PAGES = 6
+PAGE_SIZE = 64
+
 class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
@@ -31,10 +34,9 @@ class Fixture(object):
 
     def read_eeprom(self,):
         print("\nReading EEPROM:")
-        pages = 6
         self.eeprom_pages = []
-        for page in range(pages):
-            buf = self.get_buf(cmd=0xff, value=0x01, index=page, length=64)
+        for page in range(MAX_PAGES):
+            buf = self.get_buf(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
             self.eeprom_pages.append(buf)
             print("  Page %d: %s" % (page, buf))
 
@@ -54,7 +56,7 @@ class Fixture(object):
         print("  User Text: [%s]" % user_text)
 
     def update_buffers(self, user_text):
-        length = len(user_text)
+        length = min(len(user_text), PAGE_SIZE - 1)
         page = 4
 
         print("\nUpdating buffers")
@@ -65,9 +67,9 @@ class Fixture(object):
 
     def write_eeprom(self):
         print("\nWriting EEPROM")
-        for page in range(5, -1, -1):
+        for page in range(MAX_PAGES - 1, -1, -1):
             DATA_START = 0x3c00
-            offset = DATA_START + page * 64
+            offset = DATA_START + page * PAGE_SIZE
             if page == 4:
                 buf = self.eeprom_pages[page]
                 print("  writing page %d, offset 0x%04x: %s" % (page, offset, buf))
