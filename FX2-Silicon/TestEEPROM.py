@@ -65,17 +65,23 @@ class Fixture(object):
             self.eeprom_pages[page][i] = ord(user_text[i])
         self.eeprom_pages[page][length] = 0
 
-    def write_eeprom(self):
+    # works on FX2 (unclear if ARM supports the -1 index offset)
+    def write_eeprom_new(self):
+        print("\nWriting EEPROM")
+        for page in range(MAX_PAGES):
+            buf = self.eeprom_pages[page]
+            print("  writing page %d: %s" % (page, buf))
+            self.send_cmd(cmd=0xff, value=0x02, index=page - 1, buf=buf)
+
+    # works on FX2, not ARM
+    def write_eeprom_old(self):
         print("\nWriting EEPROM")
         for page in range(MAX_PAGES - 1, -1, -1):
             DATA_START = 0x3c00
             offset = DATA_START + page * PAGE_SIZE
-            if page == 4:
-                buf = self.eeprom_pages[page]
-                print("  writing page %d, offset 0x%04x: %s" % (page, offset, buf))
-                self.send_cmd(0xa2, value=offset, index=0, buf=buf)
-            else:
-                print("  skipping page %d, offset 0x%04x" % (page, offset))
+            buf = self.eeprom_pages[page]
+            print("  writing page %d, offset 0x%04x: %s" % (page, offset, buf))
+            self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
 
     def run(self):
         while True:
@@ -85,7 +91,7 @@ class Fixture(object):
 
                 new_text = input("\nEnter replacement user_text (Ctrl-C to exit): ")
                 self.update_buffers(user_text=new_text)
-                self.write_eeprom()
+                self.write_eeprom_new()
             except KeyboardInterrupt:
                 break
             except:
