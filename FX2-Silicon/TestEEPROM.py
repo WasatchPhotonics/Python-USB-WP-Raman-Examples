@@ -32,7 +32,7 @@ class Fixture(object):
     def get_buf(self, cmd, value=0, index=0, length=64):
         return self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
 
-    def read_eeprom(self,):
+    def read_eeprom(self):
         print("\nReading EEPROM:")
         self.eeprom_pages = []
         for page in range(MAX_PAGES):
@@ -40,48 +40,42 @@ class Fixture(object):
             self.eeprom_pages.append(buf)
             print("  Page %d: %s" % (page, buf))
 
-    # for test purposes, only print page 4 (user_text)
-    def dump_eeprom(self):
-        buf = self.eeprom_pages[4]
-        user_text  = ""
-
-        for i in range(len(buf)):
+    def parse_string(self, page, start, length):
+        buf = self.eeprom_pages[page]
+        s = ""
+        for i in range(length):
             c = buf[i]
             if c == 0:
                 break
             else:
-                user_text += chr(c)
+                s += chr(c)
+        return s
 
+    def dump_eeprom(self):
         print("\nEEPROM Contents:")
-        print("  User Text: [%s]" % user_text)
+        print("  User Text:             [%s]" % self.parse_string(4,  0, 64))
+        print("  Product Configuration: [%s]" % self.parse_string(5, 30, 16))
 
-    def update_buffers(self, user_text):
-        length = min(len(user_text), PAGE_SIZE - 1)
-        page = 4
+    def update_string(self, page, start, max_len, value, label):
+        print("  %s -> '%s'" % (label, value))
+        for i in range(max_len):
+            if i < len(value):
+                self.eeprom_pages[page][start + i] = ord(value[i])
+            else:
+                self.eeprom_pages[page][start + i] = 0
 
+    def update_buffers(self, user_text, product_config):
         print("\nUpdating buffers")
-        print("  user_text -> '%s'" % user_text)
-        for i in range(length):
-            self.eeprom_pages[page][i] = ord(user_text[i])
-        self.eeprom_pages[page][length] = 0
+        self.update_string(page=4, start=0, max_len=PAGE_SIZE, value=user_text, label="User Text")
+        self.update_string(page=5, start=30, max_len=16, value=product_config, label="Product Configuration")
 
     # works on FX2 (unclear if ARM supports the -1 index offset)
-    def write_eeprom_new(self):
+    def write_eeprom(self):
         print("\nWriting EEPROM")
         for page in range(MAX_PAGES):
             buf = self.eeprom_pages[page]
             print("  writing page %d: %s" % (page, buf))
             self.send_cmd(cmd=0xff, value=0x02, index=page - 1, buf=buf)
-
-    # works on FX2, not ARM
-    def write_eeprom_old(self):
-        print("\nWriting EEPROM")
-        for page in range(MAX_PAGES - 1, -1, -1):
-            DATA_START = 0x3c00
-            offset = DATA_START + page * PAGE_SIZE
-            buf = self.eeprom_pages[page]
-            print("  writing page %d, offset 0x%04x: %s" % (page, offset, buf))
-            self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
 
     def run(self):
         while True:
@@ -89,9 +83,10 @@ class Fixture(object):
                 self.read_eeprom()
                 self.dump_eeprom()
 
-                new_text = input("\nEnter replacement user_text (Ctrl-C to exit): ")
-                self.update_buffers(user_text=new_text)
-                self.write_eeprom_new()
+                new_user_text = input("\nEnter replacement user_text (Ctrl-C to exit): ")
+                new_product_config = input("\nEnter product configuration (Ctrl-C to exit): ")
+                self.update_buffers(user_text=new_user_text, product_config=new_product_config)
+                self.write_eeprom()
             except KeyboardInterrupt:
                 break
             except:
