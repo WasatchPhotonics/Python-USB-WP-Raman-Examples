@@ -10,7 +10,7 @@ from time import sleep
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print dev
+print(dev)
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -30,5 +30,5 @@ def Get_Value(Command, ByteCount, index=0):
 	return RetVal
 
 while True:	
-	print "Photodiode RAW	",	Get_Value(0xa6, 3),"		", 	dev.ctrl_transfer(D2H, 0xa6, 0,0,3,TIMEOUT)
+	print("Photodiode RAW	",	Get_Value(0xa6, 3),"		", 	dev.ctrl_transfer(D2H, 0xa6, 0,0,3,TIMEOUT))
 	time.sleep(0.100)

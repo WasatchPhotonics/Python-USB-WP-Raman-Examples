@@ -106,27 +106,27 @@ throttle_usb.count = 0
 
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if dev is None:
-    print "No spectrometers found."
+    print("No spectrometers found.")
     sys.exit()
 
-print dev
+print(dev)
 
 fpga_rev = Get_FPGA_Revision()
-print 'FPGA Ver %s' % fpga_rev
-print 'Testing Set Commands'
-print "\nPress Ctrl-C to exit..."
+print('FPGA Ver %s' % fpga_rev)
+print('Testing Set Commands')
+print("\nPress Ctrl-C to exit...")
 
 iterations = 0
 while True:
     try:
-        print "Iteration %d: (%d errors)" % (iterations, Test_Set.errors)
-        print "  Integration Time ", Test_Set(0xb2, 0xbf, 100, 6)
-        print "  CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2)
-        print "  CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2)
-        print "  CCD TEC Enable   ", Test_Set(0xd6, 0xda,   1, 1)
-        print "  CCD TEC Disable  ", Test_Set(0xd6, 0xda,   0, 1)
+        print("Iteration %d: (%d errors)" % (iterations, Test_Set.errors))
+        print("  Integration Time ", Test_Set(0xb2, 0xbf, 100, 6))
+        print("  CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2))
+        print("  CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2))
+        print("  CCD TEC Enable   ", Test_Set(0xd6, 0xda,   1, 1))
+        print("  CCD TEC Disable  ", Test_Set(0xd6, 0xda,   0, 1))
         iterations += 1
     except Exception as ex:
-        print "Caught exception after %d USB calls" % throttle_usb.count 
-        print ex
+        print("Caught exception after %d USB calls" % throttle_usb.count) 
+        print(ex)
         sys.exit()

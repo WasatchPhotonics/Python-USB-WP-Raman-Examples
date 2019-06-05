@@ -9,7 +9,7 @@ dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print dev
+print(dev)
 H2D = 0x40
 D2H = 0xC0
 TIMEOUT = 1000
@@ -39,14 +39,14 @@ class FPGAOptions(object):
 
     def dump(self):
         print("FPGA Compilation Options:")
-        print("  integration time resolution = %s" % self.stringify_resolution())
-        print("  data header                 = %s" % self.stringify_header())
-        print("  has cf select               = %s" % self.has_cf_select)
-        print("  laser type                  = %s" % self.stringify_laser_type())
-        print("  laser control               = %s" % self.stringify_laser_control())
-        print("  has area scan               = %s" % self.has_area_scan)
-        print("  has actual integ time       = %s" % self.has_actual_integ_time)
-        print("  has horiz binning           = %s" % self.has_horiz_binning)
+        print(("  integration time resolution = %s" % self.stringify_resolution()))
+        print(("  data header                 = %s" % self.stringify_header()))
+        print(("  has cf select               = %s" % self.has_cf_select))
+        print(("  laser type                  = %s" % self.stringify_laser_type()))
+        print(("  laser control               = %s" % self.stringify_laser_control()))
+        print(("  has area scan               = %s" % self.has_area_scan))
+        print(("  has actual integ time       = %s" % self.has_actual_integ_time))
+        print(("  has horiz binning           = %s" % self.has_horiz_binning))
 
     def stringify_resolution(self):
         v = self.integration_time_resolution
@@ -67,5 +67,5 @@ class FPGAOptions(object):
 buf = dev.ctrl_transfer(D2H, 0xff, 0x04, 0, 2, TIMEOUT)   
 word = buf[0] | (buf[1] << 8)
 
-print("FPGA Compilation Options: 0x%04x" % word)
+print(("FPGA Compilation Options: 0x%04x" % word))
 options = FPGAOptions(word)

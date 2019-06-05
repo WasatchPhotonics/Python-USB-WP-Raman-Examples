@@ -10,7 +10,7 @@ VID = 0x24aa
 PID = 0x1000
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if dev is None:
-    print "No spectrometer found."
+    print("No spectrometer found.")
     sys.exit()
 
 HOST_TO_DEVICE = 0x40
@@ -52,14 +52,14 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
     sleep(0.01) # Time in seconds. 
 
     if BUFFER_SIZE != Ret:
-        print 'Set {0:x}  Fail'.format(SetCommand)
+        print('Set {0:x}  Fail'.format(SetCommand))
     else:
         RetValue = Get_Value(GetCommand, RetLen)
         if SetValue == RetValue:
             # print 'Get {0:x} Success. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue)
             return True
         else:
-            print 'Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue)
+            print('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))
     return False
 
 def Ramp_Laser(current_laser_setpoint, target_laser_setpoint, increments):
@@ -97,61 +97,61 @@ def Ramp_Laser(current_laser_setpoint, target_laser_setpoint, increments):
         width = int(target_loop_setpoint)
         Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, width, 5)
 
-        print "Ramp_Laser: step = %3d, width = 0x%04x, target_loop_setpoint = %8.2f" % (counter_laser_setpoint, width, target_loop_setpoint)
+        print("Ramp_Laser: step = %3d, width = 0x%04x, target_loop_setpoint = %8.2f" % (counter_laser_setpoint, width, target_loop_setpoint))
         sleep(0.01)
 
     timeEnd = datetime.datetime.now()
-    print "Ramp_Laser: ramp time %.3f sec" % (timeEnd - timeStart).total_seconds()
+    print("Ramp_Laser: ramp time %.3f sec" % (timeEnd - timeStart).total_seconds())
 
 ############################################################################################
 # First stage of testing will perform 100% laser power pulses using a ramping routine
 # to reach the 100% threshold
 ############################################################################################
-print "Stage 1 - Ramping"
+print("Stage 1 - Ramping")
 for PulseCounter in range(NUMBER_OF_PULSES):
 
     # Set laser power to maximum to begin pulsing
-    print "Laser OFF",        Test_Set(SET_LASER_ENABLE,          GET_LASER_ENABLE, 0, 1)          # Turns the laser off
-    print "Laser Mod ENABLE", Test_Set(SET_LASER_MOD_ENABLE,      GET_LASER_MOD_ENABLE, 1, 1)      # Disables modulation, this sets it to 100%
-    print "Laser Mod Period", Test_Set(SET_LASER_MOD_PERIOD,      GET_LASER_MOD_PERIOD, 100, 5)    # Sets the modulation period to 100us
-    print "Laser Mod PW",     Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, 1, 5) # Sets the modulation pulse-width to 10us
+    print("Laser OFF",        Test_Set(SET_LASER_ENABLE,          GET_LASER_ENABLE, 0, 1))          # Turns the laser off
+    print("Laser Mod ENABLE", Test_Set(SET_LASER_MOD_ENABLE,      GET_LASER_MOD_ENABLE, 1, 1))      # Disables modulation, this sets it to 100%
+    print("Laser Mod Period", Test_Set(SET_LASER_MOD_PERIOD,      GET_LASER_MOD_PERIOD, 100, 5))    # Sets the modulation period to 100us
+    print("Laser Mod PW",     Test_Set(SET_LASER_MOD_PULSE_WIDTH, GET_LASER_MOD_PULSE_WIDTH, 1, 5)) # Sets the modulation pulse-width to 10us
 
     delay_sec = SAMPLES_PER_PULSE * SAMPLING_PERIOD_SEC
 
-    print "sleeping %.2f" % delay_sec
+    print("sleeping %.2f" % delay_sec)
     time.sleep(delay_sec)
 
     start = 0
     end   = 100
     steps = 100
-    print "Ramping laser from %d to %d in %d steps" % (start, end, steps)
+    print("Ramping laser from %d to %d in %d steps" % (start, end, steps))
     Ramp_Laser(start, end, steps)
 
-    print "sleeping %.2f" % delay_sec
+    print("sleeping %.2f" % delay_sec)
     time.sleep(delay_sec)
 
 ############################################################################################
 # This second stage of testing will perform the same function but disregards ramping
 ############################################################################################
 if False:
-    print "Stage 2 - Without Ramping"
+    print("Stage 2 - Without Ramping")
     for PulseCounter in range(NUMBER_OF_PULSES):
 
         # Set laser power to maximum to begin pulsing
-        print "Laser OFF",         Test_Set(SET_LASER_ENABLE,     GET_LASER_ENABLE,     0, 1) # Turns the laser off
-        print "Laser Mod Disable", Test_Set(SET_LASER_MOD_ENABLE, GET_LASER_MOD_ENABLE, 0, 1) # Disables modulation, this sets it to 100%        
+        print("Laser OFF",         Test_Set(SET_LASER_ENABLE,     GET_LASER_ENABLE,     0, 1)) # Turns the laser off
+        print("Laser Mod Disable", Test_Set(SET_LASER_MOD_ENABLE, GET_LASER_MOD_ENABLE, 0, 1)) # Disables modulation, this sets it to 100%        
 
         for SamplingCounter in range(SAMPLES_PER_PULSE):
-            print "Laser Temperature    ", Get_Value(GET_LASER_TEMPERATURE, 2)
+            print("Laser Temperature    ", Get_Value(GET_LASER_TEMPERATURE, 2))
             time.sleep(SAMPLING_PERIOD_SEC)
 
         # Set laser power to maximum to begin pulsing
-        print "Laser Mod Disable", Test_Set(SET_LASER_MOD_ENABLE, GET_LASER_MOD_ENABLE, 0, 1) # Disables modulation, this sets it to 100%
-        print "Laser ON",          Test_Set(SET_LASER_ENABLE,     GET_LASER_ENABLE,     1, 1) # Turns the laser off
+        print("Laser Mod Disable", Test_Set(SET_LASER_MOD_ENABLE, GET_LASER_MOD_ENABLE, 0, 1)) # Disables modulation, this sets it to 100%
+        print("Laser ON",          Test_Set(SET_LASER_ENABLE,     GET_LASER_ENABLE,     1, 1)) # Turns the laser off
 
         for SamplingCounter in range(SAMPLES_PER_PULSE):
-            print "Laser Temperature    ", Get_Value(GET_LASER_TEMPERATURE, 2)
+            print("Laser Temperature    ", Get_Value(GET_LASER_TEMPERATURE, 2))
             time.sleep(SAMPLING_PERIOD_SEC)
 
 # no matter what, turn off laser when done
-print "Laser OFF ", Test_Set(SET_LASER_ENABLE, GET_LASER_ENABLE, 0, 1)
+print("Laser OFF ", Test_Set(SET_LASER_ENABLE, GET_LASER_ENABLE, 0, 1))

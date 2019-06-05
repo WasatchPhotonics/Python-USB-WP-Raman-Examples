@@ -8,7 +8,7 @@ from time import sleep
 # Select Product
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 if not dev:
-    print "No spectrometer found"
+    print("No spectrometer found")
     sys.exit()
 
 # print dev
@@ -27,7 +27,7 @@ for page in range(5):
                             page, 
                             PAGE_SIZE, 
                             TIMEOUT_MS)
-    print "\nEEPROM page %d:" % page
+    print("\nEEPROM page %d:" % page)
     for i in range(len(buf)):
         sys.stdout.write("%02x " % buf[i])
         if (i + 1) % 16 == 0:

@@ -29,7 +29,7 @@ def Get_Value(Command, ByteCount):
             RetVal = RetVal*256 + RetArray[ByteCount - i - 1]
         return RetVal
     except Exception as e:
-        print("Get Value fail", str(e))
+        print(("Get Value fail", str(e)))
 
 
 def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
@@ -49,7 +49,7 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
             else:
                 return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))
     except Exception as e:
-        print("Test_Set fail", str(e))
+        print(("Test_Set fail", str(e)))
 
 # Function gets a spectrum from the detector
 def get_spectrum():

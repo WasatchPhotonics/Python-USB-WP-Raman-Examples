@@ -8,7 +8,7 @@ from time import sleep
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print dev
+print(dev)
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 BUFFER_SIZE = 8
@@ -47,10 +47,10 @@ def Get_FPGA_Revision():
     return s
 
 fpga_rev = Get_FPGA_Revision()
-print 'FPGA Ver %s' % fpga_rev
-print 'Testing Set Commands'
-print "  Integration Time ", Test_Set(0xb2, 0xbf, 100, 6)
-print "  CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2)
-print "  CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2)
-print "  CCD TEC Enable   ", Test_Set(0xd6, 0xda,   1, 1)
-print "  CCD TEC Disable  ", Test_Set(0xd6, 0xda,   0, 1)
+print('FPGA Ver %s' % fpga_rev)
+print('Testing Set Commands')
+print("  Integration Time ", Test_Set(0xb2, 0xbf, 100, 6))
+print("  CCD Offset       ", Test_Set(0xb6, 0xc4,   0, 2))
+print("  CCD Gain         ", Test_Set(0xb7, 0xc5, 487, 2))
+print("  CCD TEC Enable   ", Test_Set(0xd6, 0xda,   1, 1))
+print("  CCD TEC Disable  ", Test_Set(0xd6, 0xda,   0, 1))

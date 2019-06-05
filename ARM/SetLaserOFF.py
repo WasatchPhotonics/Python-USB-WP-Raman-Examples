@@ -9,7 +9,7 @@ from time import sleep
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print dev
+print(dev)
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -37,4 +37,4 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 			return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
 
 			
-print "Laser OFF", 		Test_Set(0xbe, 0xe2, 0, 1)
+print("Laser OFF", 		Test_Set(0xbe, 0xe2, 0, 1))

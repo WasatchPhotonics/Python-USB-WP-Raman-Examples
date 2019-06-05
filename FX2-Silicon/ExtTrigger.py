@@ -9,7 +9,7 @@ from time import sleep
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print dev
+print(dev)
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -22,7 +22,7 @@ frameCounter = 0
 PixelCount=1024
 #PixelCount=2048
 
-print dev
+print(dev)
 
 def Get_Value(Command, ByteCount):
 	RetVal = 0
@@ -47,15 +47,15 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 			return ('Get {0:x} Failure. Txd:0x{1:x} Rxd:0x{2:x}'.format(GetCommand, SetValue, RetValue))	
 
 # Set the Integration time to 1ms
-print "Integration Time	",		Test_Set(0xb2, 0xbf, 1, 6)
-print "Ext Trig Enable	",		Test_Set(0xd2, 0xd3, 1, 1)
+print("Integration Time	",		Test_Set(0xb2, 0xbf, 1, 6))
+print("Ext Trig Enable	",		Test_Set(0xd2, 0xd3, 1, 1))
 
-print "Waiting for data... (60 second timeout)"
+print("Waiting for data... (60 second timeout)")
 
 while(1):        
         frameCounter = frameCounter + 1
         Data = dev.read(0x82,PixelCount*2,60000)
-        print("Frame : {}".format(frameCounter)) # Print frame number to console
+        print(("Frame : {}".format(frameCounter))) # Print frame number to console
 
 
 

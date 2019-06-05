@@ -31,7 +31,7 @@ def report(power, readings, secs):
             sec = secs[i]
             stable_count += 1
 
-    print "Laser Power %d took %.2f sec to stabilize to %.2f within %s%% (%3d of %3d readings)" % (power, sec, mean, args.stability_percentage, stable_count, len(readings))
+    print("Laser Power %d took %.2f sec to stabilize to %.2f within %s%% (%3d of %3d readings)" % (power, sec, mean, args.stability_percentage, stable_count, len(readings)))
         
     del readings[:]
     del secs[:]
@@ -81,7 +81,7 @@ def main():
     if settle_time is not None:
         settle_times.append(settle_time)
 
-    print "\nMax %8.2f, Avg %8.2f" % (max(settle_times), (sum(settle_times) / len(settle_times)))
+    print("\nMax %8.2f, Avg %8.2f" % (max(settle_times), (sum(settle_times) / len(settle_times))))
 
 # script begins here
 args = parse_args()

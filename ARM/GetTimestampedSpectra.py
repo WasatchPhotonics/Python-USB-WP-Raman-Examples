@@ -11,7 +11,7 @@ if dev is None:
     print("No spectrometers found")
     sys.exit(0)
 
-print dev
+print(dev)
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -46,8 +46,8 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 
 # set integration time to 10ms
 integration_time_ms = 10
-print("Setting integration time to %d ms" % integration_time_ms)
-print Test_Set(0xb2, 0xbf, integration_time_ms, 6)
+print(("Setting integration time to %d ms" % integration_time_ms))
+print(Test_Set(0xb2, 0xbf, integration_time_ms, 6))
 
 for count in range(100):
     timeStart = datetime.datetime.now()
@@ -60,7 +60,7 @@ for count in range(100):
     timeEnd = datetime.datetime.now()
     sec = (timeEnd - timeStart).total_seconds()
 
-    print("%s spectrum %3d: read %d pixels at %d ms in %.3f sec" % (timeEnd, count, len(spectrum), integration_time_ms, sec))
+    print(("%s spectrum %3d: read %d pixels at %d ms in %.3f sec" % (timeEnd, count, len(spectrum), integration_time_ms, sec)))
 
     # 65-75ms seems to be the threshold (sometimes works, sometimes fails)
     sleep(0.1)
