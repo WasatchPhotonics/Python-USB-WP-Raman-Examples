@@ -21,12 +21,14 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex) (default 1000)")
         self.args = parser.parse_args()
+        self.pid = int(self.args.pid, 16)
 
-        self.dev = usb.core.find(idVendor=0x24aa, idProduct=int(self.args.pid, 16))
+        self.dev = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
         if not self.dev:
-            print("No spectrometers found with PID 0x%s" % self.args.pid)
+            print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def send_cmd(self, cmd, value, index=0, buf=None):
+        #print("send_cmd: request %02x, cmd %02x, value %04x, index %04x, buf %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_buf(self, cmd, value=0, index=0, length=64):
@@ -44,7 +46,7 @@ class Fixture(object):
         buf = self.eeprom_pages[page]
         s = ""
         for i in range(length):
-            c = buf[i]
+            c = buf[start + i]
             if c == 0:
                 break
             else:
@@ -69,13 +71,18 @@ class Fixture(object):
         self.update_string(page=4, start=0, max_len=PAGE_SIZE, value=user_text, label="User Text")
         self.update_string(page=5, start=30, max_len=16, value=product_config, label="Product Configuration")
 
-    # works on FX2 (unclear if ARM supports the -1 index offset)
+    # believed to work on FX2 and ARM?
     def write_eeprom(self):
         print("\nWriting EEPROM")
         for page in range(MAX_PAGES):
             buf = self.eeprom_pages[page]
             print("  writing page %d: %s" % (page, buf))
-            self.send_cmd(cmd=0xff, value=0x02, index=page - 1, buf=buf)
+            if self.pid == 0x4000:
+                self.send_cmd(cmd=0xff, value=0x02, index=page, buf=buf)
+            else:
+                DATA_START = 0x3c00
+                offset = DATA_START + page * 64 
+                self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
 
     def run(self):
         while True:
