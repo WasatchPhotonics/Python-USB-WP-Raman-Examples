@@ -9,7 +9,7 @@ from time import sleep
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print(dev)
+print dev
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -24,5 +24,5 @@ def Get_Value(Command, ByteCount, index=0):
 	return RetVal
 
 FPGAVer = dev.ctrl_transfer(D2H, 0xb4, 0,0,7,TIMEOUT)   
-print(('FPGA Ver 		{0:}{1:}{2:}{3:}{4:}{5:}{6:}'.format(chr(FPGAVer[0]), chr(FPGAVer[1]), chr(FPGAVer[2]), chr(FPGAVer[3]), chr(FPGAVer[4]), chr(FPGAVer[5]), chr(FPGAVer[6]))))
+print ('FPGA Ver 		{0:}{1:}{2:}{3:}{4:}{5:}{6:}'.format(chr(FPGAVer[0]), chr(FPGAVer[1]), chr(FPGAVer[2]), chr(FPGAVer[3]), chr(FPGAVer[4]), chr(FPGAVer[5]), chr(FPGAVer[6])))
 	

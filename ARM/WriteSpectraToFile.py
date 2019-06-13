@@ -11,7 +11,7 @@ dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 # Legacy products
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 
-print(dev)
+print dev
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -23,7 +23,7 @@ PixelCount = 1024
 file = open("data.csv","w")
 
 while True:
-	print("Start Data Acquisition")
+	print "Start Data Acquisition"
 	dev.ctrl_transfer(H2D, 0xad, 0,0,Z,TIMEOUT)   # trigger an acquisition
 
 	Data = dev.read(0x82,PixelCount*2)

@@ -7,7 +7,7 @@ import usb.core
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 if not dev:
-    print("No spectrometer found")
+    print "No spectrometer found"
     sys.exit()
 #print dev
 
@@ -36,4 +36,4 @@ def get_battery_level():
     return (percentage, charging)
     
 (percentage, charging) = get_battery_level()
-print("Battery Charge Level: %.2f%% (%s)" % (percentage, "charging" if charging else "not charging"))
+print "Battery Charge Level: %.2f%% (%s)" % (percentage, "charging" if charging else "not charging")

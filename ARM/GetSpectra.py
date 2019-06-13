@@ -9,7 +9,7 @@ from time import sleep
 # select product
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print(dev)
+print dev
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -20,13 +20,13 @@ TIMEOUT=1000
 PixelCount=1024
 PixelCount=1952
 
-print("Start Data Acquisition")
+print "Start Data Acquisition"
 dev.ctrl_transfer(H2D, 0xad, 0,0,Z,TIMEOUT)   # trigger an acquisition
 
 # MZ: this works from Windows but not Mac?
 Data = dev.read(0x82, PixelCount*2)
 
-print("Read %d pixels (%d bytes)" % (PixelCount, len(Data)))
+print "Read %d pixels (%d bytes)" % (PixelCount, len(Data))
 for j in range (0, (PixelCount*2)/32, 1):
     for i in range (0, 31, 2):
         pixel = Data[j*32+i+1]*256+Data[j*32+i]

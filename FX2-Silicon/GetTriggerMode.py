@@ -9,7 +9,7 @@ dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print(dev)
+print dev
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -24,4 +24,4 @@ def Get_Value(Command, ByteCount, index=0):
 	return RetVal
 
 
-print("Trigger Mode:		",	Get_Value(0xd3, 1),"		", 	dev.ctrl_transfer(D2H, 0xd3, 0,0,1,TIMEOUT))
+print "Trigger Mode:		",	Get_Value(0xd3, 1),"		", 	dev.ctrl_transfer(D2H, 0xd3, 0,0,1,TIMEOUT)

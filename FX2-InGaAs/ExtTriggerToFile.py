@@ -8,7 +8,7 @@ from time import sleep
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
-print(dev)
+print dev
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -48,9 +48,9 @@ def Test_Set(SetCommand, GetCommand, SetValue, RetLen):
 
 
 # Set the Integration time to 1ms
-print("Turn OFF Continuous Read	",		Test_Set(0xc8, 0xcc, 0, 1))
-print("Set the Number of Frames	",		Test_Set(0xc9, 0xcd, 1, 1))
-print("Capturing... (60 second timeout)")
+print "Turn OFF Continuous Read	",		Test_Set(0xc8, 0xcc, 0, 1)
+print "Set the Number of Frames	",		Test_Set(0xc9, 0xcd, 1, 1)
+print "Capturing... (60 second timeout)"
 while(1):
         stringBuffer = ""
         frameCounter = frameCounter + 1

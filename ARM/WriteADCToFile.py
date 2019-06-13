@@ -11,7 +11,7 @@ dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 # Legacy products
 #dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 
-print(dev)
+print dev
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
@@ -34,6 +34,6 @@ def Get_Value(Command, ByteCount, index=0):
 file = open("data.csv","w")
 
 while True:
-	print("CCD Temperature		",	Get_Value(0xd7, 2),"		", 	dev.ctrl_transfer(D2H, 0xd7, 0,0,2,TIMEOUT))
-	print("Laser Temperature	",	Get_Value(0xd5, 2),"		", 	dev.ctrl_transfer(D2H, 0xd5, 0,0,2,TIMEOUT))
+	print "CCD Temperature		",	Get_Value(0xd7, 2),"		", 	dev.ctrl_transfer(D2H, 0xd7, 0,0,2,TIMEOUT)
+	print "Laser Temperature	",	Get_Value(0xd5, 2),"		", 	dev.ctrl_transfer(D2H, 0xd5, 0,0,2,TIMEOUT)
 	time.sleep(0.100)

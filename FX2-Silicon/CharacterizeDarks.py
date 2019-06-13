@@ -30,7 +30,7 @@ def get_spectrum(timeout_ms=TIMEOUT_MS):
 
 def log(msg=""):
     now = datetime.datetime.now()
-    print("%s %s" % (now, msg))
+    print "%s %s" % (now, msg)
 
 def characterize_dark():
     step = 0
@@ -83,7 +83,7 @@ args = parser.parse_args()
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=int(args.pid, 16))
 if not dev:
-    print("No spectrometers found")
+    print "No spectrometers found"
     sys.exit()
 
 characterize_dark()

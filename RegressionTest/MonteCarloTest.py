@@ -356,26 +356,26 @@ class TestFixture(object):
         self.addCommand(APICommand("VR_NUM_FRAMES",                getter=0xCD, setter=0xC9, dataType="Uint8",   readLen=1, notes="When using continuous CCD acquisitions with external triggering, how many spectra are being acquired per trigger event."))
 
     def enumerate(self):
-        print("Using VID 0x%04x, PID 0x%04x and %d pixels (block size %d)" % (VID, self.pid, self.pixels, self.block_size))
+        print "Using VID 0x%04x, PID 0x%04x and %d pixels (block size %d)" % (VID, self.pid, self.pixels, self.block_size)
         self.dev = usb.core.find(idVendor=VID, idProduct=fixture.pid)
         if self.dev is None:
             return False
 
         if fixture.debug:
-            print(self.dev)
+            print self.dev
 
         return True
 
     def apiReport(self):
-        print("The following test workarounds were found in the command listing:\n")
-        print("setterDisabled:         %s" % [ name for name, cmd in self.cmds.items() if cmd.setterDisabled ])
-        print("getterDisabled:         %s" % [ name for name, cmd in self.cmds.items() if cmd.getterDisabled ])
-        print("readBack:               %s" % [ name for name, cmd in self.cmds.items() if cmd.readBack ])
-        print("getFakeBufferLen:       %s" % [ name for name, cmd in self.cmds.items() if cmd.getFakeBufferLen ])
-        print("setFakeBufferFromValue: %s" % [ name for name, cmd in self.cmds.items() if cmd.setFakeBufferFromValue ])
-        print("setFakeLenFromValue:    %s" % [ name for name, cmd in self.cmds.items() if cmd.setFakeLenFromValue ])
-        print("getter little-endian:   %s" % [ name for name, cmd in self.cmds.items() if     cmd.getLittleEndian and cmd.getter is not None ])
-        print("getter big-endian:      %s" % [ name for name, cmd in self.cmds.items() if not cmd.getLittleEndian and cmd.getter is not None ])
+        print "The following test workarounds were found in the command listing:\n"
+        print "setterDisabled:         %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.setterDisabled ]
+        print "getterDisabled:         %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.getterDisabled ]
+        print "readBack:               %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.readBack ]
+        print "getFakeBufferLen:       %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.getFakeBufferLen ]
+        print "setFakeBufferFromValue: %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.setFakeBufferFromValue ]
+        print "setFakeLenFromValue:    %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.setFakeLenFromValue ]
+        print "getter little-endian:   %s" % [ name for name, cmd in self.cmds.iteritems() if     cmd.getLittleEndian and cmd.getter is not None ]
+        print "getter big-endian:      %s" % [ name for name, cmd in self.cmds.iteritems() if not cmd.getLittleEndian and cmd.getter is not None ]
 
     def countCommand(self):
         self.commandCount += 1
@@ -424,8 +424,8 @@ class TestFixture(object):
             return False
 
         if self.debug:
-            print("  %s(%s) -> opcode 0x%02x, value 0x%04x, index 0x%04x, buf_or_len %s" % (
-                cmd.setterName(), value, cmd.setter, wValue, wIndex, buf_or_len))
+            print "  %s(%s) -> opcode 0x%02x, value 0x%04x, index 0x%04x, buf_or_len %s" % (
+                cmd.setterName(), value, cmd.setter, wValue, wIndex, buf_or_len)
 
         self.throttle_usb()
         result = self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd.setter, wValue, wIndex, buf_or_len, self.timeout_ms)
@@ -474,8 +474,8 @@ class TestFixture(object):
             wIndex = random.randrange(cmd.wIndexRange[0], cmd.wIndexRange[1])
 
         if self.debug:
-            print("  %s -> opcode 0x%02x, value 0x%04x, index 0x%04x, len %s" % (
-                cmd.getterName(), cmd.getter, wValue, wIndex, wLength))
+            print "  %s -> opcode 0x%02x, value 0x%04x, index 0x%04x, len %s" % (
+                cmd.getterName(), cmd.getter, wValue, wIndex, wLength)
 
         self.throttle_usb()
         result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd.getter, wValue, wIndex, wLength, self.timeout_ms)
@@ -483,8 +483,8 @@ class TestFixture(object):
 
         (raw, rawDisplay, stringDisplay) = cmd.parseResult(result)
         if self.debug:
-            print("  %s (opcode 0x%02x, value 0x%04x, index 0x%04x, len %s) -> %s -> %s (%s)" % (
-                cmd.getterName(), cmd.getter, wValue, wIndex, wLength, result, stringDisplay, rawDisplay))
+            print "  %s (opcode 0x%02x, value 0x%04x, index 0x%04x, len %s) -> %s -> %s (%s)" % (
+                cmd.getterName(), cmd.getter, wValue, wIndex, wLength, result, stringDisplay, rawDisplay)
 
         if expectedValue is not None:
             if raw == expectedValue[0]:
@@ -499,7 +499,7 @@ class TestFixture(object):
 
     def run(self, cmd):
         if self.debug:
-            print("\nRunning: %s (dataType %s, %d errors)" % (cmd, cmd.dataType, self.errorCount))
+            print "\nRunning: %s (dataType %s, %d errors)" % (cmd, cmd.dataType, self.errorCount)
 
         if cmd.usesLaser and not self.use_laser:
             return self.logSkip(cmd, "laser tests disabled")
@@ -528,7 +528,7 @@ class TestFixture(object):
             return self.testGet(cmd, expectedValue)
 
     def runRandom(self):
-        name = random.choice(list(self.cmds.keys()))
+        name = random.choice(self.cmds.keys())
         cmd = self.cmds[name]
         self.run(cmd)
 
@@ -553,7 +553,7 @@ class TestFixture(object):
         self.skipCount += 1
 
     def logInfo(self, msg=""):
-        print("%s [%6d] %s" % (datetime.datetime.now(), self.commandCount, msg))
+        print "%s [%6d] %s" % (datetime.datetime.now(), self.commandCount, msg)
 
     def logHeader(self, msg):
         self.logInfo() 
@@ -615,7 +615,7 @@ if fixture.report:
     sys.exit()
 
 if not fixture.enumerate():
-    print("No matching spectrometers found.")
+    print "No matching spectrometers found."
     sys.exit()
 
 if not fixture.simple:
@@ -636,11 +636,11 @@ try:
             fixture.getSpectrum()
 
         if fixture.complete():
-            print("%d commands completed successfully" % fixture.commandCount)
+            print "%d commands completed successfully" % fixture.commandCount
             break
 except:
-    print("Caught exception after %d commands sent (%d errors, %d skipped)" % (
-        fixture.commandCount, fixture.errorCount, fixture.skipCount))
+    print "Caught exception after %d commands sent (%d errors, %d skipped)" % (
+        fixture.commandCount, fixture.errorCount, fixture.skipCount)
     traceback.print_exc()
 
-print("Test ended after %.2f seconds" % fixture.duration()) 
+print "Test ended after %.2f seconds" % fixture.duration() 

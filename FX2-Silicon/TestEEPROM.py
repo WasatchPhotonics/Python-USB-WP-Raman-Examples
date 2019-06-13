@@ -25,7 +25,7 @@ class Fixture(object):
 
         self.dev = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
         if not self.dev:
-            print(("No spectrometers found with PID 0x%04x" % self.pid))
+            print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def send_cmd(self, cmd, value, index=0, buf=None):
         #print("send_cmd: request %02x, cmd %02x, value %04x, index %04x, buf %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
@@ -40,7 +40,7 @@ class Fixture(object):
         for page in range(MAX_PAGES):
             buf = self.get_buf(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
             self.eeprom_pages.append(buf)
-            print(("  Page %d: %s" % (page, buf)))
+            print("  Page %d: %s" % (page, buf))
 
     def parse_string(self, page, start, length):
         buf = self.eeprom_pages[page]
@@ -55,11 +55,11 @@ class Fixture(object):
 
     def dump_eeprom(self):
         print("\nEEPROM Contents:")
-        print(("  User Text:             [%s]" % self.parse_string(4,  0, 64)))
-        print(("  Product Configuration: [%s]" % self.parse_string(5, 30, 16)))
+        print("  User Text:             [%s]" % self.parse_string(4,  0, 64))
+        print("  Product Configuration: [%s]" % self.parse_string(5, 30, 16))
 
     def update_string(self, page, start, max_len, value, label):
-        print(("  %s -> '%s'" % (label, value)))
+        print("  %s -> '%s'" % (label, value))
         for i in range(max_len):
             if i < len(value):
                 self.eeprom_pages[page][start + i] = ord(value[i])
@@ -76,7 +76,7 @@ class Fixture(object):
         print("\nWriting EEPROM")
         for page in range(MAX_PAGES):
             buf = self.eeprom_pages[page]
-            print(("  writing page %d: %s" % (page, buf)))
+            print("  writing page %d: %s" % (page, buf))
             if self.pid == 0x4000:
                 self.send_cmd(cmd=0xff, value=0x02, index=page, buf=buf)
             else:
@@ -90,8 +90,8 @@ class Fixture(object):
                 self.read_eeprom()
                 self.dump_eeprom()
 
-                new_user_text = eval(input("\nEnter replacement user_text (Ctrl-C to exit): "))
-                new_product_config = eval(input("\nEnter product configuration (Ctrl-C to exit): "))
+                new_user_text = input("\nEnter replacement user_text (Ctrl-C to exit): ")
+                new_product_config = input("\nEnter product configuration (Ctrl-C to exit): ")
                 self.update_buffers(user_text=new_user_text, product_config=new_product_config)
                 self.write_eeprom()
             except KeyboardInterrupt:

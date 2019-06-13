@@ -36,14 +36,14 @@ class FPGAOptions(object):
 
     def dump(self):
         print("FPGA Compilation Options:")
-        print(("  integration time resolution = %s" % self.stringify_resolution()))
-        print(("  data header                 = %s" % self.stringify_header()))
-        print(("  has cf select               = %s" % self.has_cf_select))
-        print(("  laser type                  = %s" % self.stringify_laser_type()))
-        print(("  laser control               = %s" % self.stringify_laser_control()))
-        print(("  has area scan               = %s" % self.has_area_scan))
-        print(("  has actual integ time       = %s" % self.has_actual_integ_time))
-        print(("  has horiz binning           = %s" % self.has_horiz_binning))
+        print("  integration time resolution = %s" % self.stringify_resolution())
+        print("  data header                 = %s" % self.stringify_header())
+        print("  has cf select               = %s" % self.has_cf_select)
+        print("  laser type                  = %s" % self.stringify_laser_type())
+        print("  laser control               = %s" % self.stringify_laser_control())
+        print("  has area scan               = %s" % self.has_area_scan)
+        print("  has actual integ time       = %s" % self.has_actual_integ_time)
+        print("  has horiz binning           = %s" % self.has_horiz_binning)
 
     def stringify_resolution(self):
         v = self.integration_time_resolution
@@ -78,7 +78,7 @@ fake_buf = [0] * 8    # bReqType        bReq  wValue  wIndex  buf/cnt   timeout
 buf = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x0004, 0x0000, fake_buf, TIMEOUT_MS)
 word = buf[0] | (buf[1] << 8)
 
-print(("FPGA Compilation Options: 0x%04x" % word))
+print("FPGA Compilation Options: 0x%04x" % word)
 options = FPGAOptions(word)
 
 # This comes back empty...

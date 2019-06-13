@@ -40,11 +40,11 @@ def timing_test():
         # make sure we're really reading distinct spectra
         total = sum(spectrum)
         if total == last_total:
-            print("Warning: consecutive spectra summed to %d" % total)
+            print "Warning: consecutive spectra summed to %d" % total
         last_total = total
 
         if i and i % 100 == 0:
-            print("%s read %d spectra" % (datetime.datetime.now(), i))
+            print "%s read %d spectra" % (datetime.datetime.now(), i)
 
     end = datetime.datetime.now()
 
@@ -57,11 +57,11 @@ def timing_test():
     comms_total_sec = elapsed_sec - integration_total_sec
     comms_average_ms = (comms_total_sec / args.count) * 1000.0
 
-    print("\nread %d spectra at %d ms in %.2f sec\n" % (args.count, args.integration_time_ms, elapsed_sec))
-    print("scan rate              = %6.2f spectra/sec" % scan_rate)
-    print("cumulative integration = %6.2f sec" % integration_total_sec)
-    print("cumulative overhead    = %6.2f sec" % comms_total_sec)
-    print("comms latency          = %6.2f ms/spectrum" % comms_average_ms)
+    print "\nread %d spectra at %d ms in %.2f sec\n" % (args.count, args.integration_time_ms, elapsed_sec)
+    print "scan rate              = %6.2f spectra/sec" % scan_rate
+    print "cumulative integration = %6.2f sec" % integration_total_sec
+    print "cumulative overhead    = %6.2f sec" % comms_total_sec
+    print "comms latency          = %6.2f ms/spectrum" % comms_average_ms
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--pid", default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex) (default 1000)")
@@ -72,7 +72,7 @@ args = parser.parse_args()
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=int(args.pid, 16))
 if not dev:
-    print("No spectrometers found")
+    print "No spectrometers found"
     sys.exit()
 
 timing_test()
