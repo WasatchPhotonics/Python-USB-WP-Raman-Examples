@@ -2,34 +2,33 @@
 
 import sys
 import usb.core
-import datetime
-from time import sleep
 
-# Select Product
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 if dev is None:
-    print "No spectrometers found"
+    print("No spectrometers found")
     sys.exit(1)
 
-print dev
-print "VID = 0x%04x" % dev.idVendor
-print "PID = 0x%04x" % dev.idProduct
-print "Bus = %s" % dev.bus
-print "Address = %s" % dev.address
+HOST_TO_DEVICE = 0x40
+DEVICE_TO_HOST = 0xC0
+TIMEOUT_MS = 1000
+Z = [0] * 8
 
-H2D=0x40
-D2H=0xC0
-BUFFER_SIZE=8
-Z='\x00'*BUFFER_SIZE
-TIMEOUT=1000
+def Get_Value(Command, ByteCount, raw=False):
+    RetArray = dev.ctrl_transfer(DEVICE_TO_HOST, Command, 0, 0, ByteCount, TIMEOUT_MS)
+    if raw:
+        RetVal = RetArray
+    else:
+        RetVal = 0
+        for i in range(len(RetArray)):
+            RetVal = (RetVal << 8) | RetArray[ByteCount - i - 1]
+    return RetVal
 
-def Get_Value(Command, ByteCount, index=0):
-	RetVal = 0
-	RetArray = dev.ctrl_transfer(D2H, Command, 0,0,ByteCount,TIMEOUT)
-	for i in range (0, ByteCount):
-		RetVal = RetVal*256 + RetArray[ByteCount - i - 1]
-	return RetVal
+def getFirmwareRev():
+    return ".".join(reversed([str(int(x)) for x in Get_Value(0xc0, 4, raw=True)]))
 
-FPGAVer = dev.ctrl_transfer(D2H, 0xb4, 0,0,7,TIMEOUT)   
-print ('FPGA Ver 		{0:}{1:}{2:}{3:}{4:}{5:}{6:}'.format(chr(FPGAVer[0]), chr(FPGAVer[1]), chr(FPGAVer[2]), chr(FPGAVer[3]), chr(FPGAVer[4]), chr(FPGAVer[5]), chr(FPGAVer[6])))
-	
+def getFPGARev():
+    return "".join(chr(x) for x in Get_Value(0xb4, 7, raw=True))
+
+print("microcontroller firmware: %s" % getFirmwareRev())
+print("           FPGA firmware: %s" % getFPGARev())
+    
