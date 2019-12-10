@@ -87,8 +87,8 @@ for a in range(10, 100, 10):
 #for a in range(4, 1001, 1):
 for a in range(4, 100, 10):
 	#inttime = random.randint(1,5000)
-	#inttime = 8
-	inttime = a
+	inttime = 4
+	#inttime = a
 	#intval = hex(a)
 	#b1, b0 = bytes(a)
 	b1, b0 = bytes(inttime)
@@ -104,8 +104,8 @@ for a in range(4, 100, 10):
 	time.sleep(0.1)
 	
 	for i in range(1):
-		while(ft232h.input(6)!= GPIO.LOW): #for D6, D7 triggering
-		#while(ft232h.input(9)!= GPIO.LOW): #for C0, C1 triggering
+		#while(ft232h.input(6)!= GPIO.LOW): #for D6, D7 triggering
+		while(ft232h.input(9)!= GPIO.LOW): #for C0, C1 triggering
 			time.sleep(0.01)
 			spi.read(2050) #flush buffer
 		#print("reading integration time %dms" % a)
@@ -119,8 +119,8 @@ for a in range(4, 100, 10):
 		ft232h.output(8, GPIO.LOW)
 		#time.sleep(inttime/1000 +1)
 		counter = 0
-		#while(ft232h.input(9) != GPIO.HIGH): # for C0, C1 triggering
-		while(ft232h.input(6) != GPIO.HIGH): # for D6, D7 triggering
+		while(ft232h.input(9) != GPIO.HIGH): # for C0, C1 triggering
+		#while(ft232h.input(6) != GPIO.HIGH): # for D6, D7 triggering
 			time.sleep(0.01)
 			
 			if counter != 10000:
