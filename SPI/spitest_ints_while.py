@@ -26,6 +26,8 @@ print hex(crc8('\x04\x91\xe8\x03\x00'))
 
 ft232h.setup(7, GPIO.OUT) # Make pin D7 a digital output
 ft232h.setup(6, GPIO.IN) # Make pin D6 a digital input
+ft232h.setup(8, GPIO.OUT) # Make pin C0 a digital output
+ft232h.setup(9, GPIO.IN) # Make pin C1 a digital input
 
 f= open("results.csv","w")
 #response = spi.transfer([0x3C, 0x00, 0x03, 0x92, 0x87, 0x40, 0xE8, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
@@ -102,19 +104,23 @@ for a in range(4, 100, 10):
 	time.sleep(0.1)
 	
 	for i in range(1):
-		while(ft232h.input(6) != GPIO.LOW):
+		#	while(ft232h.input(6)!= GPIO.LOW): #for D6, D7 triggering
+		while(ft232h.input(9)!= GPIO.LOW): #for C0, C1 triggering
 			time.sleep(0.01)
 			spi.read(2050) #flush buffer
 		#print("reading integration time %dms" % a)
 		print("reading integration time %dms" % inttime)
 		ft232h.output(7, GPIO.HIGH)
+		ft232h.output(8, GPIO.HIGH)
 		# Sleep for .1 second.
 		#time.sleep(inttime/1000)
 		time.sleep(0.0045)
 		ft232h.output(7, GPIO.LOW)
+		ft232h.output(8, GPIO.LOW)
 		#time.sleep(inttime/1000 +1)
 		counter = 0
-		while(ft232h.input(6) != GPIO.HIGH):
+		while(ft232h.input(9) != GPIO.HIGH): # for C0, C1 triggering
+		#while(ft232h.input(6) != GPIO.HIGH): # for D6, D7 triggering
 			time.sleep(0.01)
 			
 			if counter != 10000:
