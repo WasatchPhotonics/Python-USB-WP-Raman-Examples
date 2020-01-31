@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import sys
+
 # This script is for Sandbox units with moveable gratings where multiple 
 # 3rd-order wavecals are desired to be stored on the EEPROM.  It reads a file 
 # like this:
@@ -86,8 +88,14 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",   action="store_true", help="debug output")
         parser.add_argument("--pid",     default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex) (default 1000)")
-        parser.add_argument("--wavecal", required=True, type=str, help="file containing 9 wavecals")
+        parser.add_argument("--wavecal", type=str, help="file containing 9 wavecals")
+        parser.add_argument("--zero",    action="store_true", help="zero wavecals 1-8 (leave primary)")
         self.args = parser.parse_args()
+
+        if not self.args.zero or self.args.wavecal:
+            print("must provide --zero or --wavecal")
+            sys.exit(1)
+
         self.pid = int(self.args.pid, 16)
 
         self.dev = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
@@ -98,10 +106,14 @@ class Fixture(object):
         self.read_eeprom()
         self.dump_eeprom()
 
-        pos_coeffs = self.load_file()
-        for pos, coeffs in pos_coeffs.items():
-            print("updating coeffs for pos %d: %s" % (pos, coeffs))
-            self.update_wavecal_coeffs(pos, coeffs)
+        if self.args.zero:
+            coeffs = [ 0, 0, 0, 0 ]
+            for i in range(8):
+                self.update_wavecal_coeffs(i + 1, [0, 0, 0, 0])
+        else:
+            pos_coeffs = self.load_file()
+            for pos, coeffs in pos_coeffs.items():
+                self.update_wavecal_coeffs(pos, coeffs)
 
         # global settings
         self.pack((0, 63, 1), "B", EEPROM_FORMAT)
@@ -138,6 +150,8 @@ class Fixture(object):
         return (page, start)
 
     def update_wavecal_coeffs(self, pos, coeffs):
+        print("updating coeffs for pos %d: %s" % (pos, coeffs))
+
         if pos < 0 or pos > 8:
             raise Exception("invalid grating position (valid positions 1-8)")
 
