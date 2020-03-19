@@ -2,6 +2,7 @@
 
 import sys
 import re
+from time import sleep
 
 # @par Multi-Wavecal
 #
@@ -75,9 +76,7 @@ import sys
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
-BUFFER_SIZE = 8
 TIMEOUT_MS = 1000
-ZZ = [0] * BUFFER_SIZE
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
@@ -91,6 +90,7 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",          action="store_true",    help="debug output")
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
+        parser.add_argument("--force-offset",   action="store_true",    help="force ARMs to use the old 'offset' write method")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--multi-wavecal",  type=str,               help="file containing 9 wavecals")
@@ -150,7 +150,7 @@ class Fixture(object):
         self.debug("reading %s" % self.args.restore)
         with open(self.args.restore) as f:
             for line in f:
-                self.debug("read: %s" % line)
+                #self.debug("read: %s" % line)
                 line = line.strip()
                 if line.startswith("#") or len(line) == 0:
                     continue
@@ -163,8 +163,8 @@ class Fixture(object):
                     if "wasatch.FeatureIdentificationDevice" in line and \
                             "GET_MODEL_CONFIG" in line:
                         filetype = "ENLIGHTEN_LOG"
+                    self.debug("filetype: %s" % filetype)
 
-                self.debug("filetype: %s" % filetype)
                 if filetype is None:
                     raise Exception("ERROR: could not determine filetype")
 
@@ -175,14 +175,15 @@ class Fixture(object):
                     page = int(m.group(1))
                     if not (0 <= page <= 7):
                         raise Exception("invalid page")
+
                     m = re.search("array\('B', \[([0-9, ]+)\]\)", line)
                     if not m:
                         raise Exception("can't parse data")
                     delimited = m.group(1)
-                    self.debug("parsing values from: %s" % delimited)
                     values = [ int(v.strip()) for v in delimited.split(",")]
                     if len(values) != 64:
                         raise Exception("wrong array length")
+
                     for i in range(len(values)):
                         v = values[i]
                         if not (0 <= v <= 255):
@@ -239,7 +240,7 @@ class Fixture(object):
         print("Reading EEPROM:")
         self.eeprom_pages = []
         for page in range(MAX_PAGES):
-            buf = self.read_eeprom_page(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
+            buf = self.get_cmd(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
             self.eeprom_pages.append(buf)
 
     def dump_eeprom(self, state="Current"):
@@ -249,16 +250,17 @@ class Fixture(object):
 
     def write_eeprom(self):
         print("Writing EEPROM")
-        for page in range(MAX_PAGES):
+        for page in range(len(self.eeprom_pages)):
             buf = self.eeprom_pages[page]
             print("  writing page %d: %s" % (page, buf))
 
-            if self.pid == 0x4000:
+            if self.pid == 0x4000 and not self.args.force_offset:
                 self.send_cmd(cmd=0xff, value=0x02, index=page, buf=buf)
             else:
                 DATA_START = 0x3c00
                 offset = DATA_START + page * 64 
                 self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
+            sleep(0.1)
 
     ############################################################################
     # Utility Methods
@@ -269,9 +271,15 @@ class Fixture(object):
             print("DEBUG: %s" % msg)
 
     def send_cmd(self, cmd, value, index=0, buf=None):
+        if buf is None:
+            if self.pid == 0x4000:
+                buf = [0] * 8
+            else:
+                buf = ""
+        self.debug("ctrl_transfer(%02x, %02x, %04x, %04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
-    def read_eeprom_page(self, cmd, value=0, index=0, length=64):
+    def get_cmd(self, cmd, value=0, index=0, length=64):
         return self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
 
     ##  
@@ -313,10 +321,10 @@ class Fixture(object):
                 print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
                 return
 
-        if label is None:
-            self.debug("Unpacked [%s]: %s" % (data_type, unpack_result))
-        else:
-            self.debug("Unpacked [%s]: %s (%s)" % (data_type, unpack_result, label))
+        # if label is None:
+        #     self.debug("Unpacked [%s]: %s" % (data_type, unpack_result))
+        # else:
+        #     self.debug("Unpacked [%s]: %s (%s)" % (data_type, unpack_result, label))
         return unpack_result
 
     ## 
@@ -332,9 +340,8 @@ class Fixture(object):
         end_byte   = start_byte + length
 
         if page > len(self.eeprom_pages):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
+            raise Exception("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
                 page, start_byte, length, data_type, label))
-            return
 
         # don't try to write negatives to unsigned types
         if data_type in ["H", "I"] and value < 0:
@@ -355,7 +362,7 @@ class Fixture(object):
         else:
             struct.pack_into(data_type, buf, start_byte, value)
 
-        self.debug("Packed (%d, %2d, %2d) '%s' value %s -> %s" % (page, start_byte, length, data_type, value, buf[start_byte:end_byte]))
+        # self.debug("Packed (%d, %2d, %2d) '%s' value %s -> %s" % (page, start_byte, length, data_type, value, buf[start_byte:end_byte]))
 
     def dump_wavecals(self, state="Current"):
         print("%s Wavecals:" % state)
