@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
 import sys
+import re
 
-# This script is for Sandbox units with moveable gratings where multiple 
+# @par Multi-Wavecal
+#
+# This was originally for Sandbox units with moveable gratings where multiple 
 # 3rd-order wavecals are desired to be stored on the EEPROM.  It reads a file 
 # like this:
 # 
@@ -78,23 +81,27 @@ ZZ = [0] * BUFFER_SIZE
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
-EEPROM_FORMAT = 7
-EEPROM_SUBFORMAT = 3
+EEPROM_FORMAT = 8
 
 class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
+        self.subformat = None
 
         parser = argparse.ArgumentParser()
-        parser.add_argument("--debug",   action="store_true", help="debug output")
-        parser.add_argument("--pid",     default="1000", choices=["1000", "2000", "4000"], help="USB Product ID (hex) (default 1000)")
-        parser.add_argument("--wavecal", type=str, help="file containing 9 wavecals")
-        parser.add_argument("--zero",    action="store_true", help="zero wavecals 1-8 (leave primary)")
+        parser.add_argument("--debug",          action="store_true",    help="debug output")
+        parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
+        parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
+        parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
+        parser.add_argument("--multi-wavecal",  type=str,               help="file containing 9 wavecals")
+        parser.add_argument("--zero-multi",     action="store_true",    help="zero wavecals 1-8 (leave primary)")
         self.args = parser.parse_args()
 
-        if not self.args.zero or self.args.wavecal:
-            print("must provide --zero or --wavecal")
-            sys.exit(1)
+        if not (self.args.dump or \
+                self.args.restore or \
+                self.args.zero_multi or \
+                self.args.multi_wavecal):
+            self.args.dump = True
 
         self.pid = int(self.args.pid, 16)
 
@@ -105,29 +112,94 @@ class Fixture(object):
     def run(self):
         self.read_eeprom()
         self.dump_eeprom()
+        self.dump_wavecals()
 
-        if self.args.zero:
-            coeffs = [ 0, 0, 0, 0 ]
-            for i in range(8):
-                self.update_wavecal_coeffs(i + 1, [0, 0, 0, 0])
-        else:
-            pos_coeffs = self.load_file()
+        if self.args.dump:
+            return
+
+        elif self.args.zero_multi:
+            self.zero_multi()
+
+        elif self.args.multi_wavecal:
+            pos_coeffs = self.load_multi()
             for pos, coeffs in pos_coeffs.items():
                 self.update_wavecal_coeffs(pos, coeffs)
 
+        elif self.args.restore:
+            self.restore()
+
         # global settings
         self.pack((0, 63, 1), "B", EEPROM_FORMAT)
-        self.pack((5, 63, 1), "B", EEPROM_SUBFORMAT)
-        self.pack((2, 21, 4), "f", 0.0) # so-called 5th coeff of default wavecal
+        if self.subformat is not None:
+            self.pack((5, 63, 1), "B", self.subformat)
+        #self.pack((2, 21, 4), "f", 0.0) # so-called 5th coeff of default wavecal
 
-        cont = input("Continue? (y/N)")
+        self.dump_eeprom("Proposed")
+        self.dump_wavecals("Proposed")
+
+        cont = input("\nContinue? (y/N)")
         if cont.lower() != "y":
             print("Cancelled")
             return
 
         self.write_eeprom()
 
-    def load_file(self):
+    def restore(self):
+        linecount = 0
+        filetype = None
+        self.debug("reading %s" % self.args.restore)
+        with open(self.args.restore) as f:
+            for line in f:
+                self.debug("read: %s" % line)
+                line = line.strip()
+                if line.startswith("#") or len(line) == 0:
+                    continue
+
+                linecount += 1
+
+                # use first (valid) line to determine filetype
+                if linecount == 1:
+                    # DEBUG: read: 2020-03-19 12:05:41,726 Process-2  wasatch.FeatureIdentificationDevice DEBUG    GET_MODEL_CONFIG(0): get_code: request 0xff value 0x0001 index 0x0000 = [array('B', [87, 80, 45, 55, 56, 53, 45, 88, 45, 83, 82, 45, 83, 0, 0, 0, 87, 80, 45, 48, 48, 53, 54, 49, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 1, 0, 0, 17, 3, 50, 0, 2, 0, 10, 0, 0, 51, 51, 243, 63, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 6])]
+                    if "wasatch.FeatureIdentificationDevice" in line and \
+                            "GET_MODEL_CONFIG" in line:
+                        filetype = "ENLIGHTEN_LOG"
+
+                self.debug("filetype: %s" % filetype)
+                if filetype is None:
+                    raise Exception("ERROR: could not determine filetype")
+
+                if filetype == "ENLIGHTEN_LOG":
+                    m = re.search("GET_MODEL_CONFIG\((\d)\)", line)
+                    if not m:
+                        raise Exception("can't parse page number")
+                    page = int(m.group(1))
+                    if not (0 <= page <= 7):
+                        raise Exception("invalid page")
+                    m = re.search("array\('B', \[([0-9, ]+)\]\)", line)
+                    if not m:
+                        raise Exception("can't parse data")
+                    delimited = m.group(1)
+                    self.debug("parsing values from: %s" % delimited)
+                    values = [ int(v.strip()) for v in delimited.split(",")]
+                    if len(values) != 64:
+                        raise Exception("wrong array length")
+                    for i in range(len(values)):
+                        v = values[i]
+                        if not (0 <= v <= 255):
+                            raise Exception("invalid byte")
+                        self.pack((page, i, 1), "B", values[i])
+                    self.debug("parsed and packed page %d" % page)
+                else:
+                    raise Exception("Unsupported filetype: %s" % filetype)
+
+    def zero_multi(self):             
+        coeffs = [ 0, 0, 0, 0 ]
+        for i in range(8):
+            print("zeroing wavecal %d" % (i + 1));
+            self.update_wavecal_coeffs(i + 1, [0, 0, 0, 0])
+
+    def load_multi(self):
+        self.subformat = 3
         pos_coeffs = {}
         with open(self.args.wavecal) as f:
             for line in f:
@@ -169,7 +241,11 @@ class Fixture(object):
         for page in range(MAX_PAGES):
             buf = self.read_eeprom_page(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
             self.eeprom_pages.append(buf)
-            print("  Page %d: %s" % (page, buf))
+
+    def dump_eeprom(self, state="Current"):
+        print("%s EEPROM:" % state)
+        for page in range(len(self.eeprom_pages)):
+            print("  Page %d: %s" % (page, self.eeprom_pages[page]))
 
     def write_eeprom(self):
         print("Writing EEPROM")
@@ -281,15 +357,13 @@ class Fixture(object):
 
         self.debug("Packed (%d, %2d, %2d) '%s' value %s -> %s" % (page, start_byte, length, data_type, value, buf[start_byte:end_byte]))
 
-    def dump_eeprom(self):
-        print("EEPROM Contents:")
+    def dump_wavecals(self, state="Current"):
+        print("%s Wavecals:" % state)
         for pos in range(9):
             (page, start) = self.get_page_start(pos)
-
             coeffs = []
             for i in range(4):
                 coeffs.append(self.unpack((page, start + i * 4, 4), "f"))
-
             print("  Pos %d: %s" % (pos, coeffs))
 
 fixture = Fixture()
