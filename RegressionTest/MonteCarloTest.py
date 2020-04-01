@@ -618,23 +618,21 @@ if not fixture.enumerate():
     print "No matching spectrometers found."
     sys.exit()
 
-#if not fixture.simple:
-#    fixture.logHeader("Quick test of all commands")
-#    fixture.runAll()
-#    fixture.resetCounts()
+if not fixture.simple:
+    fixture.logHeader("Quick test of all commands")
+    fixture.runAll()
+    fixture.resetCounts()
 
 fixture.logHeader("Starting Monte Carlo testing")
 fixture.logInfo("Press Ctrl-C to exit...\n")
 
 try:
-    cmd = APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(3000,6000), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
-    fixture.run(cmd)
     while True:
         if fixture.simple:
             fixture.runSimple()
         else:
-            #for i in range(fixture.count):
-                #fixture.runRandom()    
+            for i in range(fixture.count):
+                fixture.runRandom()    
             fixture.getSpectrum()
 
         if fixture.complete():
