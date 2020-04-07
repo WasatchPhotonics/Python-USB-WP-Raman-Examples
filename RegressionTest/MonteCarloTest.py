@@ -387,10 +387,10 @@ class TestFixture(object):
         self.dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, buf, self.timeout_ms)
         self.countCommand()
 
-        data = self.dev.read(0x82, self.block_size)
+        data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
         self.countCommand()
         if self.pixels == 2048:
-            data.extend(self.dev.read(0x86, self.block_size))
+            data.extend(self.dev.read(0x86, self.block_size, timeout=self.timeout_ms))
             self.countCommand()
 
         spectrum = [i + 256 * j for i, j in zip(data[::2], data[1::2])] # LSB-MSB
