@@ -4,70 +4,6 @@ import sys
 import re
 from time import sleep
 
-# @par Multi-Wavecal
-#
-# This was originally for Sandbox units with moveable gratings where multiple 
-# 3rd-order wavecals are desired to be stored on the EEPROM.  It reads a file 
-# like this:
-# 
-#     # pos, coeff0, coeff1, coeff2, coeff3
-#     0, 7.31218E+02, 2.50578E-01, -5.00670E-06, -2.43241E-08
-#     1, 7.26996E+02, 2.54947E-01, -5.21551E-06, -2.48926E-08
-#     2, 7.27856E+02, 2.36300E-01,  2.84885E-05, -4.16291E-08
-#     3, 7.14525E+02, 2.92230E-01, -6.05089E-05,  6.15874E-09
-#     4, 7.11584E+02, 2.90810E-01, -5.67034E-05,  5.66710E-09
-#     5, 7.09098E+02, 2.85220E-01, -4.59783E-05,  1.85891E-09
-#     6, 7.07605E+02, 2.75729E-01, -3.05849E-05, -4.12326E-09
-#     7, 7.04131E+02, 2.69440E-01, -1.32936E-05, -1.42876E-08
-#     8, 6.99588E+02, 2.72788E-01, -1.61517E-05, -1.21567E-08
-#
-# Position 0 is written to the standard wavecal location (per ENG-0034).
-# Positions 1-4 are written to EEPROM page 6, and positions 5-8 written to
-# EEPROM page 7.
-#
-# Notes:
-#   - EEPROM format is updated to rev 7
-#   - EEPROM subformat set to 3
-#   - Coeff5 on standard wavecal is set to 0.0
-#
-# Per ENG-0034, EEPROM format for pages 6-7 (subformat 3) is:
-#
-#   Page    Bytes   Field               Format
-#   6        0- 3   Wavecal 1 Coeff 0   float32
-#   6        4- 7   Wavecal 1 Coeff 1   float32
-#   6        8-11   Wavecal 1 Coeff 2   float32
-#   6       12-15   Wavecal 1 Coeff 3   float32
-#   6       16-19   Wavecal 2 Coeff 0   float32
-#   6       20-23   Wavecal 2 Coeff 1   float32
-#   6       24-27   Wavecal 2 Coeff 2   float32
-#   6       28-31   Wavecal 2 Coeff 3   float32
-#   6       32-35   Wavecal 3 Coeff 0   float32
-#   6       36-39   Wavecal 3 Coeff 1   float32
-#   6       40-43   Wavecal 3 Coeff 2   float32
-#   6       44-47   Wavecal 3 Coeff 3   float32
-#   6       48-51   Wavecal 4 Coeff 0   float32
-#   6       52-55   Wavecal 4 Coeff 1   float32
-#   6       56-59   Wavecal 4 Coeff 2   float32
-#   6       60-63   Wavecal 4 Coeff 3   float32
-#
-#   Page    Bytes   Field               Format
-#   7        0- 3   Wavecal 5 Coeff 0   float32
-#   7        4- 7   Wavecal 5 Coeff 1   float32
-#   7        8-11   Wavecal 5 Coeff 2   float32
-#   7       12-15   Wavecal 5 Coeff 3   float32
-#   7       16-19   Wavecal 6 Coeff 0   float32
-#   7       20-23   Wavecal 6 Coeff 1   float32
-#   7       24-27   Wavecal 6 Coeff 2   float32
-#   7       28-31   Wavecal 6 Coeff 3   float32
-#   7       32-35   Wavecal 7 Coeff 0   float32
-#   7       36-39   Wavecal 7 Coeff 1   float32
-#   7       40-43   Wavecal 7 Coeff 2   float32
-#   7       44-47   Wavecal 7 Coeff 3   float32
-#   7       48-51   Wavecal 8 Coeff 0   float32
-#   7       52-55   Wavecal 8 Coeff 1   float32
-#   7       56-59   Wavecal 8 Coeff 2   float32
-#   7       60-63   Wavecal 8 Coeff 3   float32
-
 import traceback
 import usb.core
 import argparse
@@ -95,11 +31,13 @@ class Fixture(object):
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--multi-wavecal",  type=str,               help="file containing 9 wavecals")
         parser.add_argument("--zero-multi",     action="store_true",    help="zero wavecals 1-8 (leave primary)")
+        parser.add_argument("--fix-fifth",      action="store_true",    help="fix the fifth wavelcal coefficient, setting it to zero")
         self.args = parser.parse_args()
 
-        if not (self.args.dump or \
-                self.args.restore or \
+        if not (self.args.dump       or \
+                self.args.restore    or \
                 self.args.zero_multi or \
+                self.args.fix_fifth  or \
                 self.args.multi_wavecal):
             self.args.dump = True
 
@@ -125,6 +63,9 @@ class Fixture(object):
             for pos, coeffs in pos_coeffs.items():
                 self.update_wavecal_coeffs(pos, coeffs)
 
+        elif self.args.fix_fifth:
+            self.fix_fifth()
+
         elif self.args.restore:
             self.restore()
 
@@ -132,7 +73,6 @@ class Fixture(object):
         self.pack((0, 63, 1), "B", EEPROM_FORMAT)
         if self.subformat is not None:
             self.pack((5, 63, 1), "B", self.subformat)
-        #self.pack((2, 21, 4), "f", 0.0) # so-called 5th coeff of default wavecal
 
         self.dump_eeprom("Proposed")
         self.dump_wavecals("Proposed")
@@ -192,6 +132,10 @@ class Fixture(object):
                     self.debug("parsed and packed page %d" % page)
                 else:
                     raise Exception("Unsupported filetype: %s" % filetype)
+
+    def fix_fifth(self):
+        print("zeroing wavecal coeff[4]")
+        self.pack((2, 21, 4), "f", 0.0) # so-called 5th coeff of default wavecal
 
     def zero_multi(self):             
         coeffs = [ 0, 0, 0, 0 ]
@@ -376,3 +320,68 @@ class Fixture(object):
 fixture = Fixture()
 if fixture.dev:
     fixture.run()
+
+# @par Multi-Wavecal
+#
+# This was originally for Sandbox units with moveable gratings where multiple 
+# 3rd-order wavecals are desired to be stored on the EEPROM.  It reads a file 
+# like this:
+# 
+#     # pos, coeff0, coeff1, coeff2, coeff3
+#     0, 7.31218E+02, 2.50578E-01, -5.00670E-06, -2.43241E-08
+#     1, 7.26996E+02, 2.54947E-01, -5.21551E-06, -2.48926E-08
+#     2, 7.27856E+02, 2.36300E-01,  2.84885E-05, -4.16291E-08
+#     3, 7.14525E+02, 2.92230E-01, -6.05089E-05,  6.15874E-09
+#     4, 7.11584E+02, 2.90810E-01, -5.67034E-05,  5.66710E-09
+#     5, 7.09098E+02, 2.85220E-01, -4.59783E-05,  1.85891E-09
+#     6, 7.07605E+02, 2.75729E-01, -3.05849E-05, -4.12326E-09
+#     7, 7.04131E+02, 2.69440E-01, -1.32936E-05, -1.42876E-08
+#     8, 6.99588E+02, 2.72788E-01, -1.61517E-05, -1.21567E-08
+#
+# Position 0 is written to the standard wavecal location (per ENG-0034).
+# Positions 1-4 are written to EEPROM page 6, and positions 5-8 written to
+# EEPROM page 7.
+#
+# Notes:
+#   - EEPROM format is updated to rev 7
+#   - EEPROM subformat set to 3
+#   - Coeff5 on standard wavecal is set to 0.0
+#
+# Per ENG-0034, EEPROM format for pages 6-7 (subformat 3) is:
+#
+#   Page    Bytes   Field               Format
+#   6        0- 3   Wavecal 1 Coeff 0   float32
+#   6        4- 7   Wavecal 1 Coeff 1   float32
+#   6        8-11   Wavecal 1 Coeff 2   float32
+#   6       12-15   Wavecal 1 Coeff 3   float32
+#   6       16-19   Wavecal 2 Coeff 0   float32
+#   6       20-23   Wavecal 2 Coeff 1   float32
+#   6       24-27   Wavecal 2 Coeff 2   float32
+#   6       28-31   Wavecal 2 Coeff 3   float32
+#   6       32-35   Wavecal 3 Coeff 0   float32
+#   6       36-39   Wavecal 3 Coeff 1   float32
+#   6       40-43   Wavecal 3 Coeff 2   float32
+#   6       44-47   Wavecal 3 Coeff 3   float32
+#   6       48-51   Wavecal 4 Coeff 0   float32
+#   6       52-55   Wavecal 4 Coeff 1   float32
+#   6       56-59   Wavecal 4 Coeff 2   float32
+#   6       60-63   Wavecal 4 Coeff 3   float32
+#
+#   Page    Bytes   Field               Format
+#   7        0- 3   Wavecal 5 Coeff 0   float32
+#   7        4- 7   Wavecal 5 Coeff 1   float32
+#   7        8-11   Wavecal 5 Coeff 2   float32
+#   7       12-15   Wavecal 5 Coeff 3   float32
+#   7       16-19   Wavecal 6 Coeff 0   float32
+#   7       20-23   Wavecal 6 Coeff 1   float32
+#   7       24-27   Wavecal 6 Coeff 2   float32
+#   7       28-31   Wavecal 6 Coeff 3   float32
+#   7       32-35   Wavecal 7 Coeff 0   float32
+#   7       36-39   Wavecal 7 Coeff 1   float32
+#   7       40-43   Wavecal 7 Coeff 2   float32
+#   7       44-47   Wavecal 7 Coeff 3   float32
+#   7       48-51   Wavecal 8 Coeff 0   float32
+#   7       52-55   Wavecal 8 Coeff 1   float32
+#   7       56-59   Wavecal 8 Coeff 2   float32
+#   7       60-63   Wavecal 8 Coeff 3   float32
+
