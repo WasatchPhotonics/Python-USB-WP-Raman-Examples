@@ -330,16 +330,16 @@ class TestFixture(object):
         self.addCommand(APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(10, 1000), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)"))
         self.addCommand(APICommand("INTERLOCK",                    getter=0xEF,              dataType="Bool",    readLen=1, supports=("FX2"), notes="Couldn't get to work on ARM, checking with Jason"))
         self.addCommand(APICommand("LASER_ENABLED",                getter=0xE2, setter=0xBE, dataType="Bool",    readLen=1, usesLaser=True, setterDisabled=True, notes="disabled in test because dangerous"))
-        self.addCommand(APICommand("LASER_MOD_ENABLED",            getter=0xE3, setter=0xBD, dataType="Bool",    readLen=1, usesLaser=True, getFakeBufferLen=8))
-        self.addCommand(APICommand("LASER_MOD_DURATION",           getter=0xC3, setter=0xB9, dataType="Uint40",  readLen=5, usesLaser=True, requiresLaserModEnabled=True, setterDisabled=True, getLittleEndian=True, notes="Never used in ENLIGHTEN? In microsec; disabled in test because doesn't seem to work"))
-        self.addCommand(APICommand("LASER_MOD_PERIOD",             getter=0xCB, setter=0xC7, dataType="Uint40",  readLen=5, usesLaser=True, getterDisabled=True, requiresLaserModEnabled=True, setRange=(100, 100), setFakeLenFromValue=True, notes="API Kludge: sending integral percentage as length of fake buffer"))
-        self.addCommand(APICommand("LASER_MOD_PULSE_DELAY",        getter=0xCA, setter=0xC6, dataType="Uint40",  readLen=5, usesLaser=True, setRange=(0, 5000), getLittleEndian=True, requiresLaserModEnabled=True))
-        self.addCommand(APICommand("LASER_MOD_PULSE_WIDTH",        getter=0xDC, setter=0xDB, dataType="Uint40",  readLen=5, usesLaser=True, getterDisabled=True, requiresLaserModEnabled=True, setDelayMS=100, getLittleEndian=True, setRange=(1, 100), setFakeBufferFromValue=True, notes="getter disabled because doesn't seem to work"))
-        self.addCommand(APICommand("LASER_RAMPING_MODE",           getter=0xEA, setter=0xE9, dataType="Bool",    readLen=1, usesLaser=True, supports=("ARM")))
-        self.addCommand(APICommand("LASER_TEMP",                   getter=0xD5,              dataType="Uint16",  readLen=2, usesLaser=True, getLittleEndian=True, notes="causes problems on ARM if no laser connected?"))
-        self.addCommand(APICommand("LASER_TEMP_SETPOINT",          getter=0xE8, setter=0xE7, dataType="Uint12",  readLen=1, usesLaser=True, getterDisabled=True, getFakeBufferLen=8, setRange=(63, 127), supports=("ARM"), notes="TODO: Unclear what this returns; documented length of 1 byte is insufficient for 12-bit DAC? getter disabled in testing because wasn't working"))
+        #self.addCommand(APICommand("LASER_MOD_ENABLED",            getter=0xE3, setter=0xBD, dataType="Bool",    readLen=1, usesLaser=True, getFakeBufferLen=8))
+        #self.addCommand(APICommand("LASER_MOD_DURATION",           getter=0xC3, setter=0xB9, dataType="Uint40",  readLen=5, usesLaser=True, requiresLaserModEnabled=True, setterDisabled=True, getLittleEndian=True, notes="Never used in ENLIGHTEN? In microsec; disabled in test because doesn't seem to work"))
+        #self.addCommand(APICommand("LASER_MOD_PERIOD",             getter=0xCB, setter=0xC7, dataType="Uint40",  readLen=5, usesLaser=True, getterDisabled=True, requiresLaserModEnabled=True, setRange=(100, 100), setFakeLenFromValue=True, notes="API Kludge: sending integral percentage as length of fake buffer"))
+        #self.addCommand(APICommand("LASER_MOD_PULSE_DELAY",        getter=0xCA, setter=0xC6, dataType="Uint40",  readLen=5, usesLaser=True, setRange=(0, 5000), getLittleEndian=True, requiresLaserModEnabled=True))
+        #self.addCommand(APICommand("LASER_MOD_PULSE_WIDTH",        getter=0xDC, setter=0xDB, dataType="Uint40",  readLen=5, usesLaser=True, getterDisabled=True, requiresLaserModEnabled=True, setDelayMS=100, getLittleEndian=True, setRange=(1, 100), setFakeBufferFromValue=True, notes="getter disabled because doesn't seem to work"))
+        #self.addCommand(APICommand("LASER_RAMPING_MODE",           getter=0xEA, setter=0xE9, dataType="Bool",    readLen=1, usesLaser=True, supports=("ARM")))
+        #self.addCommand(APICommand("LASER_TEMP",                   getter=0xD5,              dataType="Uint16",  readLen=2, usesLaser=True, getLittleEndian=True, notes="causes problems on ARM if no laser connected?"))
+        #self.addCommand(APICommand("LASER_TEMP_SETPOINT",          getter=0xE8, setter=0xE7, dataType="Uint12",  readLen=1, usesLaser=True, getterDisabled=True, getFakeBufferLen=8, setRange=(63, 127), supports=("ARM"), notes="TODO: Unclear what this returns; documented length of 1 byte is insufficient for 12-bit DAC? getter disabled in testing because wasn't working"))
         self.addCommand(APICommand("LINE_LENGTH",                  getter=0xFF,              dataType="Uint16",  readLen=2, getLittleEndian=True, wValue=0x03, notes="causes problems on ARM in combination with others?"))
-        self.addCommand(APICommand("LINK_LASER_MOD_TO_INTEG_TIME", getter=0xDE, setter=0xDD, dataType="Bool",    readLen=1, usesLaser=True)) 
+        #self.addCommand(APICommand("LINK_LASER_MOD_TO_INTEG_TIME", getter=0xDE, setter=0xDD, dataType="Bool",    readLen=1, usesLaser=True)) 
         self.addCommand(APICommand("MODEL_CONFIG",                 getter=0xFF, setter=0xA2, dataType="Byte[]",  readLen=64, wValue=0x01, wIndexRange=(0, 5), setterDisabled=True, notes="On read, pass desired page index (0-7) via wIndex; BatchTest; on write, wValue should be 0x3c00 + 64 * (zero-indexed page index); buf should be 64 bytes; disabled in testing because very stupid"))
         self.addCommand(APICommand("OPT_ACT_INT_TIME",             getter=0xFF,              dataType="Bool",    readLen=1, wValue=0x0B, getFakeBufferLen=8))
         self.addCommand(APICommand("OPT_AREA_SCAN",                getter=0xFF,              dataType="Bool",    readLen=1, wValue=0x0A, getFakeBufferLen=8))
@@ -351,34 +351,54 @@ class TestFixture(object):
         self.addCommand(APICommand("OPT_LASER_CONTROL",            getter=0xFF,              dataType="Enum",    readLen=1, wValue=0x09, enum=("MODULATION", "TRANSITION_POINTS", "RAMPING")))
         self.addCommand(APICommand("RESET_FPGA",                                setter=0xB5, dataType="Void",               setterDisabled=True, notes="disabled in test because bad idea"))
         self.addCommand(APICommand("SELECTED_LASER",               getter=0xEE, setter=0xED, dataType="Bool",    readLen=1))
-        self.addCommand(APICommand("TRIGGER_DELAY",                getter=0xAB, setter=0xAA, dataType="Uint24",  readLen=3, getLittleEndian=True, supports=("ARM"), notes="Delay is in 0.5us, supports 24-bit unsigned value (about 8.3sec)"))
-        self.addCommand(APICommand("VR_CONTINUOUS_CCD",            getter=0xCC, setter=0xC8, dataType="Bool",    readLen=1, notes="When using external triggering, perform multiple acquisitions on a single inbound trigger event."))
-        self.addCommand(APICommand("VR_NUM_FRAMES",                getter=0xCD, setter=0xC9, dataType="Uint8",   readLen=1, notes="When using continuous CCD acquisitions with external triggering, how many spectra are being acquired per trigger event."))
+        self.addCommand(APICommand("TRIGGER_DELAY",                getter=0xAB, setter=0xAA, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(1, 6000000), supports=("ARM"), notes="Delay is in 0.5us, supports 24-bit unsigned value (about 8.3sec)"))
+        #self.addCommand(APICommand("VR_CONTINUOUS_CCD",            getter=0xCC, setter=0xC8, dataType="Bool",    readLen=1, notes="When using external triggering, perform multiple acquisitions on a single inbound trigger event."))
+        #self.addCommand(APICommand("VR_NUM_FRAMES",                getter=0xCD, setter=0xC9, dataType="Uint8",   readLen=1, notes="When using continuous CCD acquisitions with external triggering, how many spectra are being acquired per trigger event."))
 
     def enumerate(self):
-        print "Using VID 0x%04x, PID 0x%04x and %d pixels (block size %d)" % (VID, self.pid, self.pixels, self.block_size)
+        print("Using VID 0x%04x, PID 0x%04x and %d pixels (block size %d)" % (VID, self.pid, self.pixels, self.block_size))
         self.dev = usb.core.find(idVendor=VID, idProduct=fixture.pid)
         if self.dev is None:
             return False
 
         if fixture.debug:
-            print self.dev
+            print(self.dev)
 
         return True
 
     def apiReport(self):
-        print "The following test workarounds were found in the command listing:\n"
-        print "setterDisabled:         %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.setterDisabled ]
-        print "getterDisabled:         %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.getterDisabled ]
-        print "readBack:               %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.readBack ]
-        print "getFakeBufferLen:       %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.getFakeBufferLen ]
-        print "setFakeBufferFromValue: %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.setFakeBufferFromValue ]
-        print "setFakeLenFromValue:    %s" % [ name for name, cmd in self.cmds.iteritems() if cmd.setFakeLenFromValue ]
-        print "getter little-endian:   %s" % [ name for name, cmd in self.cmds.iteritems() if     cmd.getLittleEndian and cmd.getter is not None ]
-        print "getter big-endian:      %s" % [ name for name, cmd in self.cmds.iteritems() if not cmd.getLittleEndian and cmd.getter is not None ]
+        print("The following test workarounds were found in the command listing:\n")
+        print("setterDisabled:         %s" % [ name for name, cmd in self.cmds.items() if cmd.setterDisabled ])
+        print("getterDisabled:         %s" % [ name for name, cmd in self.cmds.items() if cmd.getterDisabled ])
+        print("readBack:               %s" % [ name for name, cmd in self.cmds.items() if cmd.readBack ])
+        print("getFakeBufferLen:       %s" % [ name for name, cmd in self.cmds.items() if cmd.getFakeBufferLen ])
+        print("setFakeBufferFromValue: %s" % [ name for name, cmd in self.cmds.items() if cmd.setFakeBufferFromValue ])
+        print("setFakeLenFromValue:    %s" % [ name for name, cmd in self.cmds.items() if cmd.setFakeLenFromValue ])
+        print("getter little-endian:   %s" % [ name for name, cmd in self.cmds.items() if     cmd.getLittleEndian and cmd.getter is not None ])
+        print("getter big-endian:      %s" % [ name for name, cmd in self.cmds.items() if not cmd.getLittleEndian and cmd.getter is not None ])
 
     def countCommand(self):
         self.commandCount += 1
+        
+    def getSpectrumExternal(self):
+        data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
+        self.countCommand()
+        if self.pixels == 2048:
+            data.extend(self.dev.read(0x86, self.block_size, timeout=self.timeout_ms))
+            self.countCommand()
+
+        spectrum = [i + 256 * j for i, j in zip(data[::2], data[1::2])] # LSB-MSB
+
+        if len(spectrum) != self.pixels:
+            self.logError("getSpectrum: read %d pixels (expected %d)" % (len(spectrum), self.pixels))
+            return False
+
+        self.logInfo()
+        self.logInfo("ACQUIRE_CCD: read %d pixels (%s)" % (len(spectrum), spectrum[:10]))
+        #self.logInfo("ACQUIRE_CCD: nothing to read")#Hecox temp log statement
+        self.logInfo()
+
+        return True
 
     def getSpectrum(self):
         buf = [0] * 8
@@ -401,6 +421,7 @@ class TestFixture(object):
 
         self.logInfo()
         self.logInfo("ACQUIRE_CCD: read %d pixels (%s)" % (len(spectrum), spectrum[:10]))
+        #self.logInfo("ACQUIRE_CCD: nothing to read")#Hecox temp log statement
         self.logInfo()
 
         return True
@@ -411,11 +432,14 @@ class TestFixture(object):
         return None
 
     def testSet(self, cmd, expectedValue):
+        print("testget for " + str(cmd))
         if cmd.setter is None or cmd.setterDisabled:
             return False
 
         value = expectedValue[0]
+        print("value=" + str(value))
         displayValue = expectedValue[1]
+        print("displayValue=" + str(displayValue))
         
         try:
             (wValue, wIndex, buf_or_len) = cmd.buildPayload(value)
@@ -424,11 +448,13 @@ class TestFixture(object):
             return False
 
         if self.debug:
-            print "  %s(%s) -> opcode 0x%02x, value 0x%04x, index 0x%04x, buf_or_len %s" % (
-                cmd.setterName(), value, cmd.setter, wValue, wIndex, buf_or_len)
+            print("  %s(%s) -> opcode 0x%02x, value 0x%04x, index 0x%04x, buf_or_len %s" % (
+                cmd.setterName(), value, cmd.setter, wValue, wIndex, buf_or_len))
 
         self.throttle_usb()
+        print("before transfer")
         result = self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd.setter, wValue, wIndex, buf_or_len, self.timeout_ms)
+        print("after transfer")
         self.countCommand()
 
         if type(buf_or_len) is list:
@@ -474,8 +500,8 @@ class TestFixture(object):
             wIndex = random.randrange(cmd.wIndexRange[0], cmd.wIndexRange[1])
 
         if self.debug:
-            print "  %s -> opcode 0x%02x, value 0x%04x, index 0x%04x, len %s" % (
-                cmd.getterName(), cmd.getter, wValue, wIndex, wLength)
+            print("  %s -> opcode 0x%02x, value 0x%04x, index 0x%04x, len %s" % (
+                cmd.getterName(), cmd.getter, wValue, wIndex, wLength))
 
         self.throttle_usb()
         result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd.getter, wValue, wIndex, wLength, self.timeout_ms)
@@ -483,8 +509,8 @@ class TestFixture(object):
 
         (raw, rawDisplay, stringDisplay) = cmd.parseResult(result)
         if self.debug:
-            print "  %s (opcode 0x%02x, value 0x%04x, index 0x%04x, len %s) -> %s -> %s (%s)" % (
-                cmd.getterName(), cmd.getter, wValue, wIndex, wLength, result, stringDisplay, rawDisplay)
+            print("  %s (opcode 0x%02x, value 0x%04x, index 0x%04x, len %s) -> %s -> %s (%s)" % (
+                cmd.getterName(), cmd.getter, wValue, wIndex, wLength, result, stringDisplay, rawDisplay))
 
         if expectedValue is not None:
             if raw == expectedValue[0]:
@@ -499,7 +525,7 @@ class TestFixture(object):
 
     def run(self, cmd):
         if self.debug:
-            print "\nRunning: %s (dataType %s, %d errors)" % (cmd, cmd.dataType, self.errorCount)
+            print("\nRunning: %s (dataType %s, %d errors)" % (cmd, cmd.dataType, self.errorCount))
 
         if cmd.usesLaser and not self.use_laser:
             return self.logSkip(cmd, "laser tests disabled")
@@ -528,7 +554,7 @@ class TestFixture(object):
             return self.testGet(cmd, expectedValue)
 
     def runRandom(self):
-        name = random.choice(self.cmds.keys())
+        name = random.choice(list(self.cmds.keys()))
         cmd = self.cmds[name]
         self.run(cmd)
 
@@ -553,7 +579,7 @@ class TestFixture(object):
         self.skipCount += 1
 
     def logInfo(self, msg=""):
-        print "%s [%6d] %s" % (datetime.datetime.now(), self.commandCount, msg)
+        print("%s [%6d] %s" % (datetime.datetime.now(), self.commandCount, msg))
 
     def logHeader(self, msg):
         self.logInfo() 
@@ -572,6 +598,7 @@ class TestFixture(object):
         parser.add_argument("--timeout-ms", type=int, default=1000, help="USB timeout (ms)")
         parser.add_argument("--max", type=int, help="maximum number of commands to test")
         parser.add_argument("--simple", action='store_true', help="simple command set")
+        parser.add_argument("--externalAcq", action='store_true', help="run external acquisition with laser pulse")
         parser.add_argument("--report", action='store_true', help="generate an API report")
         parser.add_argument("--debug", action='store_true', help="verbose output")
 
@@ -583,7 +610,7 @@ class TestFixture(object):
         args = parser.parse_args()
 
         # copy results
-        for field in ['pixels', 'block_size', 'debug', 'count', 'delay_ms', 'timeout_ms', 'simple', 'max', 'report', 'use_laser']:
+        for field in ['pixels', 'block_size', 'debug', 'count', 'delay_ms', 'timeout_ms', 'simple', 'externalAcq', 'max', 'report', 'use_laser']:
             setattr(self, field, getattr(args, field))
 
         self.pid = int(args.pid, 16)
@@ -601,6 +628,17 @@ class TestFixture(object):
                 self.block_size = 2048
             else:
                 self.block_size = self.pixels * 2
+    
+    #Executes the required commands for external spectrum acquisition
+    def runExtAcq(self):
+        #get spectrum by pulsing the laser for 50ms; then get the spectrum
+        self.throttle_usb()
+        cmd = APICommand("LASER_ENABLED",                getter=0xE2, setter=0xBE, dataType="Bool",    readLen=1, setRange=(1,1), usesLaser=True, setterDisabled=False, notes="disabled in test because dangerous")
+        self.run(cmd)
+        sleep(0.05)
+        cmd = APICommand("LASER_ENABLED",                getter=0xE2, setter=0xBE, dataType="Bool",    readLen=1, setRange=(0,0), usesLaser=True, setterDisabled=False, notes="disabled in test because dangerous")
+        self.run(cmd)
+        self.getSpectrumExternal()
 
 ################################################################################
 #                                                                              #
@@ -609,38 +647,42 @@ class TestFixture(object):
 ################################################################################
 
 fixture = TestFixture()
-
 if fixture.report:
     fixture.apiReport()
     sys.exit()
 
 if not fixture.enumerate():
-    print "No matching spectrometers found."
+    print("No matching spectrometers found.")
     sys.exit()
 
-if not fixture.simple:
-    fixture.logHeader("Quick test of all commands")
-    fixture.runAll()
-    fixture.resetCounts()
+#if not fixture.simple:
+#    fixture.logHeader("Quick test of all commands")
+#    fixture.runAll()
+#    fixture.resetCounts()
 
 fixture.logHeader("Starting Monte Carlo testing")
 fixture.logInfo("Press Ctrl-C to exit...\n")
 
 try:
+    #The below line was added by Hecox for testing integration-time command. For testing only
+    #cmd = APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(500,500), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
+    #fixture.run(cmd)
     while True:
         if fixture.simple:
             fixture.runSimple()
+        elif fixture.externalAcq:
+            fixture.runExtAcq()
         else:
             for i in range(fixture.count):
                 fixture.runRandom()    
             fixture.getSpectrum()
 
         if fixture.complete():
-            print "%d commands completed successfully" % fixture.commandCount
+            print("%d commands completed successfully" % fixture.commandCount)
             break
 except:
-    print "Caught exception after %d commands sent (%d errors, %d skipped)" % (
-        fixture.commandCount, fixture.errorCount, fixture.skipCount)
+    print("Caught exception after %d commands sent (%d errors, %d skipped)" % (
+        fixture.commandCount, fixture.errorCount, fixture.skipCount))
     traceback.print_exc()
 
-print "Test ended after %.2f seconds" % fixture.duration() 
+print("Test ended after %.2f seconds" % fixture.duration()) 
