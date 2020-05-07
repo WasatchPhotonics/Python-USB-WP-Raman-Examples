@@ -27,13 +27,11 @@ class Fixture(object):
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",           action="store_true", help="debug output")
-        parser.add_argument("--pid",             default="4000",      help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
+        parser.add_argument("--pid",             default="1000",      help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--enable",          type=str,            help="dis/enable laser")
         parser.add_argument("--raman-mode",      type=str,            help="dis/enable raman mode (link firing to integration)")
         parser.add_argument("--raman-delay-ms",  type=int,            help="set laser warm-up delay in Raman Mode (~ms)")
         parser.add_argument("--watchdog-sec",    type=int,            help="set laser watchdog (sec)")
-        parser.add_argument("--startline",       type=int,            help="set startline for binning")
-        parser.add_argument("--stopline",        type=int,            help="set stopline for binning")
         self.args = parser.parse_args()
 
         # convert PID from hex string
@@ -56,13 +54,6 @@ class Fixture(object):
 
         if self.args.raman_mode is not None:
             self.set_raman_mode(self.str2bool(self.args.raman_mode))
-			
-        if self.args.startline is not None:
-            self.set_startline(self.args.startline)
-            self.get_startline()
-
-        if self.args.stopline is not None:
-            self.set_stopline(self.args.stopline)			
 
     def str2bool(self, s):
         return s.lower() in ("true", "yes", "on", "enable", "1")
@@ -90,28 +81,6 @@ class Fixture(object):
 
         print("setting Raman Watchdog %d sec" % sec)
         self.send_cmd(0xff, 0x18, sec)
-		
-    def set_startline(self, linenum):
-        if linenum < 0 or linenum > 0x0436:
-            print("ERROR: choose a line between 0 and 1078")
-            return
-
-        print("setting startline to %d" % linenum)
-        self.send_cmd(0xff, 0x21, linenum)	
-
-    def set_stopline(self, linenum):
-        if linenum < 2 or linenum > 0x0438:
-            print("ERROR: choose a line between 2 and 1080")
-            return
-
-        print("setting stopline to %d" % linenum)
-        self.send_cmd(0xff, 0x23, linenum)	
-
-    def get_startline(self):
-        data = self.get_cmd(0xff, 0x22)
-        print(data)		
-        print("The Startline is %d" % (data[0] + data[1]*256))
-
 
     ############################################################################
     # Utility Methods
