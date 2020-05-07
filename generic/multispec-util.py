@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+# We don't want this to become a copy of everything in Wasatch.PY, but we want to
+# make certain things very easy and debuggable from the command-line
+
 import sys
 import re
 from time import sleep
@@ -20,6 +23,11 @@ EEPROM_FORMAT = 8
 
 # An extensible, stateful "Test Fixture" 
 class Fixture(object):
+
+    ############################################################################
+    # Lifecycle 
+    ############################################################################
+
     def __init__(self):
         self.eeprom_pages = None
         self.subformat = None
@@ -29,36 +37,49 @@ class Fixture(object):
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
+        parser.add_argument("--model",               type=str,            help="desired model")
+        parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         self.args = parser.parse_args()
 
-        # find all supported devices
         self.devices = []
         for pid in [0x1000, 0x2000, 0x4000]:
-            devices = usb.core.find(find_all=True, idVendor=0x24aa, idProduct=pid)
-            for dev in devices:
-                self.debug("found PID 0x%04x" % pid)
-                self.devices.append(dev)
+            if self.args.pid is not None:
+                if pid != int(self.args.pid, 16):
+                    continue
+            self.devices.extend(usb.core.find(find_all=True, idVendor=0x24aa, idProduct=pid))
 
         # is this needed?
         for dev in self.devices:
             self.connect(dev)
 
-        # read eeproms
+        # read configuration
         for dev in self.devices:
             self.read_eeprom(dev)
+            dev.fw_version = self.get_firmware_version(dev)
+            dev.fpga_version = self.get_fpga_version(dev)
 
         # apply filters
-        if self.args.serial_number is not None:
-            filtered = []
-            for dev in self.devices:
-                if dev.eeprom["serial_number"] == self.args.serial_number:
-                    filtered.append(dev)
-                else:
-                    self.debug("ignoring %s" % dev.eeprom["serial_number"])
-            self.devices = filtered
+        self.filter_by_serial()
+        self.filter_by_model()
 
         if len(self.devices) == 0:
             print("No spectrometers found")
+
+    def filter_by_serial(self):
+        if self.args.serial_number is not None:
+            filtered = []
+            for dev in self.devices:
+                if dev.eeprom["serial_number"].lower() == self.args.serial_number.lower():
+                    filtered.append(dev)
+            self.devices = filtered
+
+    def filter_by_model(self):
+        if self.args.model is not None:
+            filtered = []
+            for dev in self.devices:
+                if dev.eeprom["model"].lower() == self.args.model.lower():
+                    filtered.append(dev)
+            self.devices = filtered
 
     def connect(self, dev):
         dev.set_configuration(1)
@@ -66,29 +87,57 @@ class Fixture(object):
         self.debug("claimed device")
 
     def read_eeprom(self, dev):
-        buffers = []
-        for page in range(8):
-            buf = self.get_cmd(dev, 0xff, 0x01, page)
-            buffers.append(buf)
-        dev.buffers = buffers
+        dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
 
-        # parse a few handy fields
+        # parse key fields (extend as needed)
         dev.eeprom = {}
+        dev.eeprom["format"]        = self.unpack(dev, (0, 63,  1), "B")
         dev.eeprom["model"]         = self.unpack(dev, (0,  0, 16), "s")
         dev.eeprom["serial_number"] = self.unpack(dev, (0, 16, 16), "s")
+        dev.eeprom["pixels"]        = self.unpack(dev, (2, 25,  2), "H" if dev.eeprom["format"] >= 4 else "h")
+
+    ############################################################################
+    # Commands
+    ############################################################################
 
     def run(self):
         if self.args.list:
-            for dev in self.devices:
-                print("0x%04x %-32s %s" % (dev.idProduct, dev.eeprom["model"], dev.eeprom["serial_number"]))
+            self.list()
 
         if self.args.set_dfu:
             for dev in self.devices:
                 self.set_dfu(dev)
 
+    def list(self):
+        print("PID\tModel\tSerial\tFormat\tPixels\tFW\tFPGA")
+        for dev in self.devices:
+            print("0x%04x\t%s\t%s\t%d\t%d\t%s\t%s" % (
+                dev.idProduct, 
+                dev.eeprom["model"], 
+                dev.eeprom["serial_number"],
+                dev.eeprom["format"],
+                dev.eeprom["pixels"],
+                dev.fw_version,
+                dev.fpga_version))
+
     ############################################################################
     # opcodes
     ############################################################################
+
+    def get_firmware_version(self, dev):
+        result = self.get_cmd(dev, 0xc0)
+        if result is not None and len(result) >= 4:
+            return "%d.%d.%d.%d" % (result[3], result[2], result[1], result[0]) 
+
+    def get_fpga_version(self, dev):
+        s = ""
+        result = self.get_cmd(dev, 0xb4)
+        if result is not None:
+            for i in range(len(result)):
+                c = result[i]
+                if 0x20 <= c < 0x7f:
+                    s += chr(c)
+        return s
 
     def set_dfu(self, dev):
         self.debug("setting DFU on %s" % dev.eeprom["serial_number"])
