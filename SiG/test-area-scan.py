@@ -26,7 +26,7 @@ dev.ctrl_transfer(HOST_TO_DEVICE, 0xe9, 1, 0, Z, TIMEOUT_MS)
 
 print("Looping over 20 rows")
 spectra_to_read = 20
-for i in range(spectra_to_read):
+for count in range(spectra_to_read):
     # send SW trigger
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, Z, TIMEOUT_MS)
 
@@ -37,4 +37,4 @@ for i in range(spectra_to_read):
     for i in range(0, len(data), 2):
         spectrum.append(data[i] | (data[i+1] << 8))
 
-    print("Spectrum %3d/%3d: %s ..." % (i + 1, spectra_to_read, spectrum[:10]))
+    print("Spectrum %3d/%3d: %s ..." % (count + 1, spectra_to_read, spectrum[:10]))
