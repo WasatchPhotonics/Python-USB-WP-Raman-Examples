@@ -22,7 +22,7 @@ print("Set integration time 10ms")
 dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, integration_time_ms & 0xffff, 0, Z, TIMEOUT_MS)
 
 print("Enable area scan")
-dev.ctrl_transfer(HOST_TO_DEVICE, 0xe9, 1, 0, Z, TIMEOUT_MS)
+dev.ctrl_transfer(HOST_TO_DEVICE, 0xeb, 1, 0, Z, TIMEOUT_MS)
 
 print("Looping over 20 rows")
 spectra_to_read = 20
