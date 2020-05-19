@@ -11,7 +11,7 @@ BUFFER_SIZE = 8
 TIMEOUT_MS = 1000
 ZZ = [0] * BUFFER_SIZE
 
-MAX_PAGES = 6
+MAX_PAGES = 8
 PAGE_SIZE = 64
 
 class Fixture(object):
@@ -32,6 +32,8 @@ class Fixture(object):
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_buf(self, cmd, value=0, index=0, length=64):
+        print("ctrl_transfer: dir %02x, cmd %04x, value %04x, index %04x, len %02x, timeout %d" % (
+            DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
         return self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
 
     def read_eeprom(self):
