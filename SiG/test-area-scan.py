@@ -18,6 +18,11 @@ TIMEOUT_MS = 1000
 pixels = 1952
 integration_time_ms = 10
 
+# report firmware revisions
+fw = ".".join(reversed([str(x) for x in dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 64)]))
+fpga = "".join([chr(x) for x in dev.ctrl_transfer(DEVICE_TO_HOST, 0xb4, 0, 0, 64)])
+print("FW %s FPGA %s" % (fw, fpga))
+
 print("Set integration time 10ms")
 dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, integration_time_ms & 0xffff, 0, Z, TIMEOUT_MS)
 
