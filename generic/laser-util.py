@@ -92,6 +92,12 @@ class Fixture(object):
     # opcodes
     ############################################################################
 
+    def get_firmware_version(self):
+        return ".".join(reversed([str(x) for x in self.get_cmd(0xc0)]))
+
+    def get_fpga_version(self):
+        return "".join([chr(x) for x in self.get_cmd(0xb4)])
+
     ### Acquire ###############################################################
 
     def acquire(self):
@@ -179,7 +185,9 @@ class Fixture(object):
     def get_watchdog_sec(self):
         if not self.is_sig():
             return
-        return get_cmd(0xff, 0x17)
+        data = self.get_cmd(0xff, 0x17)
+        #return data[0] + (data[] << 8)
+        return data
 
     def set_watchdog_sec(self, sec):
         if not self.is_sig():
@@ -227,12 +235,32 @@ class Fixture(object):
         print("setting stopline to %d" % linenum)
         self.send_cmd(0xff, 0x23, linenum)	
 
+    ### Battery ################################################################
+
+    def get_battery_state(self):
+        if not self.is_sig():
+            return
+
+        raw = self.get_cmd(0xff, 0x13)
+
+        charging = 0 != raw[2]
+        perc_lsb = raw[0]
+        perc_msb = raw[1]
+
+        perc = perc_msb + (1.0 * perc_lsb / 256.0)
+
+        return "%.2f%% (%s)" % (perc, "charging" if charging else "discharging")
+
     def dump(self, label):
         print("%s:" % label)
+        print("    Firmware:            %s" % self.get_firmware_version())
+        print("    FPGA:                %s" % self.get_fpga_version())
+        print("    Battery State:       %s" % self.get_battery_state())
         print("    Laser enabled:       %s" % self.get_enable())
         print("    Selected ADC:        %s" % self.get_selected_adc())
         print("    Integration Time ms: %s" % self.get_integration_time_ms())
         print("    Modulation enabled:  %s" % self.get_modulation_enable())
+        print("    Watchdog sec:        %s" % self.get_watchdog_sec())
         print("    Raman Mode:          %s" % self.get_raman_mode())
         print("    Raman Delay ms:      %s" % self.get_raman_delay_ms())
         print("    Start line:          %s" % self.get_startline())
@@ -242,8 +270,11 @@ class Fixture(object):
     # Utility Methods
     ############################################################################
 
+    def is_arm(self):
+        return self.pid == 0x4000 
+
     def is_sig(self):
-        return self.pid == "4000" # close enough for now
+        return self.is_arm() # close enough
 
     def str2bool(self, s):
         return s.lower() in ("true", "yes", "on", "enable", "1")
@@ -254,7 +285,7 @@ class Fixture(object):
 
     def send_cmd(self, cmd, value, index=0, buf=None):
         if buf is None:
-            if self.pid == 0x4000:
+            if self.is_arm():
                 buf = [0] * 8
             else:
                 buf = ""
