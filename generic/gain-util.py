@@ -29,6 +29,8 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",          action="store_true",    help="debug output")
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
+        parser.add_argument("--gain",           type=float,             help="override value in EEPROM (does not write EEPROM)")
+        parser.add_argument("--offset",         type=int,               help="override value in EEPROM (does not write EEPROM)")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--push-gain",      action="store_true",    help="send the EEPROM's gain to the FPGA")
         parser.add_argument("--push-offset",    action="store_true",    help="send the EEPROM's offset to the FPGA")
@@ -41,12 +43,19 @@ class Fixture(object):
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def run(self):
+        # load defaults from spectrometer
         self.read_eeprom()
         self.parse_eeprom()
 
+        # apply overrides if provided
+        if self.args.gain is not None:
+            self.detector_gain = self.args.gain
+        if self.args.offset is not None:
+            self.detector_offset = self.args.offset
+
+        # send downstream to FPGA
         if self.args.push_gain:
             self.push_gain()
-
         if self.args.push_offset:
             self.push_offset()
 
