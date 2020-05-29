@@ -277,8 +277,9 @@ class TestFixture(object):
         self.cmds = {}
         self.lastValues = {}
 
-        self.simpleCommands = ('INTEGRATION_TIME', 'CCD_OFFSET', 'CCD_GAIN', 'CCD_TEC_ENABLE')
-
+        #self.simpleCommands = ('INTEGRATION_TIME', 'CCD_OFFSET', 'CCD_GAIN', 'CCD_TEC_ENABLE') #Hecox: original
+        self.simpleCommands = ('INTEGRATION_TIME') #Hecox: only run integration time in simple mode for now
+        
         self.processArgs()
         self.loadCommands()
         self.resetCounts()
@@ -402,11 +403,11 @@ class TestFixture(object):
 
     def getSpectrum(self):
         buf = [0] * 8
-
+        self.pixels = 2048 #Hecox: temporary for FX2!!
         self.throttle_usb()
         self.dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, buf, self.timeout_ms)
         self.countCommand()
-
+        sleep(0.001) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
         self.countCommand()
         if self.pixels == 2048:
@@ -417,10 +418,11 @@ class TestFixture(object):
 
         if len(spectrum) != self.pixels:
             self.logError("getSpectrum: read %d pixels (expected %d)" % (len(spectrum), self.pixels))
+            print(spectrum)
             return False
 
         self.logInfo()
-        self.logInfo("ACQUIRE_CCD: read %d pixels (%s)" % (len(spectrum), spectrum[:10]))
+        self.logInfo("ACQUIRE_CCD: read %d pixels (%s)" % (len(spectrum), spectrum[0:10]))
         #self.logInfo("ACQUIRE_CCD: nothing to read")#Hecox temp log statement
         self.logInfo()
 
@@ -668,15 +670,21 @@ try:
     #cmd = APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(500,500), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
     #fixture.run(cmd)
     while True:
+        break
+        fixture.run(APICommand("CCD_SENSING_THRESHOLD",        getter=0xD1, setter=0xD0, dataType="Uint16",  readLen=2, setRange=(0, 5000), getLittleEndian=True))
+    while True:
         if fixture.simple:
+            #cmd = APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(10, 1000), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
+            #fixture.run(cmd)
             fixture.runSimple()
+            fixture.getSpectrum()
         elif fixture.externalAcq:
             fixture.runExtAcq()
         else:
-            for i in range(fixture.count):
-                fixture.runRandom()    
+            #for i in range(fixture.count):
+                #fixture.runRandom()    
             fixture.getSpectrum()
-
+            
         if fixture.complete():
             print("%d commands completed successfully" % fixture.commandCount)
             break
