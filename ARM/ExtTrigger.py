@@ -66,7 +66,7 @@ def getFPGARev():
     return "".join(chr(x) for x in Get_Value(0xb4, 7, raw=True))
 
 def display(msg):
-    print "%s: %s" % (datetime.datetime.now(), msg)
+    print("%s: %s" % (datetime.datetime.now(), msg))
 
 ################################################################################
 # main()
@@ -82,16 +82,16 @@ args.timeout_ms = args.timeout_sec * 1000
 # claim USB device
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if not dev:
-    print "No {0} spectrometers found." % PID
+    print("No {0} spectrometers found." % PID)
     sys.exit(0)
 
 # initialize test
-print "uC Revision:      ", getFirmwareRev()
-print "FPGA Revision:    ", getFPGARev()
-print "Integration Time: ", Test_Set(0xb2, 0xbf, args.integration_time_ms, 6) 
+print("uC Revision:      ", getFirmwareRev())
+print("FPGA Revision:    ", getFPGARev())
+print("Integration Time: ", Test_Set(0xb2, 0xbf, args.integration_time_ms, 6))
 
 # loop over trigger signals
-print "\nstart sending incoming trigger signals...\n"
+print("\nstart sending incoming trigger signals...\n")
 
 frames = 0
 while True:
