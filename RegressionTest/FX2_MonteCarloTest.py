@@ -426,7 +426,7 @@ class TestFixture(object):
         #self.logInfo("ACQUIRE_CCD: nothing to read")#Hecox temp log statement
         index = 0
         for pixel_index in spectrum:
-            if pixel_index == 655535:
+            if pixel_index == 65535:
                 self.logInfo("First pixel at offset of %d pixels" % (index))
             index += 1
         self.logInfo()
