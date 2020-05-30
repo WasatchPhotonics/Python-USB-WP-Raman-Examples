@@ -278,7 +278,7 @@ class TestFixture(object):
         self.lastValues = {}
 
         #self.simpleCommands = ('INTEGRATION_TIME', 'CCD_OFFSET', 'CCD_GAIN', 'CCD_TEC_ENABLE') #Hecox: original
-        self.simpleCommands = ('INTEGRATION_TIME') #Hecox: only run integration time in simple mode for now
+        self.simpleCommands = ('INTEGRATION_TIME',) #Hecox: only run integration time in simple mode for now
         
         self.processArgs()
         self.loadCommands()
@@ -406,18 +406,26 @@ class TestFixture(object):
         self.pixels = 2048 #Hecox: temporary for FX2!!
         self.throttle_usb()
         self.dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, buf, self.timeout_ms)
+        self.logInfo("Sent acquire command")
+        #sleep(2) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         self.countCommand()
-        sleep(0.001) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
+        self.logInfo("EP2 readout successful")
+        #sleep(0.5) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         self.countCommand()
         if self.pixels == 2048:
             data.extend(self.dev.read(0x86, self.block_size, timeout=self.timeout_ms))
+            self.logInfo("EP6 readout successful")
+            #sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
+            #data.extend(self.dev.read(0x86, 1024, timeout=self.timeout_ms))
+            #self.logInfo("Part 2 of EP6 readout successful")
             self.countCommand()
 
         spectrum = [i + 256 * j for i, j in zip(data[::2], data[1::2])] # LSB-MSB
 
         if len(spectrum) != self.pixels:
             self.logError("getSpectrum: read %d pixels (expected %d)" % (len(spectrum), self.pixels))
+            #temp = spectrum[65535]
             print(spectrum)
             return False
 
@@ -426,8 +434,14 @@ class TestFixture(object):
         #self.logInfo("ACQUIRE_CCD: nothing to read")#Hecox temp log statement
         index = 0
         for pixel_index in spectrum:
-            if pixel_index == 655535:
+            #temp = spectrum[65535]
+            if pixel_index == 65535:
                 self.logInfo("First pixel at offset of %d pixels" % (index))
+                if index != 0:
+                    self.logInfo("Exiting")
+                    #cmd = APICommand("RESET_FPGA", setter=0xB5, dataType="Bool",readBack=1,readLen=1, notes="NA")
+                    #fixture.run(cmd)
+                    sys.exit()
             index += 1
         self.logInfo()
 
@@ -513,6 +527,7 @@ class TestFixture(object):
 
         self.throttle_usb()
         result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd.getter, wValue, wIndex, wLength, self.timeout_ms)
+        self.logInfo("Sent command")
         self.countCommand()
 
         (raw, rawDisplay, stringDisplay) = cmd.parseResult(result)
