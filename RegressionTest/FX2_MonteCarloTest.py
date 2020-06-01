@@ -409,14 +409,23 @@ class TestFixture(object):
         self.logInfo("Sent acquire command")
         #sleep(2) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         self.countCommand()
-        data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
+        data = []
+        try:
+            data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
+        except:
+            self.logError("Failed to read EP2")
+            sys.exit()
         self.logInfo("EP2 readout successful")
-        sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
+        #sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         self.countCommand()
         if self.pixels == 2048:
-            data.extend(self.dev.read(0x86, self.block_size, timeout=self.timeout_ms))
+            try:
+                data.extend(self.dev.read(0x86, self.block_size, timeout=self.timeout_ms))
+            except:
+                self.logInfo("Failed to read EP6")
+                sys.exit()
             self.logInfo("Part 1 of EP6 readout successful")
-            sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
+            #sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
             #data.extend(self.dev.read(0x86, 1024, timeout=self.timeout_ms))
             self.logInfo("Part 2 of EP6 readout successful")
             self.countCommand()
