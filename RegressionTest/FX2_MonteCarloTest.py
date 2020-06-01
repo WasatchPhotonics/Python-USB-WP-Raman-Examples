@@ -411,14 +411,14 @@ class TestFixture(object):
         self.countCommand()
         data = self.dev.read(0x82, self.block_size, timeout=self.timeout_ms)
         self.logInfo("EP2 readout successful")
-        #sleep(0.5) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
+        sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
         self.countCommand()
         if self.pixels == 2048:
             data.extend(self.dev.read(0x86, self.block_size, timeout=self.timeout_ms))
-            self.logInfo("EP6 readout successful")
-            #sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
+            self.logInfo("Part 1 of EP6 readout successful")
+            sleep(0.25) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
             #data.extend(self.dev.read(0x86, 1024, timeout=self.timeout_ms))
-            #self.logInfo("Part 2 of EP6 readout successful")
+            self.logInfo("Part 2 of EP6 readout successful")
             self.countCommand()
 
         spectrum = [i + 256 * j for i, j in zip(data[::2], data[1::2])] # LSB-MSB
@@ -427,6 +427,7 @@ class TestFixture(object):
             self.logError("getSpectrum: read %d pixels (expected %d)" % (len(spectrum), self.pixels))
             #temp = spectrum[65535]
             print(spectrum)
+            sys.exit()
             return False
 
         self.logInfo()
@@ -443,6 +444,40 @@ class TestFixture(object):
                     #fixture.run(cmd)
                     sys.exit()
             index += 1
+        self.logInfo()
+
+
+        return True
+        
+    def clearBuffers(self):
+        buf = [0] * 8
+        self.pixels = 2048 #Hecox: temporary for FX2!!
+        self.throttle_usb()
+        self.dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, buf, self.timeout_ms)
+        self.logInfo("Sent acquire command")
+        #sleep(2) #Hecox: introduce a slight delay to test behavior of EP when it's not immediately read
+        self.countCommand()
+        try:
+            data = self.dev.read(0x82, self.block_size, timeout=100)
+            spectrum = [i + 256 * j for i, j in zip(data[::2], data[1::2])] # LSB-MSB
+            self.logInfo("cleared EP2: read %d pixels (expected %d)" % (len(spectrum), self.pixels))
+        except:
+            self.logInfo("No data found on EP2 while clearing buffer")
+        self.logInfo("EP2 readout successful")
+        self.countCommand()
+        if self.pixels == 2048:
+            try:
+                data = self.dev.read(0x86, self.block_size, timeout=100)
+                spectrum = [i + 256 * j for i, j in zip(data[::2], data[1::2])] # LSB-MSB
+                self.logInfo("cleared EP6: read %d pixels (expected %d)" % (len(spectrum), self.pixels))
+            except:
+                self.logInfo("No data found on EP6 while clearing buffer")
+            #data.extend(self.dev.read(0x86, 1024, timeout=self.timeout_ms))
+            self.countCommand()
+
+        self.logInfo()
+        self.logInfo("Cleared buffers")
+        #self.logInfo("ACQUIRE_CCD: nothing to read")#Hecox temp log statement
         self.logInfo()
 
 
@@ -690,12 +725,17 @@ try:
     #The below line was added by Hecox for testing integration-time command. For testing only
     #cmd = APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(500,500), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
     #fixture.run(cmd)
+    fixture.clearBuffers() #clear EP buffers only once per execution
+    cmd = APICommand("CCD_TEMP",                     getter=0xD7,              dataType="Uint16",  readLen=2, notes="Raw 12-bit ADC output from the TEC")
+    fixture.run(cmd)
+    #cmd = APICommand("RESET_FPGA", setter=0xB5, dataType="Bool",readBack=1,readLen=1, notes="NA")
+    #fixture.run(cmd)
     while True:
         break
         fixture.run(APICommand("CCD_SENSING_THRESHOLD",        getter=0xD1, setter=0xD0, dataType="Uint16",  readLen=2, setRange=(0, 5000), getLittleEndian=True))
     while True:
         if fixture.simple:
-            #cmd = APICommand("INTEGRATION_TIME",             getter=0xBF, setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(10, 1000), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
+            #cmd = APICommand("INTEGRATION_TIME",             setter=0xB2, dataType="Uint24",  readLen=3, getLittleEndian=True, setRange=(100, 100), readBack=6, notes="Integration time in ms or 10ms (see OPT_INT_TIME_RES) sent as 32-bit word: LSW as wValue, MSW as wIndex (big-endian within each)")
             #fixture.run(cmd)
             fixture.runSimple()
             fixture.getSpectrum()
