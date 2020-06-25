@@ -35,6 +35,8 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
+        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
+        parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
         parser.add_argument("--model",               type=str,            help="desired model")
@@ -101,12 +103,25 @@ class Fixture(object):
     ############################################################################
 
     def run(self):
+        if len(self.devices) > 0:
+            dev = self.devices[0]
+
         if self.args.list:
             self.list()
 
         if self.args.set_dfu:
             for dev in self.devices:
                 self.set_dfu(dev)
+            return
+
+        if self.args.integration_time_ms is not None:
+            for dev in self.devices:
+                self.set_integration_time_ms(dev, self.args.integration_time_ms)
+
+        for i in range(self.args.spectra):
+            for dev in self.devices:
+                spectrum = self.get_spectrum(dev)
+                print("Spectrum %3d/%3d %s ..." % (i, self.args.spectra, spectrum[:10]))
 
     def list(self):
         print("PID\tModel\tSerial\tFormat\tPixels\tFW\tFPGA")
@@ -165,7 +180,7 @@ class Fixture(object):
 
     def set_integration_time_ms(self, dev, n):
         if n < 1 or n > 0xffff:
-            print("ERROR: integrationTimeMS requires positive uint16")
+            print("ERROR: script only supports positive uint16 integration time")
             return
 
         print("setting integrationTimeMS to %d" % n)
@@ -195,9 +210,13 @@ class Fixture(object):
         print("setting Raman Watchdog %d sec" % sec)
         self.send_cmd(dev, 0xff, 0x18, sec)
 
-    def acquire(self, dev):
-        print("performing acquire")
+    def get_spectrum(self, dev):
         self.send_cmd(dev, 0xad, 1)
+        data = dev.read(0x82, dev.eeprom["pixels"] * 2)
+        spectrum = []
+        for i in range(0, len(data), 2):
+            spectrum.append(data[i] | (data[i+1] << 8))
+        return spectrum
 
     ############################################################################
     # Utility Methods
