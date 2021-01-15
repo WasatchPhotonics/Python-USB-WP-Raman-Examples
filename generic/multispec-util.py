@@ -6,6 +6,7 @@
 import sys
 import re
 from time import sleep
+from datetime import datetime
 
 import traceback
 import usb.core
@@ -215,7 +216,7 @@ class Fixture(object):
                 spectrum = self.get_spectrum(dev)
                 print("Spectrum %3d/%3d %s ..." % (i, self.args.spectra, spectrum[:10]))
                 if outfile is not None:
-                    outfile.write("%s\n" % ", ".join([str(x) for x in spectrum]))
+                    outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
         if outfile is not None:
             outfile.close()
 
