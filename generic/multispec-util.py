@@ -36,7 +36,7 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
-        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
+        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
@@ -221,8 +221,9 @@ class Fixture(object):
             outfile.close()
 
     def get_spectrum(self, dev):
+        timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(dev, 0xad, 1)
-        data = dev.read(0x82, dev.eeprom["pixels"] * 2)
+        data = dev.read(0x82, dev.eeprom["pixels"] * 2, timeout=timeout_ms)
         spectrum = []
         for i in range(0, len(data), 2):
             spectrum.append(data[i] | (data[i+1] << 8))
