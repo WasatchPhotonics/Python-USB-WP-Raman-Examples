@@ -26,19 +26,13 @@ class Fixture(object):
         self.dev = None
 
         parser = argparse.ArgumentParser()
-        parser.add_argument("--acquire-after",       action="store_true", help="acquire after")
-        parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
         parser.add_argument("--debug",               action="store_true", help="debug output")
-        parser.add_argument("--enable",              type=str,            help="dis/enable laser (bool)", default="off")
-        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
-        parser.add_argument("--mod-enable",          type=str,            help="dis/enable laser modulation")
+        parser.add_argument("--enable",              action="store_true", help="fire laser")
+        parser.add_argument("--max-ms",              type=int,            help="firing time (ms) (default 1000)")
+        parser.add_argument("--mod-enable",          action="store_true", help="enable modulation")
+        parser.add_argument("--mod-period-us",       type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
+        parser.add_argument("--mod-width-us",        type=int,            help="laser modulation pulse width (us) (default 100)", default=100)
         parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
-        parser.add_argument("--raman-delay-ms",      type=int,            help="set laser warm-up delay in Raman Mode (~ms)")
-        parser.add_argument("--raman-mode",          type=str,            help="dis/enable raman mode (links firing to integration) (bool)")
-        parser.add_argument("--selected-adc",        type=int,            help="set selected adc")
-        parser.add_argument("--startline",           type=int,            help="set startline for binning (not laser but hey)")
-        parser.add_argument("--stopline",            type=int,            help="set stopline for binning (not laser)")
-        parser.add_argument("--watchdog-sec",        type=int,            help="set laser watchdog (sec)")
 
         self.args = parser.parse_args()
 
@@ -51,220 +45,52 @@ class Fixture(object):
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def run(self):
-        self.dump("before")
 
-        if self.args.acquire_before:
-            self.acquire()
-            
-        if self.args.mod_enable is not None:
-            self.set_modulation_enable(self.str2bool(self.args.mod_enable))
+        # handle disable operation first
+        if not self.args.enable:
+            self.set_enable(False)
+            return
 
-        if self.args.watchdog_sec is not None:
-            self.set_watchdog_sec(self.args.watchdog_sec)
+        # apparently we're to fire the laser
 
-        if self.args.integration_time_ms is not None:
-            self.set_integration_time_ms(self.args.integration_time_ms)
+        if self.args.mod_enable:
+            self.set_modulation_params()
 
-        if self.args.selected_adc is not None:
-            self.set_selected_adc(self.args.selected_adc)
+        self.set_enable(True)
 
-        if self.args.raman_delay_ms is not None:
-            self.set_raman_delay_ms(self.args.raman_delay_ms)
+        print("sleeping %d ms..." % self.args.max_ms)
+        sleep(self.args.max_ms)
 
-        if self.args.raman_mode is not None:
-            self.set_raman_mode(self.str2bool(self.args.raman_mode))
-			
-        if self.args.enable is not None:
-            self.set_enable(self.str2bool(self.args.enable))
-
-        if self.args.startline is not None:
-            self.set_startline(self.args.startline)
-
-        if self.args.stopline is not None:
-            self.set_stopline(self.args.stopline)			
-
-        if self.args.acquire_after:
-            self.acquire()
-
-        self.dump("after")
+        self.set_enable(False)
 
     ############################################################################
     # opcodes
     ############################################################################
 
-    def get_firmware_version(self):
-        return ".".join(reversed([str(x) for x in self.get_cmd(0xc0)]))
-
-    def get_fpga_version(self):
-        return "".join([chr(x) for x in self.get_cmd(0xb4)])
-
-    ### Acquire ###############################################################
-
-    def acquire(self):
-        print("performing acquire")
-        self.send_cmd(0xad, 1)
-
-    ### Enabled ###############################################################
-		
-    def get_enable(self):
-        return 0 != self.get_cmd(0xe2)[0]
-
     def set_enable(self, flag):
-        print("setting laserEnable to %s" % ("on" if flag else "off"))
+        print("setting LASER_MOD_ENABLE %s" % ("on" if flag else "off"))
         self.send_cmd(0xbe, 1 if flag else 0)
 
-    ### Selected ADC ##########################################################
-
-    def get_selected_adc(self):
-        return self.get_cmd(0xee)[0]
-
-    def set_selected_adc(self, n):
-        if not n in (0, 1):
-            print("ERROR: selectedADC requires 0 or 1")
+    def set_modulation_params(self):
+        if self.args.mod_period_us > 0xffff or \
+           self.args.mod_width_us > 0xffff:
+            print("error: lame script doesn't support full 40-bit 5-byte args")
             return
 
-        print("setting selectedADC to %d" % n)
-        self.send_cmd(0xed, n)
-
-    ### Integration Time ######################################################
-
-    def get_integration_time_ms(self):
-        data = self.get_cmd(0xbf)
-        return data[0] + (data[1] << 8) + (data[2] << 16)
-
-    def set_integration_time_ms(self, n):
-        # don't worry about 24-bit values
-        if n < 1 or n > 0xffff:
-            print("ERROR: integrationTimeMS requires positive uint16")
+        # should we modulate after all?
+        if self.args.mod_period_us <= self.args.mod_width_us:
+            print("disabling modulation because period %d <= width %d" % (self.args.mod_period_us, self.args.mod_width_us))
+            self.send_cmd(0xbd, 0)
             return
 
-        print("setting integrationTimeMS to %d" % n)
-        self.send_cmd(0xb2, n)
+        print("setting LASER_MOD_PULSE_PERIOD %d" % self.args.mod_period_us)
+        self.send_cmd(0xc7, self.args.mod_period_us, buf=[0]*8)
 
-    ### Modulation Enable #####################################################
+        print("setting LASER_MOD_PULSE_WIDTH %d" % self.args.mod_width_us)
+        self.send_cmd(0xdb, self.args.mod_width_us, buf=[0]*8)
 
-    def get_modulation_enable(self):
-        return self.get_cmd(0xe3)[0]
-
-    def set_modulation_enable(self, flag):
-        print("setting laserModulationEnable to %s" % ("on" if flag else "off"))
-        self.send_cmd(0xbd, 1 if flag else 0)
-
-    ### Raman Mode ############################################################
-
-    def get_raman_mode(self):
-        if not self.is_sig():
-            return
-        return self.get_cmd(0xff, 0x15)[0]
-
-    def set_raman_mode(self, flag):
-        if not self.is_sig():
-            return
-        print("setting Raman Mode %s" % ("on" if flag else "off"))
-        self.send_cmd(0xff, 0x16, 1 if flag else 0)
-
-    ### Raman Delay ###########################################################
-
-    def get_raman_delay_ms(self):
-        if not self.is_sig():
-            return
-        return self.get_cmd(0xff, 0x19)[0]
-
-    def set_raman_delay_ms(self, ms):
-        if not self.is_sig():
-            return
-        if ms < 0 or ms > 0xffff:
-            print("ERROR: raman delay requires uint16")
-            return
-
-        print("setting Raman Delay %d ms" % ms)
-        self.send_cmd(0xff, 0x20, ms)
-
-    ### Watchdog ###############################################################
-
-    def get_watchdog_sec(self):
-        if not self.is_sig():
-            return
-        data = self.get_cmd(0xff, 0x17)
-        #return data[0] + (data[] << 8)
-        return data
-
-    def set_watchdog_sec(self, sec):
-        if not self.is_sig():
-            return
-        if sec < 0 or sec > 0xffff:
-            print("ERROR: watchdog requires uint16")
-            return
-
-        print("setting Raman Watchdog %d sec" % sec)
-        self.send_cmd(0xff, 0x18, sec)
-
-    ### Start Line #############################################################
-
-    def get_startline(self):
-        if not self.is_sig():
-            return
-        data = self.get_cmd(0xff, 0x22)
-        return data[0] + (data[1] << 8)
-
-    def set_startline(self, linenum):
-        if not self.is_sig():
-            return
-        if linenum < 0 or linenum > 0x0436:
-            print("ERROR: choose a line between 0 and 1078")
-            return
-
-        print("setting startline to %d" % linenum)
-        self.send_cmd(0xff, 0x21, linenum)	
-
-    ### Stop Line ##############################################################
-
-    def get_stopline(self):
-        if not self.is_sig():
-            return
-        data = self.get_cmd(0xff, 0x24)
-        return data[0] + (data[1] << 8)
-
-    def set_stopline(self, linenum):
-        if not self.is_sig():
-            return
-        if linenum < 2 or linenum > 0x0438:
-            print("ERROR: choose a line between 2 and 1080")
-            return
-
-        print("setting stopline to %d" % linenum)
-        self.send_cmd(0xff, 0x23, linenum)	
-
-    ### Battery ################################################################
-
-    def get_battery_state(self):
-        if not self.is_sig():
-            return
-
-        raw = self.get_cmd(0xff, 0x13)
-
-        charging = 0 != raw[2]
-        perc_lsb = raw[0]
-        perc_msb = raw[1]
-
-        perc = perc_msb + (1.0 * perc_lsb / 256.0)
-
-        return "%.2f%% (%s)" % (perc, "charging" if charging else "discharging")
-
-    def dump(self, label):
-        print("%s:" % label)
-        print("    Firmware:            %s" % self.get_firmware_version())
-        print("    FPGA:                %s" % self.get_fpga_version())
-        print("    Battery State:       %s" % self.get_battery_state())
-        print("    Laser enabled:       %s" % self.get_enable())
-        print("    Selected ADC:        %s" % self.get_selected_adc())
-        print("    Integration Time ms: %s" % self.get_integration_time_ms())
-        print("    Modulation enabled:  %s" % self.get_modulation_enable())
-        print("    Watchdog sec:        %s" % self.get_watchdog_sec())
-        print("    Raman Mode:          %s" % self.get_raman_mode())
-        print("    Raman Delay ms:      %s" % self.get_raman_delay_ms())
-        print("    Start line:          %s" % self.get_startline())
-        print("    Stop line:           %s" % self.get_stopline())
+        print("setting LASER_MOD_ENABLE 1")
+        self.send_cmd(0xbd, 1)
 
     ############################################################################
     # Utility Methods
@@ -288,7 +114,7 @@ class Fixture(object):
             if self.is_arm():
                 buf = [0] * 8
             else:
-                buf = ""
+                buf = 0
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
