@@ -44,7 +44,7 @@ def get_cmd(dev, bRequest, wValue=0, wIndex=0, wLength=64, msb_len=None, lsb_len
 # Uses the "getter" opcode in bRequest to determine that the specified big- or 
 # little-endian value (per msb_len or lsb_len) matches "expected".
 def verify_state(dev, bRequest, wValue=0, wIndex=0, wLength=64, msb_len=None, lsb_len=None, expected=0, label="unknown"):
-    print("Verifying %s state is %d" % (label, expected))
+    print("\nVerifying %s state is %d" % (label, expected))
     if msb_len is not None:
         state = get_cmd(dev, bRequest, msb_len=msb_len)
     else:
