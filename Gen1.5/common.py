@@ -53,5 +53,5 @@ def verify_state(dev, bRequest, wValue=0, wIndex=0, wLength=64, msb_len=None, ls
     if state == expected:
         print("Verified %s state (matched expected %d)" % (label, expected))
     else:
-        print("ERROR: unexpected %s state: %d (expected %d)" % (label, state, expected))
+        print("ERROR: unexpected %s state: %d (raw 0x%010x) (expected %d)" % (label, state, state, expected))
         sys.exit(1)

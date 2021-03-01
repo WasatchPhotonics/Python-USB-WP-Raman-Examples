@@ -11,8 +11,8 @@ if not dev:
     print("No spectrometers found")
     sys.exit()
 
-SET_CMD = 0x33
-GET_CMD = 0x32
+SET_CMD = 0x32
+GET_CMD = 0x33
 SLEEP_SEC = 3
 
 print("Enabling lamp for %d sec..." % SLEEP_SEC)
