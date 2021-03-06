@@ -104,7 +104,7 @@ class Fixture(object):
                     if "wasatch.FeatureIdentificationDevice" in line and "GET_MODEL_CONFIG" in line:
                         # 2020-03-19 12:05:41,726 Process-2  wasatch.FeatureIdentificationDevice DEBUG    GET_MODEL_CONFIG(0): get_code: request 0xff value 0x0001 index 0x0000 = [array('B', [87, 80, 45, 55, 56, 53, 45, 88, 45, 83, 82, 45, 83, 0, 0, 0, 87, 80, 45, 48, 48, 53, 54, 49, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 1, 0, 0, 17, 3, 50, 0, 2, 0, 10, 0, 0, 51, 51, 243, 63, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 6])]
                         filetype = "ENLIGHTEN_LOG"
-                    elif "Page 0: array('B', [" in line:
+                    elif re.match(r"Page\s+\d+:\s*array\('B',\s*\[", line):
                         # Page 0: array('B', [83, 105, 71, 45, 55, 56, 53, 0, 0, 0, 0, 0, 0, 0, 0, 0, 87, 80, 45, 48, 48, 54, 52, 54, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 0, 1, 1, 2, 0, 25, 0, 15, 0, 15, 0, 0, 0, 0, 0, 65, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 9])
                         filetype = "eeprom-util"
                     else:
@@ -123,7 +123,7 @@ class Fixture(object):
                     values = [ int(v.strip()) for v in delimited.split(",")]
                 
                 elif filetype == "eeprom-util":
-                    m = re.search(r"""Page (\d+): array\('B', \[(.*)\]\)""", line)
+                    m = re.search(r"""Page\s+(\d+)\s*:\s*array\('B',\s*\[(.*)\]\)""", line)
                     if not m:
                         raise Exception("could not parse line: %s" % line)
                     page = int(m.group(1))
@@ -225,7 +225,7 @@ class Fixture(object):
                 DATA_START = 0x3c00
                 offset = DATA_START + page * 64 
                 self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
-            sleep(0.1)
+            sleep(0.2)
 
     ############################################################################
     # Utility Methods
