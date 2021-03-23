@@ -155,7 +155,7 @@ class Fixture(object):
     def get_raman_mode(self):
         if not self.is_sig():
             return
-        return self.get_cmd(0xff, 0x15)[0]
+        return self.get_cmd(0xff, 0x15)#[0]
 
     def set_raman_mode(self, flag):
         if not self.is_sig():
@@ -168,7 +168,7 @@ class Fixture(object):
     def get_raman_delay_ms(self):
         if not self.is_sig():
             return
-        return self.get_cmd(0xff, 0x19)[0]
+        return self.get_cmd(0xff, 0x19)#[0]
 
     def set_raman_delay_ms(self, ms):
         if not self.is_sig():
@@ -206,12 +206,13 @@ class Fixture(object):
             return
         data = self.get_cmd(0xff, 0x22)
         return data[0] + (data[1] << 8)
+        #return data
 
     def set_startline(self, linenum):
         if not self.is_sig():
             return
-        if linenum < 0 or linenum > 0x0436:
-            print("ERROR: choose a line between 0 and 1078")
+        if linenum < 0 or linenum > 0x0451:
+            print("ERROR: choose a line between 0 and 1105")
             return
 
         print("setting startline to %d" % linenum)
@@ -224,12 +225,12 @@ class Fixture(object):
             return
         data = self.get_cmd(0xff, 0x24)
         return data[0] + (data[1] << 8)
-
+        #return data
     def set_stopline(self, linenum):
         if not self.is_sig():
             return
-        if linenum < 2 or linenum > 0x0438:
-            print("ERROR: choose a line between 2 and 1080")
+        if linenum < 2 or linenum > 0x0451:
+            print("ERROR: choose a line between 2 and 1105")
             return
 
         print("setting stopline to %d" % linenum)
