@@ -14,6 +14,7 @@ HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 1000
 
+MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
@@ -31,7 +32,6 @@ class Fixture(object):
         parser.add_argument("--multi-wavecal",  type=str,               help="file containing 9 wavecals")
         parser.add_argument("--zero-multi",     action="store_true",    help="zero wavecals 1-8 (leave primary)")
         parser.add_argument("--fix-fifth",      action="store_true",    help="fix the fifth wavelcal coefficient, setting it to zero")
-        parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
         self.args = parser.parse_args()
 
         if not (self.args.dump       or \
@@ -77,7 +77,7 @@ class Fixture(object):
         self.dump_eeprom("Proposed")
         self.dump_wavecals("Proposed")
 
-        cont = input("\nWrite EEPROM? (y/N)")
+        cont = input("\nContinue? (y/N)")
         if cont.lower() != "y":
             print("Cancelled")
             return
@@ -87,76 +87,55 @@ class Fixture(object):
     def restore(self):
         linecount = 0
         filetype = None
-        print("restoring from %s" % self.args.restore)
+        self.debug("reading %s" % self.args.restore)
         with open(self.args.restore) as f:
             for line in f:
-                self.debug("read: %s" % line)
+                #self.debug("read: %s" % line)
                 line = line.strip()
                 if line.startswith("#") or len(line) == 0:
                     continue
 
                 linecount += 1
-                values = None
-                page = None
 
                 # use first (valid) line to determine filetype
                 if linecount == 1:
-                    if "wasatch.FeatureIdentificationDevice" in line and "GET_MODEL_CONFIG" in line:
-                        # 2020-03-19 12:05:41,726 Process-2  wasatch.FeatureIdentificationDevice DEBUG    GET_MODEL_CONFIG(0): get_code: request 0xff value 0x0001 index 0x0000 = [array('B', [87, 80, 45, 55, 56, 53, 45, 88, 45, 83, 82, 45, 83, 0, 0, 0, 87, 80, 45, 48, 48, 53, 54, 49, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 1, 0, 0, 17, 3, 50, 0, 2, 0, 10, 0, 0, 51, 51, 243, 63, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 6])]
+                    # DEBUG: read: 2020-03-19 12:05:41,726 Process-2  wasatch.FeatureIdentificationDevice DEBUG    GET_MODEL_CONFIG(0): get_code: request 0xff value 0x0001 index 0x0000 = [array('B', [87, 80, 45, 55, 56, 53, 45, 88, 45, 83, 82, 45, 83, 0, 0, 0, 87, 80, 45, 48, 48, 53, 54, 49, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 1, 0, 0, 17, 3, 50, 0, 2, 0, 10, 0, 0, 51, 51, 243, 63, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 6])]
+                    if "wasatch.FeatureIdentificationDevice" in line and \
+                            "GET_MODEL_CONFIG" in line:
                         filetype = "ENLIGHTEN_LOG"
-                    elif re.match(r"Page\s+\d+:\s*array\('B',\s*\[", line):
-                        # Page 0: array('B', [83, 105, 71, 45, 55, 56, 53, 0, 0, 0, 0, 0, 0, 0, 0, 0, 87, 80, 45, 48, 48, 54, 52, 54, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 0, 1, 1, 2, 0, 25, 0, 15, 0, 15, 0, 0, 0, 0, 0, 65, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 9])
-                        filetype = "eeprom-util"
-                    else:
-                        raise Exception("ERROR: could not determine filetype")
                     self.debug("filetype: %s" % filetype)
+
+                if filetype is None:
+                    raise Exception("ERROR: could not determine filetype")
 
                 if filetype == "ENLIGHTEN_LOG":
                     m = re.search("GET_MODEL_CONFIG\((\d)\)", line)
                     if not m:
                         raise Exception("can't parse page number")
                     page = int(m.group(1))
+                    if not (0 <= page <= 7):
+                        raise Exception("invalid page")
+
                     m = re.search("array\('B', \[([0-9, ]+)\]\)", line)
                     if not m:
                         raise Exception("can't parse data")
                     delimited = m.group(1)
                     values = [ int(v.strip()) for v in delimited.split(",")]
-                
-                elif filetype == "eeprom-util":
-                    m = re.search(r"""Page\s+(\d+)\s*:\s*array\('B',\s*\[(.*)\]\)""", line)
-                    if not m:
-                        raise Exception("could not parse line: %s" % line)
-                    page = int(m.group(1))
-                    if not (0 <= page <= self.args.max_pages):
-                        raise Exception("invalid page")
-                    delimited = m.group(2)
-                    values = [ int(v.strip()) for v in delimited.split(",")]
-                        
+                    if len(values) != 64:
+                        raise Exception("wrong array length")
+
+                    for i in range(len(values)):
+                        v = values[i]
+                        if not (0 <= v <= 255):
+                            raise Exception("invalid byte")
+                        self.pack((page, i, 1), "B", values[i])
+                    self.debug("parsed and packed page %d" % page)
                 else:
                     raise Exception("Unsupported filetype: %s" % filetype)
 
-                if page is None or values is None:
-                    raise Exception("could not parse line: %s" % line)
-
-                if not (0 <= page <= self.args.max_pages):
-                    raise Exception("invalid page")
-
-                if len(values) != 64:
-                    raise Exception("wrong array length")
-
-                self.debug("packing %d values" % len(values))
-                for i in range(len(values)):
-                    v = values[i]
-                    if not (0 <= v <= 255):
-                        raise Exception("invalid byte")
-                    self.pack((page, i, 1), "B", values[i])
-                self.debug("parsed and packed page %d" % page)
-
-    ##
-    # Custom command: zero-out 5th wavecal coeff (recently added to EEPROM)
     def fix_fifth(self):
         print("zeroing wavecal coeff[4]")
-        self.pack((2, 21, 4), "f", 0.0) 
+        self.pack((2, 21, 4), "f", 0.0) # so-called 5th coeff of default wavecal
 
     def zero_multi(self):             
         coeffs = [ 0, 0, 0, 0 ]
@@ -204,7 +183,7 @@ class Fixture(object):
     def read_eeprom(self):
         print("Reading EEPROM:")
         self.eeprom_pages = []
-        for page in range(self.args.max_pages):
+        for page in range(MAX_PAGES):
             buf = self.get_cmd(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
             self.eeprom_pages.append(buf)
 
@@ -225,7 +204,7 @@ class Fixture(object):
                 DATA_START = 0x3c00
                 offset = DATA_START + page * 64 
                 self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
-            sleep(0.2)
+            sleep(0.1)
 
     ############################################################################
     # Utility Methods
