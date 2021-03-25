@@ -12,7 +12,7 @@ import sys
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
-TIMEOUT_MS = 1000
+TIMEOUT_MS = 10000
 
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
@@ -28,6 +28,7 @@ class Fixture(object):
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an FRAM from text file (future dev)")
         parser.add_argument("--fram-pages",     type=int,               help="number of pages to read from FRAM (default 61)", default=61)
+        parser.add_argument("--erase",          action="store_true",    help="erase all")
         self.args = parser.parse_args()
 
         if not (self.args.dump):
@@ -48,7 +49,10 @@ class Fixture(object):
 
         elif self.args.restore:
             self.restore()
+        elif self.args.erase:
+            self.erase_fram()
 
+            
         # global settings
         self.pack((0, 63, 1), "B", FRAM_FORMAT)
         if self.subformat is not None:
@@ -152,6 +156,11 @@ class Fixture(object):
 
     def write_fram(self):
         print("Not yet implemented")
+
+    def erase_fram(self):
+        print("FRAM erased")
+        self.send_cmd(cmd=0xff, value=0x25)
+        
         
 
     ############################################################################
