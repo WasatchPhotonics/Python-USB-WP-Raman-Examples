@@ -28,7 +28,7 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              action="store_true", help="fire laser")
-        parser.add_argument("--max-sec",             type=int,            help="firing time (sec) (default 1)", default=1)
+        parser.add_argument("--max-ms",              type=int,            help="firing time (ms) (default 1000)")
         parser.add_argument("--mod-enable",          action="store_true", help="enable modulation")
         parser.add_argument("--mod-period-us",       type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
         parser.add_argument("--mod-width-us",        type=int,            help="laser modulation pulse width (us) (default 100)", default=100)
@@ -58,8 +58,8 @@ class Fixture(object):
 
         self.set_enable(True)
 
-        print("sleeping %d sec..." % self.args.max_sec)
-        sleep(self.args.max_sec)
+        print("sleeping %d ms..." % self.args.max_ms)
+        sleep(self.args.max_ms)
 
         self.set_enable(False)
 
@@ -72,19 +72,22 @@ class Fixture(object):
         self.send_cmd(0xbe, 1 if flag else 0)
 
     def set_modulation_params(self):
-        # are modulation parameters valid?
+        if self.args.mod_period_us > 0xffff or \
+           self.args.mod_width_us > 0xffff:
+            print("error: lame script doesn't support full 40-bit 5-byte args")
+            return
+
+        # should we modulate after all?
         if self.args.mod_period_us <= self.args.mod_width_us:
-            print("disabling modulation (width %d > period %d)" % (self.args.mod_width_us, self.args.mod_period_us))
+            print("disabling modulation because period %d <= width %d" % (self.args.mod_period_us, self.args.mod_width_us))
             self.send_cmd(0xbd, 0)
             return
 
-        (lsb, msb, buf) = self.to40bit(self.args.mod_period_us)
-        print("setting LASER_MOD_PULSE_PERIOD %d (lsb %04x, msb %04x, payload %s)" % (self.args.mod_period_us, lsb, msb, buf))
-        self.send_cmd(0xc7, value=lsb, index=msb, buf=buf)
+        print("setting LASER_MOD_PULSE_PERIOD %d" % self.args.mod_period_us)
+        self.send_cmd(0xc7, self.args.mod_period_us, buf=[0]*8)
 
-        (lsb, msb, buf) = self.to40bit(self.args.mod_width_us)
-        print("setting LASER_MOD_PULSE_WIDTH %d (lsb %04x, msb %04x, payload %s)" % (self.args.mod_width_us, lsb, msb, buf))
-        self.send_cmd(0xdb, value=lsb, index=msb, buf=buf)
+        print("setting LASER_MOD_PULSE_WIDTH %d" % self.args.mod_width_us)
+        self.send_cmd(0xdb, self.args.mod_width_us, buf=[0]*8)
 
         print("setting LASER_MOD_ENABLE 1")
         self.send_cmd(0xbd, 1)
@@ -105,12 +108,6 @@ class Fixture(object):
     def debug(self, msg):
         if self.args.debug:
             print("DEBUG: %s" % msg)
-
-    def to40bit(self, val):
-        lsb = val & 0xffff
-        msb = (val >> 16) & 0xffff
-        buf = [ (val >> 32) & 0xff, 0 * 7 ]
-        return (lsb, msb, buf)
 
     def send_cmd(self, cmd, value, index=0, buf=None):
         if buf is None:
