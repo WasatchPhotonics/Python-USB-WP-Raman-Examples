@@ -13,6 +13,7 @@ import sys
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 10000
+PAGES_PER_SPECTRA = 62
 
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
@@ -29,12 +30,14 @@ class Fixture(object):
         parser.add_argument("--restore",        type=str,               help="restore an FRAM from text file (future dev)")
         parser.add_argument("--fram-pages",     type=int,               help="number of pages to read from FRAM (default 61)", default=61)
         parser.add_argument("--erase",          action="store_true",    help="erase all")
+        parser.add_argument("--spectrum-index", type=int,               help="spectrum index", default=0)
         self.args = parser.parse_args()
 
         if not (self.args.dump):
             self.args.dump = True
 
         self.pid = int(self.args.pid, 16)
+        
 
         self.dev = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
         if not self.dev:
@@ -44,14 +47,15 @@ class Fixture(object):
         self.read_fram()
         self.dump_fram()
 
-        if self.args.dump:
-            return
 
-        elif self.args.restore:
+        if self.args.restore:
             self.restore()
         elif self.args.erase:
             self.erase_fram()
-
+            return
+            
+        if self.args.dump:
+            return
             
         # global settings
         self.pack((0, 63, 1), "B", FRAM_FORMAT)
@@ -142,9 +146,10 @@ class Fixture(object):
     def read_fram(self):
         print("Reading FRAM:")
         self.fram_pages = []
-        for page in range(self.args.fram_pages):
-            buf = self.get_cmd(cmd=0xff, value=0x25, index=page, length=PAGE_SIZE)
+        for i in range(self.args.fram_pages):
+            buf = self.get_cmd(cmd=0xff, value=0x25, index=(i + self.args.spectrum_index) , length=PAGE_SIZE)
             self.fram_pages.extend(buf)
+            sleep(0.1)
 
     def dump_fram(self, state="Current"):
         print("%s FRAM:" % state)
@@ -159,7 +164,7 @@ class Fixture(object):
 
     def erase_fram(self):
         print("FRAM erased")
-        self.send_cmd(cmd=0xff, value=0x25)
+        self.send_cmd(cmd=0xff, value=0x26)
         
         
 
