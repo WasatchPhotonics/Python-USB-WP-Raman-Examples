@@ -17,7 +17,7 @@ SET_MOD_WIDTH_US    = 0xdb
 GET_MOD_WIDTH_US    = 0xdc
 SET_MOD_ENABLE      = 0xbd
 GET_MOD_ENABLE      = 0xe3
-SET_STROBE_ENABLE       = 0xbe
+SET_STROBE_ENABLE   = 0xbe
 
 SLEEP_SEC = 1 
 
