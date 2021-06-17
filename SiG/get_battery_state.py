@@ -3,13 +3,11 @@
 import sys
 import usb.core
 
-# select product
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 if not dev:
-    print "No spectrometer found"
+    print("No spectrometer found")
     sys.exit()
-#print dev
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -30,10 +28,10 @@ def Get_Value(Command, command2, ByteCount, index=0):
 #
 # E.g., [0x20, 0x40, 0x00] = 64 + 32/256 = 64.125% (not charging)
 def get_battery_level():
-    register = Get_Value(0xff, 0x13, 3)
-    percentage = register[1] + (1.0 * register[0] / 256.0)
-    charging = register[2] != 0
-    return (percentage, charging)
+    raw = Get_Value(0xff, 0x13, 3)
+    percentage = raw[1] + (1.0 * raw[0] / 256.0)
+    charging = raw[2] != 0
+    return (raw, percentage, charging)
     
-(percentage, charging) = get_battery_level()
-print "Battery Charge Level: %.2f%% (%s)" % (percentage, "charging" if charging else "not charging")
+(raw, percentage, charging) = get_battery_level()
+print("Battery Charge Level: %s (%.2f%%) (%s)" % (raw, percentage, "charging" if charging else "not charging"))
