@@ -25,12 +25,12 @@ if os.name == "posix":
     dev.set_configuration()
     usb.util.claim_interface(dev, 0)
 
-# print("sending SET_INTEGRATION_TIME_MS -> %d ms" % INTEGRATION_MS)
-# dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, INTEGRATION_MS, 0, BUF, TIMEOUT_MS)
+print("sending SET_INTEGRATION_TIME_MS -> %d ms" % INTEGRATION_MS)
+dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, INTEGRATION_MS, 0, BUF, TIMEOUT_MS)
 
-# gainDB = 0x0100 # FunkyFloat(1.0)
-# print("sending GAIN_DB -> 0x%04x (FunkyFloat)" % gainDB)
-# dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gainDB, 0, BUF, TIMEOUT_MS) 
+gainDB = 0x0100 # FunkyFloat(1.0)
+print("sending GAIN_DB -> 0x%04x (FunkyFloat)" % gainDB)
+dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gainDB, 0, BUF, TIMEOUT_MS) 
 
 print("sending ACQUIRE")
 dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
