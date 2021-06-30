@@ -20,5 +20,3 @@ dependencies:
   - requests
   - pexpect
   - pyreadline
-
-prefix: !!python/unicode 'C:\Miniconda\envs\wasatch'
