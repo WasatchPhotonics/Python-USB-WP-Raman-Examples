@@ -21,6 +21,8 @@ if dev is None:
     print("No matching spectrometer found")
     sys.exit(1)
 
+print(dev)
+
 if os.name == "posix":
     dev.set_configuration()
     usb.util.claim_interface(dev, 0)
