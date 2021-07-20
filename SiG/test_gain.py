@@ -41,7 +41,7 @@ class TestFixture:
             dB += 0.1
 
     def float_to_uint16(self, gain):
-        msb = int(gain) & 0xff
+        msb = int(round(gain, 5)) & 0xff
         lsb = round((gain - msb) * 256) & 0xff
         raw = (msb << 8) | lsb
         print("float_to_uint16: gain %f -> msb %d, lsb %d -> raw 0x%04x" % (gain, msb, lsb, raw))
