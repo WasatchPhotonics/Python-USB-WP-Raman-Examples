@@ -32,6 +32,7 @@ class Fixture(object):
         parser.add_argument("--zero-multi",     action="store_true",    help="zero wavecals 1-8 (leave primary)")
         parser.add_argument("--fix-fifth",      action="store_true",    help="fix the fifth wavelcal coefficient, setting it to zero")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
+        parser.add_argument("--fram-pages",     type=int,               help="number of pages to read from FRAM (default 61)", default=61)
         self.args = parser.parse_args()
 
         if not (self.args.dump       or \
@@ -51,6 +52,8 @@ class Fixture(object):
         self.read_eeprom()
         self.dump_eeprom()
         self.dump_wavecals()
+        self.read_fram()
+        self.dump_fram()
 
         if self.args.dump:
             return
@@ -207,11 +210,23 @@ class Fixture(object):
         for page in range(self.args.max_pages):
             buf = self.get_cmd(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
             self.eeprom_pages.append(buf)
+    
+    def read_fram(self):
+        print("Reading FRAM:")
+        self.fram_pages = []
+        for page in range(self.args.fram_pages):
+            buf = self.get_cmd(cmd=0xff, value=0x25, index=page, length=PAGE_SIZE)
+            self.fram_pages.append(buf)
 
     def dump_eeprom(self, state="Current"):
         print("%s EEPROM:" % state)
         for page in range(len(self.eeprom_pages)):
             print("  Page %d: %s" % (page, self.eeprom_pages[page]))
+
+    def dump_fram(self, state="Current"):
+        print("%s FRAM:" % state)
+        for page in range(len(self.fram_pages)):
+            print("  Page %d: %s" % (page, self.fram_pages[page]))
 
     def write_eeprom(self):
         print("Writing EEPROM")

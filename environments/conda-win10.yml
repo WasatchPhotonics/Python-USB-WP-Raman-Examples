@@ -1,0 +1,22 @@
+name: wasatch3
+
+channels:
+- defaults
+
+dependencies:
+- mkl
+- numpy
+- py
+- python
+- six
+- psutil
+- pip
+- pywin32
+- vs2008_runtime
+- pip:
+  - future
+  - pygtail
+  - pyusb
+  - requests
+  - pexpect
+  - pyreadline
