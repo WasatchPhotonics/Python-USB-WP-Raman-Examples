@@ -7,26 +7,41 @@ from time import sleep
 
 # select product
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x1000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
-#dev=usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 print (dev)
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
-Z='\x00'*BUFFER_SIZE
+Z=[0] * BUFFER_SIZE
 TIMEOUT=1000
 
 # select pixel count
-#PixelCount=512
 PixelCount=1024
-#PixelCount=2048
 
-print ("Start Data Acquisition...")
-dev.ctrl_transfer(H2D, 0xad, 0,0,Z,TIMEOUT)   # trigger an acquisition
+print("setting integration time to 100ms")
+dev.ctrl_transfer(H2D, 0xb2, 100, 0, Z, TIMEOUT) # 100ms
 
-Data = dev.read(0x82,PixelCount*2)
-for j in range (0, (PixelCount*2)<<8, 1):
-	for i in range (0, 31, 2):
-		NewData = Data[j*32+i+1]*256+Data[j*32+i]
-		print (NewData)
+print("sending acquire")
+dev.ctrl_transfer(H2D, 0xad, 0, 0, Z, TIMEOUT)   # trigger an acquisition
+
+cumulative_data = []
+total_bytes_needed = PixelCount * 2
+while len(cumulative_data) < total_bytes_needed:
+    bytes_remaining = total_bytes_needed - len(cumulative_data)
+    print(f"requesting {bytes_remaining} bytes with timeout {TIMEOUT}ms")
+    latest_data = dev.read(0x82, bytes_remaining, timeout=TIMEOUT)
+    print("read %d bytes (%d requested)" % (len(latest_data), bytes_remaining))
+    cumulative_data.extend(latest_data)
+
+print("read cumulative %d bytes" % len(cumulative_data))
+
+# marshall bytes back into uint16 pixels
+spectrum = []
+for i in range(PixelCount):
+    lsb = cumulative_data[i*2]
+    msb = cumulative_data[i*2 + 1]
+    intensity = lsb | (msb << 8)
+    spectrum.append(intensity)
+
+print("read spectrum of %d pixels: %s .. %s" % (len(spectrum), spectrum[0:5], spectrum[-6:-1]))
+        

@@ -36,6 +36,8 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
+        parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
+        parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=10)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
@@ -57,10 +59,12 @@ class Fixture(object):
             self.connect(dev)
 
         # read configuration
-        for dev in self.devices:
-            self.read_eeprom(dev)
-            dev.fw_version = self.get_firmware_version(dev)
-            dev.fpga_version = self.get_fpga_version(dev)
+        for count in range(self.args.loop):
+            print(f"loop {count}")
+            for dev in self.devices:
+                self.read_eeprom(dev)
+                dev.fw_version = self.get_firmware_version(dev)
+                dev.fpga_version = self.get_fpga_version(dev)
 
         # apply filters
         self.filter_by_serial()
@@ -217,6 +221,7 @@ class Fixture(object):
                 print("Spectrum %3d/%3d %s ..." % (i, self.args.spectra, spectrum[:10]))
                 if outfile is not None:
                     outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
+            sleep(self.args.delay_ms / 1000.0 )
         if outfile is not None:
             outfile.close()
 
