@@ -18,12 +18,13 @@ BUFFER_SIZE=8
 Z=[0] * BUFFER_SIZE
 TIMEOUT=1000
 MAX_SEC = 60
+INTEG_MS = 3
 
 # select pixel count
 PixelCount=1024
 
-print("setting integration time to 100ms")
-dev.ctrl_transfer(H2D, 0xb2, 100, 0, Z, TIMEOUT) # 100ms
+print("setting integration time to %d ms" % INTEG_MS)
+dev.ctrl_transfer(H2D, 0xb2, INTEG_MS, 0, Z, TIMEOUT) 
 
 start_time = datetime.datetime.now()
 
