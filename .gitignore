@@ -1,0 +1,8 @@
+.cache
+*.pyc
+*.exe
+*.out
+*.err
+*.bak
+*.zip
+.DS_Store
