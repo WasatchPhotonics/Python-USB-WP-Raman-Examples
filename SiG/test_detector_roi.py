@@ -15,11 +15,14 @@ HOST_TO_DEVICE  = 0x40
 DEVICE_TO_HOST  = 0xC0
 TIMEOUT_MS      = 1000
 
+# this will be overwritten by the combined widths of all regions
+total_pixels = 1920
+
 def get_spectrum():
     print("sending ACQUIRE")
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
 
-    bytes_to_read = args.pixels * 2
+    bytes_to_read = total_pixels * 2
     print(f"reading {bytes_to_read} bytes from bulk endpoint")
     data = dev.read(0x82, bytes_to_read) 
 
@@ -28,7 +31,7 @@ def get_spectrum():
         sys.exit(1)
 
     spectrum = []
-    for i in range(args.pixels):
+    for i in range(total_pixels):
         spectrum.append(data[i*2] | (data[i*2 + 1] << 8))
 
     return spectrum
@@ -40,19 +43,21 @@ def uint16_to_little_endian(values):
         a.append((n >> 8) & 0xff)   # msb
     return a
 
-def split(self, spectrum, widths):
-	print(f"splitting spectrum of {len(spectrum)} pixels into {len(widths)} subspectra")
-	subspectra = []
-	start = 0
-	for width in widths:
-		end = start + width
-		if end > len(spectrum):
-			logger.error(f"computed end {end} of width {width} overran colleted spectrum")
-			return None
-		subspectrum = spectrum[start:end]
-		subspectra.append(subspectrum)
-		start = end
-	return subspectra
+def split(spectrum, widths):
+    if len(widths) == 0:
+        return [spectrum]
+    print(f"splitting spectrum of {len(spectrum)} pixels into {len(widths)} subspectra")
+    subspectra = []
+    start = 0
+    for width in widths:
+        end = start + width
+        if end > len(spectrum):
+            logger.error(f"computed end {end} of width {width} overran colleted spectrum")
+            return None
+        subspectrum = spectrum[start:end]
+        subspectra.append(subspectrum)
+        start = end
+    return subspectra
 
 ################################################################################
 # parse command-line arguments
@@ -94,14 +99,18 @@ dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gain_ff, 0, BUF, TIMEOUT_MS)
 
 widths = []
 if args.region is not None:
-	num, y0, y1, x0, x1 = [int(x) for x in region.split(',')]
-	buf = uint16_to_little_endian([y0, y1, x0, x1])
-	width = x1 - x0 + 1
-	widths.append(width)
-	print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}, buf {buf}")
+    num, y0, y1, x0, x1 = [int(x) for x in region.split(',')]
+    buf = uint16_to_little_endian([y0, y1, x0, x1])
+    width = x1 - x0 + 1
+    widths.append(width)
+    print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}, buf {buf}")
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xff, 0x25, num, buf, TIMEOUT_MS)
     print("sleeping 1 sec for detector region to 'take'")
     time.sleep(1)
+
+if len(widths) > 0:
+    total_pixels = sum(widths)
+print(f"total_pixels = {total_pixels}")
 
 ################################################################################
 # collect spectra
@@ -122,11 +131,11 @@ for i in range(args.count):
 if args.outfile:
     print(f"writing {args.outfile}")
     with open(args.outfile, 'w') as f:
-		for spectrum in spectra:
-			subspectra = split(spectrum, widths)
-			for i in range(len(subspectra)):
-				subspectrum = subspectra[i]
-				f.write("spectrum %d, %s" % (i, ', '.join([str(x) for x in subspectrum])))
+        for spectrum in spectra:
+            subspectra = split(spectrum, widths)
+            for i in range(len(subspectra)):
+                subspectrum = subspectra[i]
+                f.write("spectrum %d, %s" % (i, ', '.join([str(x) for x in subspectrum])))
                 if i + 1 < len(subspectra):
                     f.write(", end_of_subspectrum")
             f.write("\n")
