@@ -13,10 +13,27 @@ BUF             = [0] * 8
 HOST_TO_DEVICE  = 0x40
 DEVICE_TO_HOST  = 0xC0
 TIMEOUT_MS      = 1000
-INTEGRATION_MS  = 400
-GAIN_DB         = 8
 PIXELS          = 1952
 
+def get_spectrum():
+    print("sending ACQUIRE")
+    dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
+
+    print(f"reading {PIXELS * 2} bytes from bulk endpoint")
+    data = dev.read(0x82, PIXELS * 2) 
+
+    if len(data) != PIXELS * 2:
+        print("ERROR: read %d bytes" % len(data))
+        sys.exit(1)
+
+    spectrum = []
+    for i in range(PIXELS):
+        spectrum.append(data[i*2] | (data[i*2 + 1] << 8))
+    print(f"read {len(data)} pixels")
+
+    return spectrum
+
+# parse command-line arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--integration-time-ms", type=int, default=400)
 parser.add_argument("--gain-db",             type=int, default=8)
@@ -45,20 +62,11 @@ dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gain_ff, 0, BUF, TIMEOUT_MS)
 print(f"setting pixel mode {args.pixel_mode}")
 dev.ctrl_transfer(HOST_TO_DEVICE, 0xfd, args.pixel_mode, 0, BUF, TIMEOUT_MS)
 
-print("sending ACQUIRE")
-dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
+# take a throwaway spectrum to let the new settings sink in
+get_spectrum()
 
-print("reading spectrum from bulk endpoint")
-data = dev.read(0x82, PIXELS * 2) 
-
-print("read %d bytes" % len(data))
-if len(data) != PIXELS * 2:
-    print("ERROR: read %d bytes" % len(data))
-    sys.exit(1)
-
-spectrum = []
-for i in range(PIXELS):
-    spectrum.append(data[i*2] | (data[i*2 + 1] << 8))
+# take the real measurement
+spectrum = get_spectrum()
 
 if args.plot:
     plt.plot(spectrum)
