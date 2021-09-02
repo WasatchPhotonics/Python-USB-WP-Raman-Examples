@@ -14,6 +14,7 @@ HOST_TO_DEVICE  = 0x40
 DEVICE_TO_HOST  = 0xC0
 TIMEOUT_MS      = 1000
 PIXELS          = 1952
+THROWAWAYS      = 10
 
 def get_spectrum():
     print("sending ACQUIRE")
@@ -35,10 +36,11 @@ def get_spectrum():
 
 # parse command-line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--integration-time-ms", type=int, default=400)
-parser.add_argument("--gain-db",             type=int, default=8)
-parser.add_argument("--pixel-mode",          type=int, default=0, choices=[0,1,2,3])
-parser.add_argument("--plot",                action="store_true")
+parser.add_argument("--integration-time-ms", type=int, default=400, help="default 400")
+parser.add_argument("--gain-db",             type=int, default=8, help="default 8")
+parser.add_argument("--throwaways",          type=int, default=0, help="how many 'throwaways' to take (default 0)")
+parser.add_argument("--pixel-mode",          type=int, default=0, choices=[0,1,2,3], help="default 0")
+parser.add_argument("--plot",                action="store_true", help="display graph")
 args = parser.parse_args()
 
 dev = usb.core.find(idVendor=VID, idProduct=PID)
@@ -62,11 +64,8 @@ dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gain_ff, 0, BUF, TIMEOUT_MS)
 print(f"setting pixel mode {args.pixel_mode}")
 dev.ctrl_transfer(HOST_TO_DEVICE, 0xfd, args.pixel_mode, 0, BUF, TIMEOUT_MS)
 
-# take a throwaway spectrum to let the new settings sink in
-get_spectrum()
-
-# take the real measurement
-spectrum = get_spectrum()
+for i in range(args.throwaways + 1):
+    spectrum = get_spectrum()
 
 if args.plot:
     plt.plot(spectrum)
