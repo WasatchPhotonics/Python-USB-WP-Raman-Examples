@@ -106,7 +106,7 @@ if args.region is not None:
         buf = uint16_to_little_endian([y0, y1, x0, x1])
 
         # aggregate the widths of all configured regions
-        width = x1 - x0 + 1
+        width = x1 - x0   # note: not + 1 (leading x/y coordinate is open, trailing is closed)
         widths.append(width)
 
         print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}")
