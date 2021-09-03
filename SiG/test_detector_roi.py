@@ -101,17 +101,29 @@ widths = []
 if args.region is not None:
     for config in args.region:
         num, y0, y1, x0, x1 = [int(x) for x in config.split(',')]
+
+        # construct payload buffer
         buf = uint16_to_little_endian([y0, y1, x0, x1])
+
+        # aggregate the widths of all configured regions
         width = x1 - x0 + 1
         widths.append(width)
-        print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}, buf {buf}")
-        dev.ctrl_transfer(HOST_TO_DEVICE, 0xff, 0x25, num, buf, TIMEOUT_MS)
+
+        print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}")
+        bRequest = 0xff # 2nd-tier opcode
+        wValue   = 0x25 # SET_DETECTOR_ROI
+        wIndex   = num  # region index (0-3)
+
+        print(f"sending USB Control Message: bRequest 0x{bRequest:02x}, wValue 0x{wValue:04x}, wIndex 0x{wIndex:04x}")
+        print(f"                    payload: {buf} ({len(buf)} bytes)")
+        dev.ctrl_transfer(HOST_TO_DEVICE, bRequest, wValue, wIndex, buf, TIMEOUT_MS)
+
         print("sleeping 1 sec for detector region to 'take'")
         time.sleep(1)
 
 if len(widths) > 0:
     total_pixels = sum(widths)
-print(f"total_pixels = {total_pixels}")
+print(f"total_pixels expected = {total_pixels}")
 
 ################################################################################
 # collect spectra
