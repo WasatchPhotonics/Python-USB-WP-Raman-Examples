@@ -99,14 +99,15 @@ dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gain_ff, 0, BUF, TIMEOUT_MS)
 
 widths = []
 if args.region is not None:
-    num, y0, y1, x0, x1 = [int(x) for x in region.split(',')]
-    buf = uint16_to_little_endian([y0, y1, x0, x1])
-    width = x1 - x0 + 1
-    widths.append(width)
-    print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}, buf {buf}")
-    dev.ctrl_transfer(HOST_TO_DEVICE, 0xff, 0x25, num, buf, TIMEOUT_MS)
-    print("sleeping 1 sec for detector region to 'take'")
-    time.sleep(1)
+    for config in args.region:
+        num, y0, y1, x0, x1 = [int(x) for x in config.split(',')]
+        buf = uint16_to_little_endian([y0, y1, x0, x1])
+        width = x1 - x0 + 1
+        widths.append(width)
+        print(f"configuring region {num} to coords ({y0}, {y1}, {x0}, {x1} (width {width}, buf {buf}")
+        dev.ctrl_transfer(HOST_TO_DEVICE, 0xff, 0x25, num, buf, TIMEOUT_MS)
+        print("sleeping 1 sec for detector region to 'take'")
+        time.sleep(1)
 
 if len(widths) > 0:
     total_pixels = sum(widths)
