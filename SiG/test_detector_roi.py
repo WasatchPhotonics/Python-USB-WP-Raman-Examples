@@ -23,7 +23,7 @@ def get_spectrum():
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
 
     bytes_to_read = total_pixels * 2
-    print(f"reading {bytes_to_read} bytes from bulk endpoint")
+    print(f"reading {total_pixels} pixels ({bytes_to_read} bytes) from bulk endpoint")
     data = dev.read(0x82, bytes_to_read) 
 
     if len(data) != bytes_to_read:
@@ -97,6 +97,8 @@ gain_ff = args.gain_db << 8
 print(f"sending GAIN_DB -> {args.gain_db} (FunkyFloat 0x{gain_ff:04x})")
 dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gain_ff, 0, BUF, TIMEOUT_MS) 
 
+print(f"total_pixels starting at {total_pixels}")
+
 widths = []
 if args.region is not None:
     for config in args.region:
@@ -118,12 +120,11 @@ if args.region is not None:
         print(f"                    payload: {buf} ({len(buf)} bytes)")
         dev.ctrl_transfer(HOST_TO_DEVICE, bRequest, wValue, wIndex, buf, TIMEOUT_MS)
 
-        print("sleeping 1 sec for detector region to 'take'")
-        time.sleep(1)
+        print(f"sleeping {args.delay_ms}ms for detector region to 'take'")
+        time.sleep(args.delay_ms / 1000.0)
 
-if len(widths) > 0:
-    total_pixels = sum(widths)
-print(f"total_pixels expected = {total_pixels}")
+        # total_pixels = sum(widths)
+        # print(f"total_pixels now {total_pixels}")
 
 ################################################################################
 # collect spectra
@@ -154,6 +155,7 @@ if args.outfile:
             f.write("\n")
             
 if args.plot:
-    [[plt.plot(a) for a in split(spectrum, widths)] for spectrum in spectra]
+    # [[plt.plot(a) for a in split(spectrum, widths)] for spectrum in spectra]
+    [plt.plot(spectrum) for spectrum in spectra]
     plt.title(f"integration time {args.integration_time_ms}ms, gain {args.gain_db}dB, widths {widths}, count {args.count}")
     plt.show()
