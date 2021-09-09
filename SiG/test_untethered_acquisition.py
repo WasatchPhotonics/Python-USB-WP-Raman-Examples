@@ -5,6 +5,8 @@ import sys
 import usb.core
 import platform
 
+from time import sleep
+
 VID             = 0x24aa
 PID             = 0x4000
 HOST_TO_DEVICE  = 0x40
@@ -41,3 +43,27 @@ try:
 except:
     print("ignoring timeout on untethered acquisition")
 
+print("polling until IDLE")
+while True:
+    sleep(1)
+    status = dev.ctrl_transfer(DEVICE_TO_HOST, 0xd4, 0, 0, 1, TIMEOUT_MS)[0]
+    print(f"status = {status}")
+    phase = ["IDLE", "DARK", "WARMUP", "SAMPLE", "PROCESSING", "ERROR"][status]
+    print(f"phase = {phase}")
+    if phase == "IDLE":
+        break;
+
+print("reading spectrum from EP2")
+data = dev.read(0x82, PIXELS * 2) 
+
+print("read %d bytes" % len(data))
+if len(data) != PIXELS * 2:
+    print("ERROR: read %d bytes" % len(data))
+    sys.exit(1)
+
+spectrum = []
+for i in range(PIXELS):
+    intensity = data[i*2] | (data[i*2 + 1] << 8) # demarshal LSB-MSB to uint16
+    spectrum.append(intensity)
+
+print(f"read {PIXELS} pixels from {spectrum[0:5]} to {spectrum[-6:]}")

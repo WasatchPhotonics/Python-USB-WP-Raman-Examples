@@ -67,7 +67,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--integration-time-ms", type=int, default=400, help="default 400")
 parser.add_argument("--gain-db",             type=int, default=8, help="default 8")
 parser.add_argument("--count",               type=int, default=1, help="how many spectra to take")
-parser.add_argument("--delay-ms",            type=int, default=10, help="pause between throwaways (default 10)")
+parser.add_argument("--read-pixels",         type=int, default=None, help="override how many pixels to read (default 1920, or sum of ROI widths)")
+parser.add_argument("--delay-ms",            type=int, default=10, help="pause after ROI and between acquisitions (default 10)")
 parser.add_argument("--region",              type=str, action="append", help="region, y0, y1, x0, x1")
 parser.add_argument("--plot",                action="store_true", help="display graph")
 parser.add_argument("--outfile",             type=str, help="save spectra")
@@ -123,8 +124,12 @@ if args.region is not None:
         print(f"sleeping {args.delay_ms}ms for detector region to 'take'")
         time.sleep(args.delay_ms / 1000.0)
 
-        # total_pixels = sum(widths)
-        # print(f"total_pixels now {total_pixels}")
+        total_pixels = sum(widths)
+        print(f"total_pixels now {total_pixels}")
+
+if args.read_pixels is not None:
+    print(f"overriding total_pixels (was {total_pixels}, now {args.read_pixels})")
+    total_pixels = args.read_pixels
 
 ################################################################################
 # collect spectra
