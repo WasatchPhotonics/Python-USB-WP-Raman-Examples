@@ -4,7 +4,6 @@ import os
 import sys
 import time
 import usb.core
-import platform
 import argparse
 import matplotlib.pyplot as plt
 
