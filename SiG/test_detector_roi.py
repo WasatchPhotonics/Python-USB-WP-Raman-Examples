@@ -17,6 +17,16 @@ TIMEOUT_MS      = 1000
 
 # this will be overwritten by the combined widths of all regions
 total_pixels = 1920
+args = None
+
+def get_throwaway(pixels):
+    dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
+    bytes_to_read = pixels * 2 
+    try:
+        data = dev.read(0x82, bytes_to_read) 
+    except:
+        pass
+    return
 
 def get_spectrum():
     print("sending ACQUIRE")
@@ -24,8 +34,8 @@ def get_spectrum():
 
     bytes_to_read = total_pixels * 2
     print(f"reading {total_pixels} pixels ({bytes_to_read} bytes) from bulk endpoint")
-    data = dev.read(0x82, bytes_to_read) 
 
+    data = dev.read(0x82, bytes_to_read) 
     if len(data) != bytes_to_read:
         print("ERROR: read %d bytes" % len(data))
         sys.exit(1)
@@ -67,7 +77,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--integration-time-ms", type=int, default=400, help="default 400")
 parser.add_argument("--gain-db",             type=int, default=8, help="default 8")
 parser.add_argument("--count",               type=int, default=1, help="how many spectra to take")
-parser.add_argument("--read-pixels",         type=int, default=None, help="override how many pixels to read (default 1920, or sum of ROI widths)")
+parser.add_argument("--throwaways",          type=int, default=2, help="how many throwaways to take (default 2)")
+parser.add_argument("--prev-pixels",         type=int, default=1920, help="how many pixels to read for first throwaway")
 parser.add_argument("--delay-ms",            type=int, default=10, help="pause after ROI and between acquisitions (default 10)")
 parser.add_argument("--region",              type=str, action="append", help="region, y0, y1, x0, x1")
 parser.add_argument("--plot",                action="store_true", help="display graph")
@@ -121,27 +132,33 @@ if args.region is not None:
         print(f"                    payload: {buf} ({len(buf)} bytes)")
         dev.ctrl_transfer(HOST_TO_DEVICE, bRequest, wValue, wIndex, buf, TIMEOUT_MS)
 
-        print(f"sleeping {args.delay_ms}ms for detector region to 'take'")
-        time.sleep(args.delay_ms / 1000.0)
+        print(f"sleeping 1sec for detector region to 'take'")
+        time.sleep(1)
 
         total_pixels = sum(widths)
         print(f"total_pixels now {total_pixels}")
-
-if args.read_pixels is not None:
-    print(f"overriding total_pixels (was {total_pixels}, now {args.read_pixels})")
-    total_pixels = args.read_pixels
 
 ################################################################################
 # collect spectra
 ################################################################################
 
 spectra = []
-for i in range(args.count):
+for i in range(args.count + args.throwaways):
     if i > 0:
         print(f"sleeping {args.delay_ms}ms")
         time.sleep(args.delay_ms / 1000.0)
-    spectrum = get_spectrum()
-    spectra.append(spectrum)
+
+
+    if i == 0:
+        print(f"dumping throwaway with {args.prev_pixels} pixels")
+        get_throwaway(args.prev_pixels)
+    elif i < args.throwaways:
+        print(f"dumping throwaway with {total_pixels} pixels")
+        get_throwaway(total_pixels)
+    else:
+        spectrum = get_spectrum()
+        print("storing")
+        spectra.append(spectrum)
 
 ################################################################################
 # process spectra
@@ -162,5 +179,5 @@ if args.outfile:
 if args.plot:
     # [[plt.plot(a) for a in split(spectrum, widths)] for spectrum in spectra]
     [plt.plot(spectrum) for spectrum in spectra]
-    plt.title(f"integration time {args.integration_time_ms}ms, gain {args.gain_db}dB, widths {widths}, count {args.count}")
+    plt.title(f"integ {args.integration_time_ms}ms, gain {args.gain_db}dB, regions {args.region}, count {args.count}")
     plt.show()

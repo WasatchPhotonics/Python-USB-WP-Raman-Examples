@@ -40,7 +40,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--integration-time-ms", type=int, default=400, help="default 400")
 parser.add_argument("--gain-db",             type=int, default=8, help="default 8")
 parser.add_argument("--count",               type=int, default=1, help="how many spectra to take")
-parser.add_argument("--delay-ms",            type=int, default=10, help="pause between throwaways (default 10)")
+parser.add_argument("--delay-ms",            type=int, default=10, help="how long to delay between spectra (default 10)")
+parser.add_argument("--throwaways",          type=int, default=2, help="how many throwaways to take (default 2)")
 parser.add_argument("--pixels",              type=int, default=1920, help="default 1920")
 parser.add_argument("--pixel-mode",          type=int, default=None, choices=[0,1,2,3], help="(optional, no default)")
 parser.add_argument("--plot",                action="store_true", help="display graph")
@@ -84,12 +85,17 @@ if args.pixel_mode is not None:
 ################################################################################
 
 spectra = []
-for i in range(args.count):
+for i in range(args.count + args.throwaways):
+    spectrum = get_spectrum()
     if i > 0:
         print(f"sleeping {args.delay_ms}ms")
         time.sleep(args.delay_ms / 1000.0)
-    spectrum = get_spectrum()
-    spectra.append(spectrum)
+
+    if i < args.throwaways:
+        print("dumping throwaway")
+    else:
+        spectra.append(spectrum)
+        print("storing")
 
 ################################################################################
 # process spectra
