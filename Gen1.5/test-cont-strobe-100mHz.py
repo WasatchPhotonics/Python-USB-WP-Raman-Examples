@@ -11,6 +11,7 @@ if not dev:
     print("No spectrometers found")
     sys.exit()
 
+SET_ACCY_EN         = 0x38
 SET_MOD_PERIOD_US   = 0xc7
 GET_MOD_PERIOD_US   = 0xcb
 SET_MOD_WIDTH_US    = 0xdb
@@ -23,6 +24,7 @@ period = 10000000
 width =  5000000
 
 print("Setting Frequency to 0.1Hz")
+common.send_cmd(dev, SET_ACCY_EN, 1)
 common.send_cmd_uint40(dev, SET_MOD_PERIOD_US, period)
 common.verify_state(dev, GET_MOD_PERIOD_US, lsb_len=5, expected=period, label="period")
 
@@ -39,6 +41,7 @@ print("\r\nPress Enter to end.\r\n")
 input()
 
 print("\ndisabling modulation.")
+common.send_cmd(dev, SET_ACCY_EN, 0)
 common.send_cmd(dev, SET_STROBE_ENABLE, 0)
 common.send_cmd(dev, SET_MOD_ENABLE, 0)
 common.verify_state(dev, GET_MOD_ENABLE, msb_len=1, expected=0, label="enable")

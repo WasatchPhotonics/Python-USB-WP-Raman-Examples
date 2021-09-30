@@ -17,14 +17,12 @@ SET_MOD_WIDTH_US    = 0xdb
 GET_MOD_WIDTH_US    = 0xdc
 SET_MOD_ENABLE      = 0xbd
 GET_MOD_ENABLE      = 0xe3
-SET_STROBE_ENABLE   = 0xbe
 
-SLEEP_SEC = 1 
+SLEEP_SEC = 3 
 
 # width, period (both us)
 COMBINATIONS = [ [  500000, 1000000 ],   # 0.5 pulse every sec
-                 [ 250000, 500000 ],     # 0.25sec pulse every 0.5sec
-                 [125000, 250000]]       # 0.125sec pulse every 0.25sec
+                 [ 1000000, 3000000 ] ]  # 1sec pulse every 3sec
 
 for combo in COMBINATIONS:
     (width, period) = combo
@@ -38,7 +36,6 @@ for combo in COMBINATIONS:
     common.verify_state(dev, GET_MOD_WIDTH_US, lsb_len=5, expected=width, label="width")
 
     print("enabling modulation...")
-    common.send_cmd(dev, SET_STROBE_ENABLE, 1)
     common.send_cmd(dev, SET_MOD_ENABLE, 1)
     common.verify_state(dev, GET_MOD_ENABLE, msb_len=1, expected=1, label="enable")
 
@@ -46,6 +43,5 @@ for combo in COMBINATIONS:
     sleep(SLEEP_SEC)
 
     print("\ndisabling modulation.")
-    common.send_cmd(dev, SET_STROBE_ENABLE, 0)
     common.send_cmd(dev, SET_MOD_ENABLE, 0)
     common.verify_state(dev, GET_MOD_ENABLE, msb_len=1, expected=0, label="enable")

@@ -11,7 +11,7 @@ if not dev:
     print("No spectrometers found")
     sys.exit()
 
-GET_CMD = 0x34
+GET_CMD = 0x35
 TEST_COUNT = 5
 
 def twos_comp(val, bits):
@@ -24,11 +24,10 @@ for i in range(TEST_COUNT):
 
     # read raw ambient temperature
     raw = common.get_cmd(dev, GET_CMD, msb_len=2)
-    raw = raw >> 5
 
     # convert to degrees Celsius
-    # msb = (raw >> 8) & 0xff
-    # lsb = raw & 0xff
+    msb = (raw >> 8) & 0xff
+    lsb = raw & 0xff
     degC = 0.125 * twos_comp(raw, 11)
 
     print("ambient temperature %d of %d was 0x%04x raw (%0.2f degC)" % (i + 1, TEST_COUNT, raw, degC))
