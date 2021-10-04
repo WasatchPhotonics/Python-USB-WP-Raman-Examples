@@ -70,8 +70,11 @@ class Fixture(object):
         print(f"fpga_compilation_options <- {fpga_options}")
 
         # 3. CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
+        
+        # print(f"Trigger Source: " + str(self.get_trigger_source()))
 
-        if False:
+        # self.set_ccd_source(1)
+        if True:
             # 4. set trigger source
             print(f"trigger_source -> 0")
             self.set_trigger_source(0)
@@ -140,10 +143,18 @@ class Fixture(object):
         opts["has_horiz_binning"]           = (word & 0x4000) != 0
         return opts
 
+    def get_trigger_source(self):
+        return self.get_cmd(0xd3, lsb_len=1)
+    
     def set_trigger_source(self, value):
         if self.pid == 0x4000:
             return False
         return self.send_cmd(0xd2, value, buf=[0] * 8) # MZ: this is weird...we're sending the buffer on an FX2-only command
+
+    def set_ccd_source(self, value):
+        if self.pid == 0x4000:
+            return False
+        return self.send_cmd(0xba, value)        
 
     def get_firmware_version(self):
         result = self.get_cmd(0xc0)
