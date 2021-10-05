@@ -32,6 +32,8 @@ class Fixture(object):
         self.eeprom_pages = None
         self.subformat = None
 
+        self.spectrum_count = 0
+
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
@@ -58,9 +60,13 @@ class Fixture(object):
 
         self.pixels = self.args.pixels
 
+        self.get_fpga_configuration_register("before 1")
+
         # 1. read EEPROM
         eeprom = self.read_eeprom()
         print(f"eeprom <- {eeprom}")
+
+        self.get_fpga_configuration_register("after eeprom")
 
         self.pixels = eeprom["pixels"]
         print(f"pixels <- {self.pixels}")
@@ -69,6 +75,8 @@ class Fixture(object):
         fpga_options = self.read_fpga_compilation_options()
         print(f"fpga_compilation_options <- {fpga_options}")
 
+        self.get_fpga_configuration_register("after fpga compilation options")
+
         # 3. CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
 
         if False:
@@ -76,17 +84,25 @@ class Fixture(object):
             print(f"trigger_source -> 0")
             self.set_trigger_source(0)
 
+            self.get_fpga_configuration_register("after trigger source")
+
         # 5. set integration time
         print(f"integration_time_ms -> {self.args.integration_time_ms}")
         self.set_integration_time_ms(self.args.integration_time_ms)
+
+        self.get_fpga_configuration_register("after integration time")
 
         # 6. get FW revision
         fw_rev = self.get_firmware_version()
         print(f"FW Revision <- {fw_rev}")
 
+        self.get_fpga_configuration_register("after FW version")
+
         # 7. get FPGA revision
         fpga_rev = self.get_fpga_version()
         print(f"FPGA Revision <- {fpga_rev}")
+
+        self.get_fpga_configuration_register("after FPGA version")
 
         # 8. get integration time (verify it was set correctly)
         ms = self.get_integration_time_ms()
@@ -94,11 +110,13 @@ class Fixture(object):
         if ms != self.args.integration_time_ms:
             print(f"integration time didn't match expectation ({ms} != {self.args.integration_time_ms})")
 
+        self.get_fpga_configuration_register("after getting integration time")
+
         # 9. get detector gain
         gain = self.get_detector_gain()
         print(f"detector gain <- {gain:0.3f}")
 
-        # 10. ACQUIRE, read EP2...
+        self.get_fpga_configuration_register("after getting gain")
 
         print("finished ENLIGHTEN connection sequence")
 
@@ -109,12 +127,19 @@ class Fixture(object):
             print("Spectrum %3d/%3d %s ..." % (i, self.args.spectra, spectrum[:10]))
             if outfile is not None:
                 outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
+
+            raw_temp = self.get_detector_temperature_raw()
+            print("Raw temperature %04x" % raw_temp)
         if outfile is not None:
             outfile.close()
 
     ############################################################################
     # opcodes
     ############################################################################
+
+    def get_fpga_configuration_register(self, label=""):
+        raw = self.get_cmd(0xb3, lsb_len=2)
+        print(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
 
     def read_eeprom(self):
         self.buffers = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
@@ -176,13 +201,28 @@ class Fixture(object):
         gain = msb + lsb / 256.0
         return gain
 
+    def get_detector_temperature_raw(self):
+        self.get_fpga_configuration_register(f"before GET_CCD_TEMP")
+        result = self.get_cmd(0xd7, label="GET_CCD_TEMP", msb_len=2)
+        self.get_fpga_configuration_register(f"after GET_CCD_TEMP")
+        return result
+
+    def set_detector_tec_setpoint(self, raw):
+        self.get_fpga_configuration_register(f"before SET_DETECTOR_TEC_SETPOINT")
+        self.set_cmd(0xd8, wValue=0xa46, label="SET_DETECTOR_TEC_SETPOINT")
+        self.get_fpga_configuration_register(f"after SET_DETECTOR_TEC_SETPOINT")
+
     def get_spectrum(self):
+        self.get_fpga_configuration_register(f"before spectrum {self.spectrum_count}")
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(0xad, 1)
         data = self.device.read(0x82, self.pixels * 2, timeout=timeout_ms)
         spectrum = []
         for i in range(0, len(data), 2):
             spectrum.append(data[i] | (data[i+1] << 8))
+        self.get_fpga_configuration_register(f"after spectrum {self.spectrum_count}")
+
+        self.spectrum_count += 1
         return spectrum
 
     ############################################################################
