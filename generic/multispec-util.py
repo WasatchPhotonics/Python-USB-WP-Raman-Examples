@@ -32,10 +32,12 @@ class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
         self.subformat = None
+        self.last_acquire = datetime.now()
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
+        parser.add_argument("--trigger-enable",      action="store_true", help="enable triggering")
         parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
         parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=10)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
@@ -102,7 +104,7 @@ class Fixture(object):
         dev.eeprom["format"]        = self.unpack(dev, (0, 63,  1), "B")
         dev.eeprom["model"]         = self.unpack(dev, (0,  0, 16), "s")
         dev.eeprom["serial_number"] = self.unpack(dev, (0, 16, 16), "s")
-        dev.eeprom["pixels"]        = self.unpack(dev, (2, 25,  2), "H" if dev.eeprom["format"] >= 4 else "h")
+        dev.eeprom["pixels"]        = self.unpack(dev, (2, 16,  2), "H")
 
     ############################################################################
     # Commands
@@ -124,7 +126,16 @@ class Fixture(object):
             for dev in self.devices:
                 self.set_integration_time_ms(dev, self.args.integration_time_ms)
 
+        if self.args.trigger_enable:
+            [self.set_continuous_acquisition(dev, 0) for dev in self.devices]
+            [self.set_trigger_source(dev, 1) for dev in self.devices]
+
+        # [self.get_fpga_configuration_register(dev) for dev in self.devices]
+
         self.do_acquisitions()
+
+        if self.args.trigger_enable:
+            [self.set_trigger_source(dev, 0) for dev in self.devices]
 
     def list(self):
         print("PID\tModel\tSerial\tFormat\tPixels\tFW\tFPGA")
@@ -141,6 +152,12 @@ class Fixture(object):
     ############################################################################
     # opcodes
     ############################################################################
+
+    # only supported on Gen 1.5
+    def get_fpga_configuration_register(self, dev):
+        raw = self.get_cmd(dev, 0xb3, lsb_len=2, label="GET_FPGA_CONFIGURATION_REGISTER")
+        log.debug(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
+        return raw
 
     def get_firmware_version(self, dev):
         result = self.get_cmd(dev, 0xc0)
@@ -164,6 +181,14 @@ class Fixture(object):
     def set_laser_enable(self, dev, flag):
         self.debug("setting laserEnable to %s" % ("on" if flag else "off"))
         self.send_cmd(dev, 0xbe, 1 if flag else 0)
+
+    def set_trigger_source(self, dev, n):
+        self.debug(f"setting triggerSource to {n}")
+        self.send_cmd(dev, 0xd2, n)
+
+    def set_continuous_acquisition(self, dev,n):
+        self.debug(f"setting continuous acquisition to {n}")
+        self.send_cmd(dev, 0xc8, n)
 
     def set_selected_laser(self, dev, n):
         if n < 0 or n > 0xffff:
@@ -217,10 +242,11 @@ class Fixture(object):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
             for dev in self.devices:
-                spectrum = self.get_spectrum(dev)
-                print("Spectrum %3d/%3d %s ..." % (i, self.args.spectra, spectrum[:10]))
+                spectrum = self.get_spectrum(dev) if not self.args.trigger_enable else self.get_spectrum_trigger(dev)
+                now = datetime.now()
+                print("%s Spectrum %3d/%3d %s ..." % (now, i, self.args.spectra, spectrum[:10]))
                 if outfile is not None:
-                    outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
+                    outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
             sleep(self.args.delay_ms / 1000.0 )
         if outfile is not None:
             outfile.close()
@@ -228,10 +254,33 @@ class Fixture(object):
     def get_spectrum(self, dev):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(dev, 0xad, 1)
-        data = dev.read(0x82, dev.eeprom["pixels"] * 2, timeout=timeout_ms)
+        return self.demarshal_spectrum(dev.read(0x82, dev.eeprom["pixels"] * 2, timeout=timeout_ms))
+
+    def get_spectrum_trigger(self, dev):
+        now = datetime.now()
+        print(f"{now} waiting for trigger..", end='')  # note we don't send an AQUIRE
+        while True:
+            try:
+                print(".", end='')
+                data = dev.read(0x82, dev.eeprom["pixels"] * 2, timeout=1000)
+                if data is not None:
+                    now = datetime.now()
+                    ms_since_last = (now - self.last_acquire).total_seconds() * 1000.0
+                    self.last_acquire = now
+
+                    print()
+                    print(f"{now} received! ({ms_since_last}ms since last)")
+
+                    return self.demarshal_spectrum(data)
+            except Exception as ex:
+                #print(ex)
+                pass
+
+    def demarshal_spectrum(self, data):
         spectrum = []
-        for i in range(0, len(data), 2):
-            spectrum.append(data[i] | (data[i+1] << 8))
+        if data is not None:
+            for i in range(0, len(data), 2):
+                spectrum.append(data[i] | (data[i+1] << 8))
         return spectrum
 
     ############################################################################
@@ -254,11 +303,22 @@ class Fixture(object):
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
-    def get_cmd(self, dev, cmd, value=0, index=0, length=64):
+    def get_cmd(self, dev, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d)" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
         result = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, result))
-        return result
+
+        value = 0
+        if msb_len is not None:
+            for i in range(msb_len):
+                value = value << 8 | result[i]
+            return value
+        elif lsb_len is not None:
+            for i in range(lsb_len):
+                value = (result[i] << (8 * i)) | value
+            return value
+        else:
+            return result
 
     def unpack(self, dev, address, data_type):
         page       = address[0]
