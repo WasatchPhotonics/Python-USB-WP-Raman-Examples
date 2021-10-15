@@ -269,7 +269,7 @@ class Fixture(object):
                     self.last_acquire = now
 
                     print()
-                    print(f"{now} received! ({ms_since_last}ms since last)")
+                    print(f"{now} received! ({ms_since_last:.2f}ms since last)")
 
                     return self.demarshal_spectrum(data)
             except Exception as ex:
