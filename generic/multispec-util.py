@@ -127,8 +127,9 @@ class Fixture(object):
                 self.set_integration_time_ms(dev, self.args.integration_time_ms)
 
         if self.args.trigger_enable:
+            [self.set_continuous_frames     (dev, 1) for dev in self.devices]
             [self.set_continuous_acquisition(dev, 0) for dev in self.devices]
-            [self.set_trigger_source(dev, 1) for dev in self.devices]
+            [self.set_trigger_source        (dev, 1) for dev in self.devices]
 
         # [self.get_fpga_configuration_register(dev) for dev in self.devices]
 
@@ -186,9 +187,13 @@ class Fixture(object):
         self.debug(f"setting triggerSource to {n}")
         self.send_cmd(dev, 0xd2, n)
 
-    def set_continuous_acquisition(self, dev,n):
+    def set_continuous_acquisition(self, dev, n):
         self.debug(f"setting continuous acquisition to {n}")
         self.send_cmd(dev, 0xc8, n)
+
+    def set_continuous_frames(self, dev, n):
+        self.debug(f"setting continuous frame count to {n}")
+        self.send_cmd(dev, 0xc9, n)
 
     def set_selected_laser(self, dev, n):
         if n < 0 or n > 0xffff:
