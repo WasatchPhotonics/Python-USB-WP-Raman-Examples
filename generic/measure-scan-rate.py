@@ -1,3 +1,4 @@
+import os
 import re
 import sys
 import struct
@@ -41,8 +42,9 @@ class Fixture(object):
         if self.device is None:
             return
 
-        self.device.set_configuration(1)
-        usb.util.claim_interface(self.device, 0)
+        if os.name == "posix":
+            self.device.set_configuration(1)
+            usb.util.claim_interface(self.device, 0)
 
         self.read_eeprom()
         self.fw_version = self.get_firmware_version()
@@ -104,7 +106,7 @@ class Fixture(object):
         self.model           = self.unpack((0,  0, 16), "s")
         self.serial_number   = self.unpack((0, 16, 16), "s")
         self.detector        = self.unpack((2,  0, 16), "s")
-        self.pixels          = self.unpack((2, 25,  2), "H" if self.format >= 4 else "h")
+        self.pixels          = self.unpack((2, 16,  2), "H")
 
         self.wavelength_coeffs = [0] * 5
         for i in range(4):
@@ -143,7 +145,7 @@ class Fixture(object):
 
     def get_spectrum(self):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
-        self.send_cmd(0xad, 1)
+        self.send_cmd(0xad)
         data = self.device.read(0x82, self.pixels * 2, timeout=timeout_ms)
         spectrum = []
         for i in range(0, len(data), 2):
