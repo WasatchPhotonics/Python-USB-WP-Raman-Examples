@@ -28,7 +28,7 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              action="store_true", help="fire laser")
-        parser.add_argument("--max-ms",              type=int,            help="firing time (ms) (default 1000)")
+        parser.add_argument("--max-ms",              type=int,            help="firing time (ms) (default 1000)", default=1000)
         parser.add_argument("--mod-enable",          action="store_true", help="enable modulation")
         parser.add_argument("--mod-period-us",       type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
         parser.add_argument("--mod-width-us",        type=int,            help="laser modulation pulse width (us) (default 100)", default=100)
@@ -59,7 +59,7 @@ class Fixture(object):
         self.set_enable(True)
 
         print("sleeping %d ms..." % self.args.max_ms)
-        sleep(self.args.max_ms)
+        sleep(self.args.max_ms / 1000.0)
 
         self.set_enable(False)
 
