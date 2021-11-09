@@ -218,6 +218,51 @@ class cWinEEPROM:
         self.SPI.write(command, 0, 7)
 # End Class cWinEEPROM
 
+# Class container for the area scan window
+class cWinAreaScan:
+
+    def __init__(self, SPI, ready, trigger, lineCount, columnCount):
+        self.SPI     = SPI
+        self.ready   = ready
+        self.trigger = trigger
+        self.root    = tk.Tk()
+        self.root.title("Area Scan")
+        self.frame   = tk.Frame(self.root)
+        self.canvas  = tk.Canvas(self.frame, bg="black", height=lineCount, width=columnCount)
+        #This doesn't work and I don't know why /sadface
+        #   self.image   = tk.PhotoImage(height=lineCount, width=columnCount)
+        #   self.canvas.create_image((columnCount/2, lineCount/2), image=self.image, state="normal")
+        self.frame.pack()
+        self.canvas.pack()
+        # Enable Area Scan
+        command = bytearray(8)
+        command = [0x3C, 0x00, 0x03, 0x92, 0x00, 0x10, 0xFF, 0x3E]
+        self.SPI.write(command, 0, 8)
+        # Send a trigger
+        self.trigger.value = True
+        # Wait until the data is ready
+        SPIBuf  = bytearray(2)
+        for y in range(1, lineCount):
+            x = 0
+            while not self.ready.value:
+                pass
+            for x in range(0, columnCount):
+                self.SPI.readinto(SPIBuf, 0, 2)
+                pixel = (((SPIBuf[0] << 8) + SPIBuf[1]) >> 4)
+                pixelHex = hex(pixel)
+                pixelHex = pixelHex[2:].zfill(2)
+                color = "#" + pixelHex + pixelHex + pixelHex
+                #self.image.put(color, (x,y))
+                self.canvas.create_line(x, y, x+1, y, fill=color, width=1)
+                
+
+        # Clear the trigger
+        self.trigger.value = False
+        # Disable Area Scan
+        command = [0x3C, 0x00, 0x03, 0x92, 0x00, 0x00, 0xFF, 0x3E]
+        self.SPI.write(command, 0, 8)
+        self.root.mainloop()
+
 # Class container for the main window and all of its elements
 class cWinMain:
 
@@ -246,7 +291,7 @@ class cWinMain:
         cCfgCombo.frame  = self.configFrame
         # Create frame for drawing. 
         self.drawFrame= tk.Frame(self.root)
-        self.canvas = tk.Canvas(self.drawFrame, bg="black", height=540, width=960)
+        self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=1200)
         self.canvas.pack()
         self.drawFrame.grid(row=0, column=1)
         # Empty list for the config objects
@@ -256,29 +301,36 @@ class cWinMain:
         # Special case, we want this box read only
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
         # Create all of the config entries        
-        self.configObjects.append(cCfgEntry("Integration Time" , 1 , 100   , 0x11))
-        self.configObjects.append(cCfgEntry("Detector Offset"  , 2 , 0     , 0x13))
-        self.configObjects.append(cCfgEntry("Detector Gain"    , 3 , 0x100 , 0x14))
-        self.configObjects.append(cCfgEntry("Start Line"       , 4 , 250   , 0x50))
-        self.configObjects.append(cCfgEntry("Stop Line"        , 5 , 750   , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column"     , 6 , 500   , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column"      , 7 , 1500  , 0x53))
+        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100   , 0x11))
+        self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0     , 0x13))
+        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100 , 0x14))
+        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250   , 0x50))
+        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750   , 0x51))
+        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 500   , 0x52))
+        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1500  , 0x53))
+        self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0     , 0x54))
+        self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0     , 0x55))
+        self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0     , 0x56))
+        self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0     , 0x57))
         # Add the AD/OD combo boxes
-        self.configObjects.append(cCfgCombo(8))
+        self.configObjects.append(cCfgCombo(12))
         # Add the buttons
-        self.btnCapture = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
-        self.btnCapture.grid(row=10, column=0)
-        self.btnEEPROM  = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
-        self.btnEEPROM.grid(row=10, column=1)
+        self.btnCapture  = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
+        self.btnCapture.grid(row=15, column=0)
+        self.btnEEPROM   = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
+        self.btnEEPROM.grid(row=16, column=0)
+        self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
+        self.btnAreaScan.grid(row=16, column=1)
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
-        self.configFrame.grid_columnconfigure(0, minsize=110)
-        self.configFrame.grid_columnconfigure(1, minsize=100)
+        self.configFrame.grid_columnconfigure(0, minsize=120)
+        self.configFrame.grid_columnconfigure(1, minsize=120)
         for row in range(row_count):
             self.configFrame.grid_rowconfigure(row, minsize=30)
         # Write the initial values
         self.FPGAInit()
         # Launch the main loop
+        self.acquireActive = True
         self.root.after(10, self.Acquire)
         self.root.mainloop()
 
@@ -301,33 +353,65 @@ class cWinMain:
             pixel = (SPIBuf[0] << 8) + SPIBuf[1]
             spectra.append(pixel)
 
-        maxvalue = 0
-        minvalue = 65536
-        spectraBinned = []
-        for x in range(1, len(spectra), 2):
+        region0 = self.configObjects[7].value - self.configObjects[6].value
+        region1 = self.configObjects[11].value - self.configObjects[10].value
+        region1Active = self.configObjects[9].value != 0
+
+        maxvalue0 = 0
+        minvalue0 = 65536
+        maxvalue1 = 0
+        minvalue1 = 65536
+        spectraBinned0 = []
+        spectraBinned1 = []
+        for x in range(1, region0, 2):
             pixel = int((spectra[x-1] + spectra[x]) / 2)
-            if pixel > maxvalue:
-                maxvalue = pixel
-            if pixel < minvalue:
-                minvalue = pixel
-            spectraBinned.append(pixel)
+            if pixel > maxvalue0:
+                maxvalue0 = pixel
+            if pixel < minvalue0:
+                minvalue0 = pixel
+            spectraBinned0.append(pixel)
+
+        if region1Active:
+            for x in range((region0+1), (region0+region1), 2):
+                pixel = int((spectra[x-1] + spectra[x]) / 2)
+                if pixel > maxvalue1:
+                    maxvalue1 = pixel
+                if pixel < minvalue1:
+                    minvalue1 = pixel
+                spectraBinned1.append(pixel)
 
         # Draw the graph
-        scale = maxvalue - minvalue
-        if scale != 0:
-            midvalue = int(minvalue + (scale/2))
+        scale0 = maxvalue0 - minvalue0
+        if scale0 != 0:
+            midvalue = int(minvalue0 + (scale0/2))
             self.canvas.delete("all")
-            self.canvas.create_text(20,20,text=str(maxvalue), fill="white")
-            self.canvas.create_text(20,270,text=str(midvalue), fill="white")
-            self.canvas.create_text(20,520,text=str(minvalue), fill="white")
-            spectraCount = len(spectraBinned)
+            self.canvas.create_text(20,20,text=str(maxvalue0), fill="white")
+            self.canvas.create_text(20,200,text=str(midvalue), fill="white")
+            self.canvas.create_text(20,380,text=str(minvalue0), fill="white")
+            self.canvas.create_line(0, 405, 1400, 405, fill="light grey", width=10)
+            spectraCount = len(spectraBinned0)
             for x in range(1, spectraCount):
-                x0 = int((x/spectraCount)*920) + 40
-                y0 = 520 - int(((spectraBinned[(x-1)]-minvalue)/scale)*500)
-                x1 = int(((x+1)/spectraCount)*920) + 40
-                y1 = 520 - int(((spectraBinned[x]-minvalue)/scale)*500)
+                x0 = int((x/spectraCount)*1160) + 40
+                y0 = 380 - int(((spectraBinned0[(x-1)]-minvalue0)/scale0)*340)
+                x1 = int(((x+1)/spectraCount)*1160) + 40
+                y1 = 380 - int(((spectraBinned0[x]-minvalue0)/scale0)*340)
                 self.canvas.create_line(x0, y0, x1, y1, fill="green", width=1)
-        self.root.after(10, self.Acquire)
+        if region1Active:
+            scale1 = maxvalue1 - minvalue1
+            midvalue = int(minvalue1 + (scale1/2))
+            self.canvas.create_text(20,430,text=str(maxvalue1), fill="white")
+            self.canvas.create_text(20,610,text=str(midvalue), fill="white")
+            self.canvas.create_text(20,790,text=str(minvalue0), fill="white")
+            spectraCount = len(spectraBinned1)
+            for x in range(1, spectraCount):
+                x0 = int((x/spectraCount)*1160) + 40
+                y0 = 790 - int(((spectraBinned1[(x-1)]-minvalue1)/scale1)*340)
+                x1 = int(((x+1)/spectraCount)*1160) + 40
+                y1 = 790 - int(((spectraBinned1[x]-minvalue1)/scale1)*340)
+                self.canvas.create_line(x0, y0, x1, y1, fill="blue", width=1)
+
+        if (self.acquireActive):
+            self.root.after(10, self.Acquire)
 
     def FPGAInit(self):
         response = bytearray(2)
@@ -351,6 +435,17 @@ class cWinMain:
 
     def openEEPROM(self):
         self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
+
+    def openAreaScan(self):
+        self.acquireActive = False
+        # Give time for the last acquisition to complete
+        time.sleep(0.1)
+        lineCount   = self.configObjects[5].value - self.configObjects[4].value
+        columnCount = self.configObjects[7].value - self.configObjects[6].value
+        self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
+        self.acquireActive = True
+        self.root.after(10, self.Acquire)
+
 # End Class cWinMain
 
 ###############Begin Main################
