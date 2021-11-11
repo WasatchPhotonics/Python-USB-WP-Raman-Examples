@@ -246,14 +246,17 @@ class cWinAreaScan:
             x = 0
             while not self.ready.value:
                 pass
-            for x in range(0, columnCount):
+            self.SPI.readinto(SPIBuf, 0, 2)
+            pixel = (SPIBuf[0] << 8) + SPIBuf[1]
+            print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
+            for x in range(1, columnCount):
                 self.SPI.readinto(SPIBuf, 0, 2)
                 pixel = (((SPIBuf[0] << 8) + SPIBuf[1]) >> 4)
                 pixelHex = hex(pixel)
                 pixelHex = pixelHex[2:].zfill(2)
                 color = "#" + pixelHex + pixelHex + pixelHex
                 #self.image.put(color, (x,y))
-                self.canvas.create_line(x, y, x+1, y, fill=color, width=1)
+                self.canvas.create_line(x-1, y, x, y, fill=color, width=1)
                 
 
         # Clear the trigger
@@ -312,15 +315,16 @@ class cWinMain:
         self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0     , 0x55))
         self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0     , 0x56))
         self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0     , 0x57))
+        self.configObjects.append(cCfgEntry("Desmile Offset"   , 12 , 0     , 0x58))
         # Add the AD/OD combo boxes
-        self.configObjects.append(cCfgCombo(12))
+        self.configObjects.append(cCfgCombo(13))
         # Add the buttons
         self.btnCapture  = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
-        self.btnCapture.grid(row=15, column=0)
+        self.btnCapture.grid(row=16, column=0)
         self.btnEEPROM   = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
-        self.btnEEPROM.grid(row=16, column=0)
+        self.btnEEPROM.grid(row=17, column=0)
         self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
-        self.btnAreaScan.grid(row=16, column=1)
+        self.btnAreaScan.grid(row=18, column=1)
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
         self.configFrame.grid_columnconfigure(0, minsize=120)
@@ -363,7 +367,7 @@ class cWinMain:
         minvalue1 = 65536
         spectraBinned0 = []
         spectraBinned1 = []
-        for x in range(1, region0, 2):
+        for x in range(self.configObjects[12].value, region0, 2):
             pixel = int((spectra[x-1] + spectra[x]) / 2)
             if pixel > maxvalue0:
                 maxvalue0 = pixel
