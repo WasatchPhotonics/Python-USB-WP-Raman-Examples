@@ -1,5 +1,6 @@
 #!/usr/bin/env python -u
 
+import os
 import sys
 import usb.core
 import argparse
@@ -12,8 +13,9 @@ TIMEOUT_MS = 1000
 
 def process_cmd_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--count",               type=int,            help="how many spectra to read (default 20)", default=20)
+    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read (default 20)", default=20)
     parser.add_argument("--debug",               action="store_true", help="verbose output")
+    parser.add_argument("--fast",                action="store_true", help="fast mode")
     parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms) (default 10)", default=10)
     parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
     parser.add_argument("--pixels",              type=int,            help="expected pixels (default 1952)", default=1952)
@@ -35,6 +37,10 @@ if dev is None:
     print("No spectrometers found")
     sys.exit(0)
 
+if os.name == "posix":
+    dev.set_configuration(1)
+    usb.util.claim_interface(dev, 0)
+
 # report firmware revisions
 fw = ".".join(reversed([str(x) for x in dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 64)]))
 fpga = "".join([chr(x) for x in dev.ctrl_transfer(DEVICE_TO_HOST, 0xb4, 0, 0, 64)])
@@ -54,10 +60,14 @@ if args.stop_line is not None:
 print("Enabling area scan")
 send_code(0xeb, 1)
 
-print("Looping over %d spectra" % args.count)
-for linenum in range(args.count):
-    # send SW trigger
+if args.fast:
     send_code(0xad)
+
+print("Looping over %d spectra (lines)" % args.count)
+for linenum in range(args.count):
+
+    if not args.fast:
+        send_code(0xad)
 
     # read spectrum
     data = dev.read(0x82, args.pixels * 2)

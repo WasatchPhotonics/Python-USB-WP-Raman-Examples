@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import array
+import json
 import sys
 import re
 from time import sleep
@@ -61,6 +63,24 @@ class Fixture(object):
 
         self.write_eeprom()
 
+    def load(self, filename):
+        if filename.endswith(".json"):
+            self.load_json(filename)
+        else:
+            self.load_other(filename)
+
+    def load_json(self, filename):
+        with open(filename) as f:
+            doc = json.load(f)
+        buffers_string = doc["buffers"][1:-2] # strip first/last []
+
+        page_strings = buffers_string.split(", array")
+        for page in range(len(page_strings)):
+            m = re.search(r"\[(.*)\]", page_strings[page])
+            delimited = m.group(1)
+            values = [ int(v.strip()) for v in delimited.split(",") ]
+            self.pack_page(page, values)
+
     ##
     # This function will load an EEPROM definition from an external 
     # text file.  It supports a couple of different file formats,
@@ -68,10 +88,11 @@ class Fixture(object):
     #
     # - extract of ENLIGHTEN logfile
     # - output of this program (eeprom-util.py)
-    def load(self, filename):
+    def load_other(self, filename):
         linecount = 0
         filetype = None
         print(f"restoring from {filename}")
+
         with open(filename) as f:
             for line in f:
                 self.debug("read: %s" % line)
@@ -134,21 +155,24 @@ class Fixture(object):
                 if page is None or values is None:
                     raise Exception(f"could not parse line: {line}")
 
-                if not (0 <= page <= self.args.max_pages):
-                    raise Exception(f"invalid page: {page}")
-
-                length = len(values)
-                if length != 64:
-                    raise Exception(f"wrong array length: {length}")
-
-                self.debug(f"packing {length} values")
-                for i in range(length):
-                    v = values[i]
-                    if not (0 <= v <= 255):
-                        raise Exception(f"invalid byte: {v}")
-                    self.pack((page, i, 1), "B", values[i])
+                self.pack_page(page, values)
 
                 self.debug(f"parsed and packed page {page}")
+
+    def pack_page(self, page, values):
+        if not (0 <= page <= self.args.max_pages):
+            raise Exception(f"invalid page: {page}")
+
+        length = len(values)
+        if length != 64:
+            raise Exception(f"wrong array length: {length}")
+
+        self.debug(f"packing {length} values")
+        for i in range(length):
+            v = values[i]
+            if not (0 <= v <= 255):
+                raise Exception(f"invalid byte: {v}")
+            self.pack((page, i, 1), "B", values[i])
 
     def read_eeprom(self):
         print("Reading EEPROM")
