@@ -15,8 +15,6 @@ class Fixture:
         else:
             self.driver = cdll.atmcd32d
 
-        self.open()
-
     def open(self):
         cameraHandle = c_int()
         assert(self.SUCCESS == self.driver.GetCameraHandle(self.spec_index, byref(cameraHandle))), "unable to get camera handle"
@@ -26,7 +24,7 @@ class Fixture:
         # not sure init_str is actually required
         init_str = create_string_buffer(b'\000' * 16)
         assert(self.SUCCESS == self.driver.Initialize(init_str)), "unable to initialize camera"
-        print("self.SUCCESS")
+        print("success")
 
         self.get_serial_number()
         self.init_tec_setpoint()
@@ -54,7 +52,7 @@ class Fixture:
     def get_serial_number(self):
         sn = c_int()
         assert(self.SUCCESS == cdll.atmcd32d.GetCameraSerialNumber(byref(sn))), "can't get serial number"
-        self.serial = "CCD-{sn.value}"
+        self.serial = f"CCD-{sn.value}"
         print(f"connected to {self.serial}")
 
     def init_tec_setpoint(self):
