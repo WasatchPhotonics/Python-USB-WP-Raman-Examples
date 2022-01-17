@@ -1,4 +1,5 @@
 import struct
+import time
 from ctypes import *
 
 class Fixture:
@@ -53,6 +54,17 @@ class Fixture:
         self.set_integration_time_ms(10)
         spectra = self.get_spectrum()
         print(spectra)
+        for i in range(2):
+            self.close_ex_shutter()
+            time.sleep(0.5)
+            self.open_ex_shutter()
+            time.sleep(0.5)
+
+    def close_ex_shutter(self):
+        assert(self.SUCCESS == self.driver.SetShutterEx(1, 1, self.SHUTTER_SPEED_MS, self.SHUTTER_SPEED_MS, 2)), "unable to set external shutter"
+
+    def open_ex_shutter(self):
+        assert(self.SUCCESS == self.driver.SetShutterEx(1, 1, self.SHUTTER_SPEED_MS, self.SHUTTER_SPEED_MS, 1)), "unable to set external shutter"
 
     def get_serial_number(self):
         sn = c_int()
