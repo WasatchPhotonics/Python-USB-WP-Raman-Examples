@@ -8,6 +8,9 @@ class Fixture:
 
     def __init__(self):
         self.spec_index = 0 
+        self._scan_averaging = 1
+        self.dark = None
+        self.boxcar_half_width = 0
 
         # select appropriate Andor library per architecture
         if 64 == struct.calcsize("P") * 8:
@@ -48,6 +51,8 @@ class Fixture:
         print("set shutter to fully automatic external with internal always open")
 
         self.set_integration_time_ms(10)
+        spectra = self.get_spectrum()
+        print(spectra)
 
     def get_serial_number(self):
         sn = c_int()
@@ -71,7 +76,7 @@ class Fixture:
         yPixels = c_int()
         assert(self.SUCCESS == self.driver.GetDetector(byref(xPixels), byref(yPixels))), "unable to read detector dimensions"
         print(f"detector {xPixels.value} width x {yPixels.value} height")
-        pixels = xPixels.value
+        self.pixels = xPixels.value
 
     def init_detector_speed (self):
         # set vertical to recommended
@@ -111,5 +116,62 @@ class Fixture:
         assert(self.SUCCESS == self.driver.GetAcquisitionTimings(byref(exposure), byref(accumulate), byref(kinetic))), "unable to read acquisition timings"
         print(f"read integration time of {exposure.value:.3f}sec (expected {ms}ms)")
 
+    def get_spectrum_raw(self):
+        print("requesting spectrum");
+        #################
+        # read spectrum
+        #################
+        #int[] spec = new int[pixels];
+        spec_arr = c_long * self.pixels
+        spec_init_vals = [0] * self.pixels
+        spec = spec_arr(*spec_init_vals)
+
+        # ask for spectrum then collect, NOT multithreaded (though we should look into that!), blocks
+        #spec = new int[pixels];     //defaults to all zeros
+        self.driver.StartAcquisition();
+        self.driver.WaitForAcquisition();
+        success = self.driver.GetAcquiredData(spec, c_ulong(self.pixels));
+
+        if (success != self.SUCCESS):
+            print(f"getting spectra did not succeed. Received code of {success}. Returning")
+            return
+
+        convertedSpec = [x for x in spec]
+
+        #if (self.eeprom.featureMask.invertXAxis):
+         #   convertedSpec.reverse()
+
+        print(f"getSpectrumRaw: returning {len(spec)} pixels");
+        return convertedSpec;
+
+    def get_spectrum(self):
+        sum = self.get_spectrum_raw()
+        if sum == None:
+            print("spectrum raw was none")
+            return
+        print(f"Received raw specturm of length {len(sum)}")
+        if (self._scan_averaging > 1):
+            # print("getSpectrum: getting additional spectra for averaging");
+            for i in range(self._scan_averaging):
+                tmp = self.get_spectrum_raw();
+                if tmp == None:
+                    return
+
+                sum = [x + y for x, y in zip(sum,tmp)]
+
+            sum = [x/self._scan_averaging for x in sum]
+
+        if self.dark != None and len(dark) == len(sum.Length):
+            sum = [x-y for x, y in zip(sum,self.dark)]
+
+        #correct_bad_pixels(ref sum);
+
+        if (self.boxcar_half_width > 0):
+            # logger.debug("getSpectrum: returning boxcar");
+            #return Util.applyBoxcar(boxcarHalfWidth, sum);
+            return
+        else:
+            # logger.debug("getSpectrum: returning sum");
+            return sum
 fixture = Fixture()
 fixture.open()
