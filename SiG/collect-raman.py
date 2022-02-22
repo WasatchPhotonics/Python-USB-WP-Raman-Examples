@@ -48,8 +48,8 @@ class Fixture(object):
         parser.add_argument("--fire-laser",          action="store_true", help="to avoid accidents, WILL NOT fire laser unless specified")
         parser.add_argument("--gain-db",             type=float,          help="gain in dB (default 8.0)", default=8.0)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms) (default 100)", default=100)
-        parser.add_argument("--laser-power",         type=int,            help="laser power as a percentage (range 1-100) (default 100)", default=100)
-        parser.add_argument("--laser-warmup-ms",     type=int,            help="laser warmup delay in ms (default 4000)", default=4000)
+        parser.add_argument("--laser-power-perc",    type=float,          help="laser power as a percentage (range 0.1-100) (default 100)")
+        parser.add_argument("--laser-warmup-ms",     type=int,            help="laser warmup delay in ms (default 1000)", default=1000)
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--plot",                action="store_true", help="graph spectra after collection")
         parser.add_argument("--scans-to-average",    type=int,            help="scans to average (default 0)", default=1)
@@ -91,6 +91,14 @@ class Fixture(object):
         self.wavecal_C1     = self.unpack((1,  4,  4), "f")
         self.wavecal_C2     = self.unpack((1,  8,  4), "f")
         self.wavecal_C3     = self.unpack((1, 12,  4), "f")
+
+        # unsure if SiG receive laser power calibration, but capturing for when they do
+        self.laser_power_C0 = self.unpack((3, 12,  4), "f")
+        self.laser_power_C1 = self.unpack((3, 16,  4), "f")
+        self.laser_power_C2 = self.unpack((3, 20,  4), "f")
+        self.laser_power_C3 = self.unpack((3, 24,  4), "f")
+        self.max_laser_power_mW = self.unpack((3, 28,  4), "f")
+        self.min_laser_power_mW = self.unpack((3, 32,  4), "f")
 
     def generate_wavelengths(self):
         self.wavelengths = []
@@ -138,6 +146,8 @@ class Fixture(object):
 
         # enable laser
         if self.args.fire_laser:
+            if self.args.laser_power_perc is not None:
+                self.set_laser_power_perc(self.args.laser_power_perc)
             self.set_laser_enable(True)
         else:
             print("*** not firing laser because --fire-laser not specified ***")
@@ -288,9 +298,46 @@ class Fixture(object):
 
         return spectrum
 
+    ## perc is a float (0.0, 100.0)
+    def set_laser_power_perc(self, perc):
+        value = float(max(0, min(100, perc)))
+
+        self.set_mod_enable(False)
+        if value >= 100:
+            return 
+
+        if value < 0.1:
+            self.set_laser_enable(False)
+            return
+
+        period_us = 1000
+        width_us = int(round(1.0 * value * period_us / 100.0, 0)) # note value is in range (0, 100) not (0, 1)
+        width_us = max(1, min(width_us, period_us))
+
+        self.set_mod_period_us(period_us)
+        self.set_mod_width_us(width_us)
+        self.set_mod_enable(True)
+
+    def set_mod_enable(self, flag):
+        return self.send_cmd(0xbd, 1 if flag else 0)
+
+    def set_mod_period_us(self, us):
+        (lsw, msw, buf) = self.to40bit(us)
+        return self.send_cmd(0xc7, lsw, msw, buf)
+
+    def set_mod_width_us(self, us):
+        (lsw, msw, buf) = self.to40bit(us)
+        return self.send_cmd(0xdb, lsw, msw, buf)
+
     ############################################################################
     # Utility Methods
     ############################################################################
+
+    def to40bit(self, us):
+        lsw = us & 0xffff
+        msw = (us >> 16) & 0xffff
+        buf = [ (us >> 32) & 0xff, 0 * 7 ]
+        return (lsw, msw, buf)
 
     def debug(self, msg):
         if self.args.debug:
