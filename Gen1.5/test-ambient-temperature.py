@@ -24,6 +24,7 @@ for i in range(TEST_COUNT):
 
     # read raw ambient temperature
     raw = common.get_cmd(dev, GET_CMD, msb_len=2)
+    print(raw)
 
     # convert to degrees Celsius
     msb = (raw >> 8) & 0xff

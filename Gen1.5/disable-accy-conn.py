@@ -11,7 +11,7 @@ if not dev:
     print("No spectrometers found")
     sys.exit()
 
-SET_ACCY_EN         = 0x38
+SET_ACCY_EN         = 0x22
 
 print("Accessory Connector Disabled")
 common.send_cmd(dev, SET_ACCY_EN, 0)
