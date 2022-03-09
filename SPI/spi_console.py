@@ -1,6 +1,9 @@
 import tkinter as tk
 import tkinter.ttk as ttk
 
+import usb.core
+usb.core.find()
+
 import time
 import board
 import digitalio
@@ -270,6 +273,7 @@ class cWinAreaScan:
 class cWinMain:
 
     def __init__(self, SPI, ready, trigger, intValidate):
+        print("starting window main")
         # Register the handles
         self.SPI        = SPI
         self.ready      = ready
@@ -298,6 +302,7 @@ class cWinMain:
         self.canvas.pack()
         self.drawFrame.grid(row=0, column=1)
         # Empty list for the config objects
+        print("setting up configure objects")
         self.configObjects = []
         # Create an object for the FPGA Revision
         self.configObjects.append(cCfgString("FPGA Revision", 0, "00.0.00", 0x10))
@@ -332,13 +337,16 @@ class cWinMain:
         for row in range(row_count):
             self.configFrame.grid_rowconfigure(row, minsize=30)
         # Write the initial values
+        print("write initial FPGA values")
         self.FPGAInit()
         # Launch the main loop
+        print("launching main loop")
         self.acquireActive = True
         self.root.after(10, self.Acquire)
         self.root.mainloop()
 
     def Acquire(self):
+        print("calling acquire")
         SPIBuf  = bytearray(2)
         spectra = []
         # Send and acquire trigger
@@ -346,6 +354,7 @@ class cWinMain:
 
         # Wait until the data is ready
         while not self.ready.value:
+            #print("data is not ready")
             pass
 
         # Relase the trigger
@@ -421,6 +430,7 @@ class cWinMain:
         response = bytearray(2)
         # Read out an errant data
         while self.ready.value:
+            print("still reading FPGA responses")
             self.SPI.readinto(response, 0, 2)
         # Fetch the revision from the FPGA
         self.configObjects[0].SPIRead()
