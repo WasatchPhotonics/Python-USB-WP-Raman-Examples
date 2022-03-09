@@ -102,3 +102,7 @@ Places the InGaAs sensor into LOW_GAIN mode
 
 ### GetGain.py
 Requests the current gain setting
+
+## SPI
+---
+For Mac versions using circuit python for the the FT232H, you must import usb.core then perform a usb.core.find() before you can import board. If you do not, it will throw a no backend available error.
