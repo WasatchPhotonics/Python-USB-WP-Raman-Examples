@@ -10,11 +10,11 @@ DEVICE_TO_HOST  = 0xc0
 TIMEOUT_MS      = 1000
 
 CAN_LASER_FIRE  = 0xef
-IS_LASER_FIRING = 0x0d
+IS_LASER_FIRING = 0xff          # Note this is a secondary command call, the opcode is 0x0d which is included as the default value for param wValue in the getValue fuction def below
 
-def getValue(bRequest, wValue=0, wIndex=0, len_lsb=1):
+def getValue(bRequest, wValue=0x0d, wIndex=0, len_lsb=1):
     data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, len_lsb, TIMEOUT_MS)
-
+    datalen = len(data)
     # convert response array to uint in LSB order
     result = 0
     for i in range(datalen):
