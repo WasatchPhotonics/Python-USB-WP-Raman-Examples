@@ -33,11 +33,12 @@ class cCfgString:
     # Read a string from the FPGA. This is only used for the revision register
     def SPIRead(self):
         command  = bytearray(5)
-        response = bytearray(12)
+        response = bytearray(19)
         command = [0x3C, 0x00, 0x01, self.address, 0x3E]
-        cCfgString.SPI.write_readinto(command, response, 0, 5, 0, 12)
+        cCfgString.SPI.write_readinto(command, response)
+        print(response)
         # Decode the binary response into a string
-        self.value = response[5:11].decode()
+        self.value = response[10:16].decode()
         # Set the text in the entry box
         self.stringVar.set(self.value)
 
@@ -70,14 +71,16 @@ class cCfgEntry:
     # Read a 16 bit integer from the FPGA. Used for everything else
     def SPIRead(self):
         command  = bytearray(5)
-        response = bytearray(7)
+        response = bytearray(14)
         # A read command consists of opening and closing delimeters, the payload size (typically only 1 for the command byte),
         # and the command/address.
         # Refer to ENG-150 for additional information
-        command  = [0x3C, 0x00, 0x01, self.address, 0x3E, 0x00, 0x00, 0x00]
-        SPI.write_readinto(command, response, 0, 5, 0, 7)
-        self.value = (response[6] << 8) + response[5]
-        self.stringValue.set(str(self.value))
+        command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
+        SPI.write_readinto(command, response)
+        print(response)
+        print((response[6] << 8) + response[7])
+        self.value = (response[10] << 8) + response[9]
+        self.stringVar.set(str(self.value))
 
     def SPIWrite(self):
         command = bytearray(8)
@@ -131,11 +134,12 @@ class cCfgCombo:
     # Read a 16 bit integer from the FPGA. Used for everything else
     def SPIRead(self):
         command  = bytearray(5)
-        response = bytearray(7)
+        response = bytearray(14)
         command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
-        SPI.write_readinto(command, response, 0, 5, 0, 7)
-        self.value = (response[6] << 8) + response[5]
-        self.stringValue.set(str(self.value))
+        SPI.write_readinto(command, response)
+        print(response)
+        self.value = (response[10] << 8) + response[9]
+        self.stringVar.set(str(self.value))
 
     def SPIWrite(self):
         command = bytearray(7)
@@ -199,7 +203,7 @@ class cWinEEPROM:
         self.SPI.write(command, 0, 7)
         time.sleep(0.01)
         command = [0x3C, 0x00, 0x01, 0x31, 0xFF, 0x3E]
-        self.SPI.write_readinto(command, EEPROMPage, 0, 6, 0, 68)
+        self.SPI.write_readinto(command, EEPROMPage)
         for x in range(0, 64):
             self.valStrings[x].set(str(hex(EEPROMPage[x+4])))
 
@@ -419,7 +423,7 @@ class cWinMain:
 
     def FPGAInit(self):
         response = bytearray(2)
-        # Read out an errant data
+        # Read out any errant data
         while self.ready.value:
             self.SPI.readinto(response, 0, 2)
         # Fetch the revision from the FPGA
@@ -458,7 +462,7 @@ SPI  = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
 
 # Initialize D5 as the ready signal
 ready = digitalio.DigitalInOut(board.D5)
-ready.direction = digitalio.Direction.INPUT
+ready.direction = digitalio.Direction.OUTPUT
 
 # Initialize D6 as the trigger
 trigger = digitalio.DigitalInOut(board.D6)
@@ -470,7 +474,7 @@ while not SPI.try_lock():
     pass
 
 # Configure the SPI bus
-SPI.configure(baudrate=8000000, phase=0, polarity=0, bits=8)
+SPI.configure(baudrate=20000000, phase=0, polarity=0, bits=8)
 
 # Create the main window and pass in the handles
 winSIG = cWinMain(SPI, ready, trigger, fIntValidate)
