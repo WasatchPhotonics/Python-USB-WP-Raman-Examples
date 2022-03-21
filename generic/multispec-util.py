@@ -3,6 +3,7 @@
 # We don't want this to become a copy of everything in Wasatch.PY, but we want to
 # make certain things very easy and debuggable from the command-line
 
+import math
 import sys
 import re
 from time import sleep
@@ -37,6 +38,7 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
+        parser.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
         parser.add_argument("--trigger-enable",      action="store_true", help="enable triggering")
         parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
         parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=10)
@@ -64,9 +66,9 @@ class Fixture(object):
         for count in range(self.args.loop):
             print(f"loop {count}")
             for dev in self.devices:
-                self.read_eeprom(dev)
                 dev.fw_version = self.get_firmware_version(dev)
                 dev.fpga_version = self.get_fpga_version(dev)
+                self.read_eeprom(dev)
 
         # apply filters
         self.filter_by_serial()
@@ -133,7 +135,13 @@ class Fixture(object):
 
         # [self.get_fpga_configuration_register(dev) for dev in self.devices]
 
+        if self.args.laser_enable:
+            [self.set_laser_enable(dev, 1) for dev in self.devices]
+
         self.do_acquisitions()
+
+        if self.args.laser_enable:
+            [self.set_laser_enable(dev, 0) for dev in self.devices]
 
         if self.args.trigger_enable:
             [self.set_trigger_source(dev, 0) for dev in self.devices]
@@ -243,6 +251,21 @@ class Fixture(object):
         print("setting Raman Watchdog %d sec" % sec)
         self.send_cmd(dev, 0xff, 0x18, sec)
 
+    def get_laser_temperature(self, dev):
+        raw = self.get_cmd(dev, 0xd5, lsb_len=2)
+
+        voltage    = 2.5 * raw / 4096
+        resistance = 21450.0 * voltage / (2.5 - voltage) 
+
+        if resistance < 0:
+            print(f"can't compute degC: raw = 0x{raw:04x}, voltage = {voltage}, resistance = {resistance}")
+            return
+
+        logVal     = math.log(resistance / 10000.0)
+        insideMain = logVal + 3977.0 / (25 + 273.0)
+        degC       = 3977.0 / insideMain - 273.0
+        print(f"laser temperature = {degC:.2f} C")
+
     def do_acquisitions(self):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
@@ -252,6 +275,10 @@ class Fixture(object):
                 print("%s Spectrum %3d/%3d %s ..." % (now, i, self.args.spectra, spectrum[:10]))
                 if outfile is not None:
                     outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
+
+                if self.args.laser_enable:
+                    self.get_laser_temperature(dev)
+
             sleep(self.args.delay_ms / 1000.0 )
         if outfile is not None:
             outfile.close()

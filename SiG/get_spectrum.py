@@ -4,6 +4,7 @@ import os
 import sys
 import usb.core
 import argparse
+import platform
 import matplotlib.pyplot as plt
 
 from time import sleep
@@ -45,19 +46,21 @@ if args.debug:
     print(dev)
 
 if os.name == "posix":
-    dev.set_configuration()
+    if not "macOS" in platform.platform():
+        dev.set_configuration()
     usb.util.claim_interface(dev, 0)
 
 ################################################################################
 # configure
 ################################################################################
 
-print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
-dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
+if False:
+    print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
+    dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
 
-gainDB = args.gain_db << 8 
-print("sending GAIN_DB -> 0x%04x (FunkyFloat)" % gainDB)
-dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gainDB, 0, BUF, TIMEOUT_MS) 
+    gainDB = args.gain_db << 8 
+    print("sending GAIN_DB -> 0x%04x (FunkyFloat)" % gainDB)
+    dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gainDB, 0, BUF, TIMEOUT_MS) 
 
 ################################################################################
 # collect
