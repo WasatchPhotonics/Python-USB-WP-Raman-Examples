@@ -25,6 +25,7 @@ class Fixture(object):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",          action="store_true",    help="debug output")
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
+        parser.add_argument("--erase",          action="store_true",    help="erase (write all 0xff)")
         parser.add_argument("--hex",            action="store_true",    help="output in hex")
         parser.add_argument("--force-offset",   action="store_true",    help="force ARMs to use the old 'offset' write method")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
@@ -46,6 +47,10 @@ class Fixture(object):
         self.read_eeprom()
         self.dump_eeprom()
 
+        if self.args.erase:
+            self.do_erase()
+            self.write_eeprom()
+
         if self.args.dump:
             return
 
@@ -62,6 +67,12 @@ class Fixture(object):
             return
 
         self.write_eeprom()
+
+    def do_erase(self):
+        print("Erasing buffers")
+        for page in range(len(self.eeprom_pages)):
+            for i in range(PAGE_SIZE)
+                self.pack((page, i, 1), "B", 0xff)
 
     def load(self, filename):
         if filename.endswith(".json"):
