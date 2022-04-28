@@ -71,7 +71,7 @@ class Fixture(object):
     def do_erase(self):
         print("Erasing buffers")
         for page in range(len(self.eeprom_pages)):
-            for i in range(PAGE_SIZE)
+            for i in range(PAGE_SIZE):
                 self.pack((page, i, 1), "B", 0xff)
 
     def load(self, filename):
