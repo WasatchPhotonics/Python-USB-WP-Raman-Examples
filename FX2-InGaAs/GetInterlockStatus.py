@@ -5,22 +5,21 @@ HOST_TO_DEVICE  = 0x40
 DEVICE_TO_HOST  = 0xc0
 TIMEOUT_MS      = 1000
 
-# used to get microcontroller and FPGA firmware versions
-def Get_Raw(bRequest, ByteCount=64, index=0):
-    return dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, 0, 0, ByteCount, TIMEOUT_MS)
+LASER_CAN_FIRE  = 0xef
+LASER_IS_FIRING = 0x0d # second-tier
 
-# used to read interlock status
-def getValue(bRequest, wValue=0, wIndex=0, len_lsb=1):
-    data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, len_lsb, TIMEOUT_MS)
+def getRaw(bRequest, wValue=0, wIndex=0, length=64):
+    return dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, length, TIMEOUT_MS)
+
+def getValue(bRequest, wValue=0, wIndex=0, length=1):
+    data = getRaw(bRequest, wValue, wIndex, length)
     datalen = len(data)
 
-    # convert response array to uint in LSB order
     result = 0
     for i in range(datalen):
         result = (result << 8) | data[datalen - i - 1]
     return result 
 
-# used to dis/enable laser
 def setValue(cmd, wValue, wIndex=0):
     dev.ctrl_transfer(HOST_TO_DEVICE, cmd, wValue, wIndex, None, TIMEOUT_MS) 
 
@@ -29,27 +28,30 @@ def setLaserEnable(flag):
 
 def showStatus(cnt=1):
     for i in range(cnt):
-        laser_can_fire = getValue(bRequest=0xef)
-        laser_is_firing = getValue(bRequest=0xff, wValue=0x0d)
-        print(f"Status {i}/{cnt}: laser_can_fire {laser_can_fire}, laser_is_firing {laser_is_firing}")
+        can_fire_result  = getValue(bRequest=LASER_CAN_FIRE)
+        is_firing_result = getValue(bRequest=0xff, wValue=LASER_IS_FIRING)
+        print(f"Status %02d/%02d: laser_can_fire (0x%02x) %d, laser_is_firing (0x%02x) %d" % (
+            i + 1,          cnt,
+            LASER_CAN_FIRE, can_fire_result,
+            LASER_IS_FIRING, is_firing_result))
         time.sleep(0.5)
 
 ################################################################################
 # main()
 ################################################################################
 
-dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+dev = usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 
 # show firmware versions
-print("uC FW Version %s" % ".".join(str(x) for x in list(reversed(list(Get_Raw(0xc0, 4))))))
-print("FPGA FW Version %s" % "".join(chr(c) for c in Get_Raw(0xb4, 7)))
+print("FX2 FW Version %s" % ".".join(str(x) for x in list(reversed(list(getRaw(0xc0, length=4))))))
+print("FPGA FW Version %s" % "".join(chr(c) for c in getRaw(0xb4, length=7)))
 
-# show interlock before laser
+# show interlock status before laser enabled
 showStatus()
 
-# fire laser
+# fire laser, displaying status during warm-up
 print("Press <return> to fire laser...", end='')
-x = input()
+input()
 setLaserEnable(True)
 
 # show interlock while laser comes up
@@ -57,7 +59,7 @@ showStatus(20)
 
 # disable laser
 print("Press <return> to disablelaser...", end='')
-x = input()
+input()
 setLaserEnable(False)
 
 # show interlock after laser off
