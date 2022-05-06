@@ -67,7 +67,11 @@ class Fixture(object):
             print(f"loop {count}")
             for dev in self.devices:
                 dev.fw_version = self.get_firmware_version(dev)
+                print(f"firmware version: {dev.fw_version}")
+
                 dev.fpga_version = self.get_fpga_version(dev)
+                print(f"FPGA version: {dev.fpga_version}")
+
                 self.read_eeprom(dev)
 
         # apply filters
@@ -279,14 +283,21 @@ class Fixture(object):
                 if self.args.laser_enable:
                     self.get_laser_temperature(dev)
 
+            self.debug(f"sleeping {self.args.delay_ms}ms")
             sleep(self.args.delay_ms / 1000.0 )
+
         if outfile is not None:
             outfile.close()
 
     def get_spectrum(self, dev):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(dev, 0xad, 1)
-        return self.demarshal_spectrum(dev.read(0x82, dev.eeprom["pixels"] * 2, timeout=timeout_ms))
+        bytes_to_read = dev.eeprom["pixels"] * 2
+
+        self.debug(f"blocking on read of {bytes_to_read} bytes ({timeout_ms}ms timeout)")
+        data = dev.read(0x82, bytes_to_read, timeout=timeout_ms)
+
+        return self.demarshal_spectrum(data)
 
     def get_spectrum_trigger(self, dev):
         now = datetime.now()
