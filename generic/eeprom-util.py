@@ -21,6 +21,8 @@ PAGE_SIZE = 64
 class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
+        self.fields = {}
+        self.field_names = []
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",          action="store_true",    help="debug output")
@@ -45,6 +47,7 @@ class Fixture(object):
 
     def run(self):
         self.read_eeprom()
+        self.parse_eeprom()
         self.dump_eeprom()
 
         if self.args.erase:
@@ -215,6 +218,76 @@ class Fixture(object):
                 self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
             sleep(0.2)
 
+    def parse_eeprom(self):
+        print("Parsing EEPROM")
+
+        self.format = self.unpack((0, 63,  1), "B", "format")
+
+        self.unpack((0,  0, 16), "s", "model")
+        self.unpack((0, 16, 16), "s", "serial_number")
+        self.unpack((0, 32,  4), "I", "baud_rate")
+        self.unpack((0, 36,  1), "?", "has_cooling")
+        self.unpack((0, 37,  1), "?", "has_battery")
+        self.unpack((0, 38,  1), "?", "has_laser")
+        self.unpack((0, 39,  2), "H", "feature_mask")
+        self.unpack((0, 39,  2), "H", "excitation_nm")
+        self.unpack((0, 41,  2), "H", "slit_um")
+        self.unpack((0, 43,  2), "H", "start_integ")
+        self.unpack((0, 45,  2), "h", "start_temp")
+        self.unpack((0, 47,  1), "B", "start_trigger")
+        self.unpack((0, 48,  4), "f", "gain") 
+        self.unpack((0, 52,  2), "h", "offset") 
+        self.unpack((0, 54,  4), "f", "gain_odd") 
+        self.unpack((0, 58,  2), "h", "offset_odd") 
+        self.unpack((1,  0,  4), "f", "wavecal_c0")
+        self.unpack((1,  4,  4), "f", "wavecal_c1")
+        self.unpack((1,  8,  4), "f", "wavecal_c2")
+        self.unpack((1, 12,  4), "f", "wavecal_c3")
+        self.unpack((1, 16,  4), "f", "degCtoDAC_c0")
+        self.unpack((1, 20,  4), "f", "degCtoDAC_c1")
+        self.unpack((1, 24,  4), "f", "degCtoDAC_c2")
+        self.unpack((1, 28,  2), "h", "max_temp")
+        self.unpack((1, 30,  2), "h", "min_temp")
+        self.unpack((1, 32,  4), "f", "adcToDegC_c0")
+        self.unpack((1, 36,  4), "f", "adcToDegC_c1")
+        self.unpack((1, 40,  4), "f", "adcToDegC_c2")
+        self.unpack((1, 44,  2), "h", "r298")
+        self.unpack((1, 46,  2), "h", "beta")
+        self.unpack((1, 48, 12), "s", "cal_date")
+        self.unpack((1, 60,  3), "s", "cal_tech")
+        self.unpack((2,  0, 16), "s", "detector")
+        self.unpack((2, 16,  2), "H", "active_pixels_horizontal")
+        self.unpack((2, 18,  1), "B", "laser_warmup_sec")
+        self.unpack((2, 19,  2), "H", "active_pixels_vertical")
+        self.unpack((2, 21,  4), "f", "wavecal_c4")
+        self.unpack((2, 25,  2), "H", "actual_pixels_horizontal")
+        self.unpack((2, 27,  2), "H", "roi_horiz_start")
+        self.unpack((2, 29,  2), "H", "roi_horiz_end")
+        self.unpack((2, 31,  2), "H", "roi_vertical_region_1_start")
+        self.unpack((2, 33,  2), "H", "roi_vertical_region_1_end")
+        self.unpack((2, 35,  2), "H", "roi_vertical_region_2_start")
+        self.unpack((2, 37,  2), "H", "roi_vertical_region_2_end")
+        self.unpack((2, 39,  2), "H", "roi_vertical_region_3_start")
+        self.unpack((2, 41,  2), "H", "roi_vertical_region_3_end")
+        self.unpack((2, 43,  4), "f", "linearity_c0")
+        self.unpack((2, 47,  4), "f", "linearity_c1")
+        self.unpack((2, 51,  4), "f", "linearity_c2")
+        self.unpack((2, 55,  4), "f", "linearity_c3")
+        self.unpack((2, 59,  4), "f", "linearity_c4")
+        self.unpack((3, 12,  4), "f", "laser_power_c0")
+        self.unpack((3, 16,  4), "f", "laser_power_c1")
+        self.unpack((3, 20,  4), "f", "laser_power_c2")
+        self.unpack((3, 24,  4), "f", "laser_power_c3")
+        self.unpack((3, 28,  4), "f", "max_laser_mW")
+        self.unpack((3, 32,  4), "f", "min_laser_mW")
+        self.unpack((3, 36,  4), "f", "excitation_nm_float")
+        self.unpack((3, 40,  4), "I", "min_integ")
+        self.unpack((3, 44,  4), "I", "max_integ")
+        self.unpack((3, 48,  4), "f", "avg_resolution")
+
+        for field in self.field_names:
+            print("%30s %s" % (field, self.fields[field]))
+
     ############################################################################
     # Utility Methods
     ############################################################################
@@ -240,22 +313,22 @@ class Fixture(object):
     #   
     # @param address    a tuple of the form (buf, offset, len)
     # @param data_type  see https://docs.python.org/2/library/struct.html#format-characters
-    # @param label      if provided, is included in debug log output
-    def unpack_NOT_USED(self, address, data_type, label=None):
+    # @param field      where to store
+    def unpack(self, address, data_type, field):
         page       = address[0]
         start_byte = address[1]
         length     = address[2]
         end_byte   = start_byte + length
 
         if page > len(self.eeprom_pages):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % ( 
-                page, start_byte, length, data_type, label))
+            print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
+                page, start_byte, length, data_type, field))
             return
 
         buf = self.eeprom_pages[page]
         if buf is None or end_byte > len(buf):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (label %s)" % ( 
-                page, start_byte, length, data_type, buf, label))
+            print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
+                page, start_byte, length, data_type, buf, field))
             return
 
         if data_type == "s":
@@ -274,10 +347,14 @@ class Fixture(object):
                 print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
                 return
 
-        if label is None:
+        if field is None:
             self.debug("Unpacked [%s]: %s" % (data_type, unpack_result))
         else:
-            self.debug("Unpacked [%s]: %s (%s)" % (data_type, unpack_result, label))
+            self.debug("Unpacked [%s]: %s (%s)" % (data_type, unpack_result, field))
+
+        self.field_names.append(field)
+        self.fields[field] = unpack_result
+
         return unpack_result
 
     ## 
@@ -286,7 +363,7 @@ class Fixture(object):
     # @param address    a tuple of the form (buf, offset, len)
     # @param data_type  see https://docs.python.org/2/library/struct.html#format-characters
     # @param value      value to serialize
-    def pack(self, address, data_type, value):
+    def pack(self, address, data_type, value, label=None):
         page       = address[0]
         start_byte = address[1]
         length     = address[2]
