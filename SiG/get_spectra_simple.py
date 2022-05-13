@@ -35,7 +35,7 @@ for i in range(COUNT):
 
     spectrum = []
     for j in range(PIXELS):
-        spectrum.append(data[i] | (data[i+1] << 8))
+        spectrum.append(data[j] | (data[j+1] << 8))
     print(f"read spectrum {i}/{COUNT}: {spectrum[:10]}")
 
     sleep(0.2)
