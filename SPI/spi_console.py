@@ -10,7 +10,7 @@ import busio
 def fIntValidate(input):
     if input.isdigit():
         return True                        
-    elif input is "":
+    elif input == "":
         return True
     else:
         return False
@@ -442,6 +442,7 @@ class cWinMain:
             cfgObj.Update()
 
     def openEEPROM(self):
+        self.acquireActive = False
         self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
 
     def openAreaScan(self):
