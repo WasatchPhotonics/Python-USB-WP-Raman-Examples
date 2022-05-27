@@ -6,14 +6,13 @@ import time
 import sys
 import os
 
-try:
-    import board
-    import digitalio
-    import busio
-except Exception as ex:
-    if "BLINKA_FT232H" not in os.environ:
-        print("Recommend setting BLINKA_FT232H environment variable.\n")
-    raise(ex)
+os.environ["BLINKA_FT232H"] = "1"
+import board
+import digitalio
+import busio
+
+# import crcmod.predefined
+# crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
 
 # globals
 VERSION="1.0.0"
@@ -25,6 +24,9 @@ def parseArgs(argv):
     parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
     parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
     return parser.parse_args(argv[1:])
+
+def toHex(values):
+    return "[ " + ", ".join([ ("0x%02x" % v) for v in values ]) + " ]"
 
 # Simple verification function for Integer inputs
 def fIntValidate(input):
@@ -48,20 +50,28 @@ class cCfgString:
         self.label      = tk.Label(cCfgString.frame, text = name)
         self.label.grid(row=row, column=0)
         self.stringVar  = tk.StringVar(cCfgString.frame, str(value))
-        self.entry      = tk.Entry(cCfgString.frame, textvariable=self.stringVar, width = 5)
+        self.entry      = tk.Entry(cCfgString.frame, textvariable=self.stringVar, width = 8)
         self.entry.grid(row=row, column=1)
 
     # Read a string from the FPGA. This is only used for the revision register
-    def SPIRead(self):
+    #
+    # Example: CfgString[FPGA Revision] 
+    #          [ 0x3c, 0x00, 0x01, 0x10, 0x3e ] ->
+    #          [ 0x03, 0x03, 0x03, 0x03, 0x03, 0x3c, 0x00, 0x08, 0x10, 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33, 0x83, 0x3e, 0x3e ] (02.1.23)
+    #       means (5 octets during request)     <    ( length )  addr  '0'   '2'   '.'   '1'   '.'   '2'   '3'   CRC    >     >
+    #      offset 0     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16    17    18 
+    def SPIRead(self, length):
         command  = bytearray(5)
-        response = bytearray(19)
+        response = bytearray(len(command) + 6 + length) # MZ: should this be 18 instead of 19?
         command = [0x3C, 0x00, 0x01, self.address, 0x3E]
         cCfgString.SPI.write_readinto(command, response)
+
         # Decode the binary response into a string
-        self.value = response[10:16].decode()
+        self.value = response[9:16].decode() # MZ: changed from 10:16 to 9:16
+
         # Set the text in the entry box
         self.stringVar.set(self.value)
-        print(f">><< CfgString[{self.name}] {command} -> {response} ({self.value})")
+        print(f">><< CfgString[{self.name}] {toHex(command)} -> {toHex(response)} ({self.value})")
 
     def SPIWrite(self):
         pass
@@ -100,7 +110,7 @@ class cCfgEntry:
         SPI.write_readinto(command, response)
         self.value = (response[10] << 8) + response[9]
         self.stringVar.set(str(self.value))
-        print(f">><< CfgEntry[{self.name:16s}].read {command} -> {response} ({self.value})")
+        print(f">><< CfgEntry[{self.name:16s}].read {toHex(command)} -> {toHex(response)} ({self.value})")
 
     def SPIWrite(self):
         command = bytearray(8)
@@ -114,7 +124,7 @@ class cCfgEntry:
         # Refer to ENG-150 for additional information
         command = [0x3C, 0x00, 0x03, (self.address+0x80), txData[0], txData[1], 0xFF, 0x3E]
         SPI.write(command, 0, 8)
-        print(f">> CfgEntry[{self.name:16s}].write {command}")
+        print(f">> CfgEntry[{self.name:16s}].write {toHex(command)}")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
@@ -160,13 +170,13 @@ class cCfgCombo:
         SPI.write_readinto(command, response)
         self.value = (response[10] << 8) + response[9]
         self.stringVar.set(str(self.value))
-        print(f">><< CfgCombo.read {command} -> {response} ({self.value})")
+        print(f">><< CfgCombo.read {toHex(command)} -> {toHex(response)} ({self.value})")
 
     def SPIWrite(self):
         command = bytearray(7)
         command = [0x3C, 0x00, 0x02, (self.address+0x80), self.value, 0xFF, 0x3E]
         SPI.write(command, 0, 7)
-        print(f">> CfgCombo.write {command}")
+        print(f">> CfgCombo.write {toHex(command)}")
 
     def Update(self):
         newValue = 0
@@ -223,7 +233,7 @@ class cWinEEPROM:
         command     = bytearray(7)
         page        = int(self.pageStr.get())
         command     = [0x3C, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, 0x3E]
-        print(f">> EEPROM.read {command}")
+        print(f">> EEPROM.read {toHex(command)}")
         self.SPI.write(command, 0, 7)
         time.sleep(0.01)
         command = [0x3C, 0x00, 0x01, 0x31, 0xFF, 0x3E]
@@ -233,7 +243,7 @@ class cWinEEPROM:
             value = str(hex(EEPROMPage[x+9]))
             self.valStrings[x].set(value)
             values.append(value)
-        print(f">><< EEPROM.read {command} -> {EEPROMPage} ({', '.join(values)})")
+        print(f">><< EEPROM.read {toHex(command)} -> {toHex(EEPROMPage)}")
 
     def EEPROMWrite(self):
         page        = int(self.pageStr.get())
@@ -249,7 +259,7 @@ class cWinEEPROM:
         print(f">> EEPROM.write {EEPROMWrCmd}")
         command = [0x3C, 0x00, 0x02, 0xB0, (0x80 + page), 0xFF, 0x3E]
         self.SPI.write(command, 0, 7)
-        print(f">> EEPROM.write {command}")
+        print(f">> EEPROM.write {toHex(command)}")
 # End Class cWinEEPROM
 
 # Class container for the area scan window
@@ -331,9 +341,9 @@ class cWinMain:
         self.canvas.pack()
         self.drawFrame.grid(row=0, column=1)
         # Empty list for the config objects
-        self.configObjects = []
+        self.configObjects = []             # Name              row   value   address
         # Create an object for the FPGA Revision
-        self.configObjects.append(cCfgString("FPGA Revision", 0, "00.0.00", 0x10))
+        self.configObjects.append(cCfgString("FPGA Revision"   , 0 ,"00.0.00",0x10))
         # Special case, we want this box read only
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
         # Create all of the config entries        
@@ -456,7 +466,7 @@ class cWinMain:
         while self.ready.value:
             self.SPI.readinto(response, 0, 2)
         # Fetch the revision from the FPGA
-        self.configObjects[0].SPIRead()
+        self.configObjects[0].SPIRead(length=8)
         # Iterate through each of the config objects and write to the FPGA
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
