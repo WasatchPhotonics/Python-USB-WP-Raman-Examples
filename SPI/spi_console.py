@@ -11,8 +11,8 @@ import board
 import digitalio
 import busio
 
-# import crcmod.predefined
-# crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
+import crcmod.predefined
+crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
 
 # globals
 VERSION="1.0.0"
@@ -27,6 +27,11 @@ def parseArgs(argv):
 
 def toHex(values):
     return "[ " + ", ".join([ ("0x%02x" % v) for v in values ]) + " ]"
+
+def checkCRC(orig, data):
+    check = crc8(data)
+    if check != orig:
+        print(f"\nERROR *** CRC mismatch: orig 0x{orig:02x}, check 0x{check:02x}\n")
 
 # Simple verification function for Integer inputs
 def fIntValidate(input):
@@ -68,6 +73,7 @@ class cCfgString:
 
         # Decode the binary response into a string
         self.value = response[9:16].decode() # MZ: changed from 10:16 to 9:16
+        checkCRC(response[16], response[6:16])
 
         # Set the text in the entry box
         self.stringVar.set(self.value)
