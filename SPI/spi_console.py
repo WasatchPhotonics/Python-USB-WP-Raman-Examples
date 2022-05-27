@@ -1,10 +1,30 @@
 import tkinter as tk
 import tkinter.ttk as ttk
 
+import argparse
 import time
-import board
-import digitalio
-import busio
+import sys
+import os
+
+try:
+    import board
+    import digitalio
+    import busio
+except Exception as ex:
+    if "BLINKA_FT232H" not in os.environ:
+        print("Recommend setting BLINKA_FT232H environment variable.\n")
+    raise(ex)
+
+# globals
+VERSION="1.0.0"
+cmdLineArgs = None 
+
+def parseArgs(argv):
+    parser = argparse.ArgumentParser(description="GUI to test XS embedded spectrometers via SPI and FT232H adapter")
+    parser.add_argument("--debug", action="store_true", help="output verbose debug messages")
+    parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
+    parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
+    return parser.parse_args(argv[1:])
 
 # Simple verification function for Integer inputs
 def fIntValidate(input):
@@ -22,7 +42,8 @@ class cCfgString:
     SPI   = None
 
     def __init__(self, name, row, value, address):
-        self.value       = str(value)
+        self.name       = name
+        self.value      = str(value)
         self.address    = int(address)
         self.label      = tk.Label(cCfgString.frame, text = name)
         self.label.grid(row=row, column=0)
@@ -36,11 +57,11 @@ class cCfgString:
         response = bytearray(19)
         command = [0x3C, 0x00, 0x01, self.address, 0x3E]
         cCfgString.SPI.write_readinto(command, response)
-        print(response)
         # Decode the binary response into a string
         self.value = response[10:16].decode()
         # Set the text in the entry box
         self.stringVar.set(self.value)
+        print(f">><< CfgString[{self.name}] {command} -> {response} ({self.value})")
 
     def SPIWrite(self):
         pass
@@ -77,10 +98,9 @@ class cCfgEntry:
         # Refer to ENG-150 for additional information
         command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
         SPI.write_readinto(command, response)
-        print(response)
-        print((response[6] << 8) + response[7])
         self.value = (response[10] << 8) + response[9]
         self.stringVar.set(str(self.value))
+        print(f">><< CfgEntry[{self.name:16s}].read {command} -> {response} ({self.value})")
 
     def SPIWrite(self):
         command = bytearray(8)
@@ -88,12 +108,13 @@ class cCfgEntry:
         txData = bytearray(2)
         txData[1]   = self.value >> 8
         txData[0]   = self.value - (txData[1] << 8)
-        # A write command consists of opening and closing delimeters, the payload size which is data + 1 (for the command byte),
+        # A write command consists of opening and closing delimiters, the payload size which is data + 1 (for the command byte),
         # the command/address with the MSB set for a write operation, the payload data, and the CRC. This function does not 
         # caluculate the CRC nor read back the status.
         # Refer to ENG-150 for additional information
         command = [0x3C, 0x00, 0x03, (self.address+0x80), txData[0], txData[1], 0xFF, 0x3E]
         SPI.write(command, 0, 8)
+        print(f">> CfgEntry[{self.name:16s}].write {command}")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
@@ -137,14 +158,15 @@ class cCfgCombo:
         response = bytearray(14)
         command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
         SPI.write_readinto(command, response)
-        print(response)
         self.value = (response[10] << 8) + response[9]
         self.stringVar.set(str(self.value))
+        print(f">><< CfgCombo.read {command} -> {response} ({self.value})")
 
     def SPIWrite(self):
         command = bytearray(7)
         command = [0x3C, 0x00, 0x02, (self.address+0x80), self.value, 0xFF, 0x3E]
         SPI.write(command, 0, 7)
+        print(f">> CfgCombo.write {command}")
 
     def Update(self):
         newValue = 0
@@ -155,6 +177,7 @@ class cCfgCombo:
         if self.value != newValue:
             self.value = newValue
             self.SPIWrite()
+
 # End Class cCfgCombo
 
 # EEPROM Control Window Class
@@ -200,12 +223,17 @@ class cWinEEPROM:
         command     = bytearray(7)
         page        = int(self.pageStr.get())
         command     = [0x3C, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, 0x3E]
+        print(f">> EEPROM.read {command}")
         self.SPI.write(command, 0, 7)
         time.sleep(0.01)
         command = [0x3C, 0x00, 0x01, 0x31, 0xFF, 0x3E]
         self.SPI.write_readinto(command, EEPROMPage)
+        values = []
         for x in range(0, 64):
-            self.valStrings[x].set(str(hex(EEPROMPage[x+9])))
+            value = str(hex(EEPROMPage[x+9]))
+            self.valStrings[x].set(value)
+            values.append(value)
+        print(f">><< EEPROM.read {command} -> {EEPROMPage} ({', '.join(values)})")
 
     def EEPROMWrite(self):
         page        = int(self.pageStr.get())
@@ -218,8 +246,10 @@ class cWinEEPROM:
         EEPROMWrCmd[68] = 0xFF
         EEPROMWrCmd[69] = 0x3E
         self.SPI.write(EEPROMWrCmd, 0, 70)
+        print(f">> EEPROM.write {EEPROMWrCmd}")
         command = [0x3C, 0x00, 0x02, 0xB0, (0x80 + page), 0xFF, 0x3E]
         self.SPI.write(command, 0, 7)
+        print(f">> EEPROM.write {command}")
 # End Class cWinEEPROM
 
 # Class container for the area scan window
@@ -262,7 +292,6 @@ class cWinAreaScan:
                 #self.image.put(color, (x,y))
                 self.canvas.create_line(x-1, y, x, y, fill=color, width=1)
                 
-
         # Clear the trigger
         self.trigger.value = False
         # Disable Area Scan
@@ -280,7 +309,7 @@ class cWinMain:
         self.trigger    = trigger
         # Create and title a window
         self.root = tk.Tk()
-        self.root.title("SPI SIG")
+        self.root.title(f"SPI SIG Version {VERSION}")
         # Pass the SPI Comm handle
         cCfgString.SPI = self.SPI
         cCfgEntry.SPI  = self.SPI
@@ -458,15 +487,19 @@ class cWinMain:
 # End Class cWinMain
 
 ###############Begin Main################
+
+# parse command-line args (user may need different trigger/ready pins)
+cmdLineArgs = parseArgs(sys.argv)
+
 # Initialize the SPI bus on the FT232H
-SPI  = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+SPI = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
 
 # Initialize D5 as the ready signal
-ready = digitalio.DigitalInOut(board.D5)
+ready = digitalio.DigitalInOut(getattr(board, cmdLineArgs.ready_pin))
 ready.direction = digitalio.Direction.OUTPUT
 
 # Initialize D6 as the trigger
-trigger = digitalio.DigitalInOut(board.D6)
+trigger = digitalio.DigitalInOut(getattr(board, cmdLineArgs.trigger_pin))
 trigger.direction = digitalio.Direction.OUTPUT
 trigger.value = False
 
