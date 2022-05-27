@@ -1,5 +1,6 @@
 import usb.core
 import time
+import sys
 
 HOST_TO_DEVICE  = 0x40
 DEVICE_TO_HOST  = 0xc0
@@ -41,6 +42,9 @@ def showStatus(cnt=1):
 ################################################################################
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x2000)
+if dev is None:
+    print("No spectrometers found")
+    sys.exit(0)
 
 # show firmware versions
 print("FX2 FW Version %s" % ".".join(str(x) for x in list(reversed(list(getRaw(0xc0, length=4))))))
