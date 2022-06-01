@@ -308,7 +308,7 @@ class cCfgCombo:
     #
     # @param write_len: defaults to 2 (we're writing both ADDR and the 1-byte value)
     # @param read_len: defaults to 2 (we're reading both ADDR and the 1-byte value)
-    def __init__(self, row, name, write_len=1, read_len=1):
+    def __init__(self, row, name, write_len=2, read_len=2):
         self.name       = name
         self.value      = 0x03         # default to 00000011b (both AD and OD set to 12-bit)
         self.address    = 0x2B
@@ -346,11 +346,11 @@ class cCfgCombo:
         print(f">><< CfgCombo.read {toHex(unbuffered_cmd)} -> {toHex(buffered_response)} ({self.value})")
             
     def SPIWrite(self):
-        unbuffered_cmd = [START, 0, 2, self.address | WRITE, self.value] # MZ: kludge (replaced self.write_len with 2 per working)
+        unbuffered_cmd = [START, 0, self.write_len, self.address | WRITE, self.value] 
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1)  # MZ: kludge (replaced self.write_len with 1)
+        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-        SPI.write_readinto(buffered_cmd, buffered_response) # MZ: original only seemed to write command[0:7] (I think)
+        SPI.write_readinto(buffered_cmd, buffered_response) 
 
     def Update(self):
         newValue = 0
