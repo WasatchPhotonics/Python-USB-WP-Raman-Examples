@@ -176,7 +176,7 @@ class cCfgString:
         # MZ: I seem able to read the 7-char FPGA version whether this length is
         #     set to 1 (original) or 8 (read_len)...why?
         unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 1)   # MZ: kludge (+1 to match "working" version)
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 0)   # MZ: kludge (+1 to match "working" version)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
         # Write one buffer while reading the other
