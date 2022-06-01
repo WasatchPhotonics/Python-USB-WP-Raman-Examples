@@ -1,6 +1,7 @@
 import tkinter as tk
 import tkinter.ttk as ttk
 
+import logging
 import argparse
 import time
 import sys
@@ -42,6 +43,10 @@ def parseArgs(argv):
     parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
     parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
     return parser.parse_args(argv[1:])
+
+def debug(msg):
+    if args.debug:
+        print(f"DEBUG: {msg}")
 
 ## format a list or bytearray as "[ 0x00, 0x0a, 0xff ]"
 def toHex(values):
@@ -166,7 +171,8 @@ class cCfgString:
 
         # MZ: I seem able to read the 7-char FPGA version whether this length is
         #     set to 1, 8 or other
-        unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
+        # unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
+        unbuffered_cmd = [START, 0x00, 1, self.address, END]          # MZ: kludge
         buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) 
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
         print(f"buffered_cmd:          {toHex(buffered_cmd)}")
@@ -262,7 +268,7 @@ class cCfgEntry:
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
 
         # MZ: the -1 at the end was added as a kludge, because otherwise we find the trailing '>' at that offset.  This seems to be a bug?
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1 - 1) # all write responses are just 3 bytes: [ '<', errorCode, '>' ]
+        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1) # KLUDGE - 1) # all write responses are just 3 bytes: [ '<', errorCode, '>' ]
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
 
         SPI.write_readinto(buffered_cmd, buffered_response)
@@ -531,7 +537,7 @@ class cWinMain:
         self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00", 0x10, read_len=8)) 
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
 
-        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=4)) # MZ: integration time is 24-bit
+        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=3)) # KLUDGE # MZ: integration time is 24-bit
         self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0       , 0x13))
         self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100   , 0x14))
         self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250     , 0x50)) # Region 0
@@ -558,24 +564,32 @@ class cWinMain:
         self.configFrame.grid_columnconfigure(1, minsize=120)
         for row in range(row_count):
             self.configFrame.grid_rowconfigure(row, minsize=30)
-        # Write the initial values
+
+        debug("writing initial values to FPGA")
         self.FPGAInit()
-        # Launch the main loop
+
+        debug("starting acquisition loop")
         self.acquireActive = True
         self.root.after(10, self.Acquire)
         self.root.mainloop()
 
+        debug("exiting")
+
     def Acquire(self):
         SPIBuf  = bytearray(2)
         spectra = []
+
         # Send and acquire trigger
+        debug("Acquire: raising trigger")
         self.trigger.value = True
 
         # Wait until the data is ready
+        debug("Acquire: blocking on DATA_READY")
         while not self.ready.value:
             pass
 
-        # Relase the trigger
+        # Release the trigger
+        debug("Acquire: releasing trigger")
         self.trigger.value = False
 
         # Read in the spectra
@@ -583,6 +597,7 @@ class cWinMain:
             self.SPI.readinto(SPIBuf, 0, 2)
             pixel = (SPIBuf[0] << 8) | SPIBuf[1] # MZ: spectra is big-endian over SPI but little-endian (network order) over USB :-(
             spectra.append(pixel)
+        debug(f"Acquire: read {len(spectra)} pixels")
 
         region0 = self.configObjects[7].value - self.configObjects[6].value
         region1 = self.configObjects[11].value - self.configObjects[10].value
@@ -645,6 +660,7 @@ class cWinMain:
             self.root.after(10, self.Acquire)
 
     def FPGAInit(self):
+        debug("performing FPGA Init")
         response = bytearray(READY_POLL_LEN)
         # Read out any errant data
         while self.ready.value:
@@ -656,6 +672,7 @@ class cWinMain:
             self.configObjects[x].SPIWrite()
 
     def FPGAUpdate(self):
+        debug("performing FPGA Update")
         response = bytearray(READ_POLL_LEN)     # MZ: why do this as 16-bit words?
         # Read out any errant data
         while self.ready.value:
@@ -665,10 +682,12 @@ class cWinMain:
             cfgObj.Update()
 
     def openEEPROM(self):
+        debug("opening EEPROM")
         self.acquireActive = False
         self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
 
     def openAreaScan(self):
+        debug("opening Area Scan")
         self.acquireActive = False
         # Give time for the last acquisition to complete
         time.sleep(0.1)
