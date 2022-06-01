@@ -1,8 +1,8 @@
 import tkinter as tk
 import tkinter.ttk as ttk
 
-import logging
 import argparse
+import logging
 import time
 import sys
 import os
@@ -164,27 +164,20 @@ class cCfgString:
         self.entry      = tk.Entry(cCfgString.frame, textvariable=self.stringVar, width = 8)
         self.entry.grid(row=row, column=1)
 
-    ##
     # Read a string from the FPGA. In this script, this is only used for the 
     # revision register.
-    def SPIRead(self):
-
-        # MZ: I seem able to read the 7-char FPGA version whether this length is
-        #     set to 1, 8 or other
-        # unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
-        unbuffered_cmd = [START, 0x00, 1, self.address, END]          # MZ: kludge
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) 
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-        print(f"buffered_cmd:          {toHex(buffered_cmd)}")
-
-        # Write one buffer while reading the other
-        cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
+    def SPIRead(self, length):
+        command  = bytearray(5)
+        response = bytearray(len(command) + 6 + length) # MZ: should this be 18 instead of 19?
+        command = [0x3C, 0x00, 0x01, self.address, 0x3E]
+        cCfgString.SPI.write_readinto(command, response)
 
         # Decode the binary response into a string
-        self.value = decode_read_response_str(unbuffered_cmd, buffered_response)
+        self.value = response[9:16].decode() # MZ: changed from 10:16 to 9:16
 
         # Set the text in the entry box
         self.stringVar.set(self.value)
+        print(f">><< CfgString[{self.name}] {toHex(command)} -> {toHex(response)} ({self.value})")
 
     # This script currently does not write any string data to the FPGA via SPI.
     # def SPIWrite(self):
@@ -192,7 +185,7 @@ class cCfgString:
 
     def Update(self):
         pass
-
+        
 # Class for configuration entries
 class cCfgEntry:
 
@@ -230,17 +223,20 @@ class cCfgEntry:
         self.stringVar  = tk.StringVar(cCfgEntry.frame, str(value))
         self.entry      = tk.Entry(cCfgEntry.frame, textvariable=self.stringVar, validate="key", validatecommand=(cCfgEntry.validate, '%S'), width = 5)
         self.entry.grid(row=row, column=1)
+
+    # YOU ARE HERE
             
     ## Read an integer from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
-        unbuffered_cmd = [START, 0, self.read_len, self.address, END]
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len)
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-    
-        # Write one buffer while reading the other
-        SPI.write_readinto(buffered_cmd, buffered_response)
-        self.value = decode_read_response_int(unbuffered_cmd, buffered_response)
+        command  = bytearray(5)
+        response = bytearray(14)
+        # A read command consists of opening and closing delimeters, the payload size (typically only 1 for the command byte),
+        # and the command/address.
+        # Refer to ENG-150 for additional information
+        command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
+        SPI.write_readinto(command, response)
+        self.value = (response[10] << 8) + response[9]
         self.stringVar.set(str(self.value))
         print(f">><< CfgEntry[{self.name:16s}].read {toHex(command)} -> {toHex(response)} ({self.value})")
 
@@ -248,33 +244,25 @@ class cCfgEntry:
     # Write an integer to the FPGA.
     #
     # @verbatim
-    # >><< CfgEntry[Integration Time].write: [ 0x3c, 0x00, 0x03, 0x91, 0x64, 0x00, 0x6a, 0x3e, 0x00, 0x00, 0x00 ] -> [ 0x3e, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x3c, 0x00, 0x3e, 0x3e ] (0x3e ERROR_UNDEFINED)
-    #                                           <    (_length_)  ADDR  (LSB Value)  CRC   >                             <     ?     ?     ?     ?     ?     ?     <   response >    ?
-    #                                  offset:  0     1     2     3     4     5     6     7                             0     1     2     3     4     5     6     7     8     9     10 
-    #                                          \______________unbuffered_cmd______________/             MZ: I feel that \___this should be 8 bytes not 7____/ i.e. len(cmd)
-    #                                          \__________________________buffered_cmd_________________________/        \_________________________buffered_response___________________/
+    # >><< CfgEntry[Integration Time].write: [ 0x3c, 0x00, 0x03, 0x91, 0x64, 0x00, 0x6a, 0x3e, 0x00, 0x00, 0x00 ] -> [ 0x3e, 0x03, 0x03, 0x03, 0x03,
+    #                                           <    (_length_)  ADDR  (LSB Value)  CRC   >                             <     ?     ?     ?     ?   
+    #                                  offset:  0     1     2     3     4     5     6     7                             0     1     2     3     4   
+    #                                          \______________unbuffered_cmd______________/             MZ: I feel that \___this should be 8 bytes n
+    #                                          \__________________________buffered_cmd_________________________/        \_________________________bu
     # @endverbatim
     def SPIWrite(self):
-
+        command = bytearray(8)
         # Convert the int into bytes.
-        txData = []
-        txData      .append( self.value        & 0xff) # LSB
-        txData      .append((self.value >>  8) & 0xff)
-        if self.write_len > 3:
-            txData  .append((self.value >> 16) & 0xff) # MSB
-
-        unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE]
-        unbuffered_cmd.extend(txData)
-        unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
-
-        # MZ: the -1 at the end was added as a kludge, because otherwise we find the trailing '>' at that offset.  This seems to be a bug?
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1) # KLUDGE - 1) # all write responses are just 3 bytes: [ '<', errorCode, '>' ]
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-
-        SPI.write_readinto(buffered_cmd, buffered_response)
-
-        result = int(buffered_response[-2]) 
-        print(f">><< CfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
+        txData = bytearray(2)
+        txData[1]   = self.value >> 8
+        txData[0]   = self.value - (txData[1] << 8)
+        # A write command consists of opening and closing delimiters, the payload size which is data + 1 (for the command byte),
+        # the command/address with the MSB set for a write operation, the payload data, and the CRC. This function does not 
+        # caluculate the CRC nor read back the status.
+        # Refer to ENG-150 for additional information
+        command = [0x3C, 0x00, 0x03, (self.address+0x80), txData[0], txData[1], 0xFF, 0x3E]
+        SPI.write(command, 0, 8)
+        print(f">> CfgEntry[{self.name:16s}].write {toHex(command)}")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
@@ -325,25 +313,19 @@ class cCfgCombo:
     # Read a 16 bit integer from the FPGA. Used for everything else
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
-        unbuffered_cmd = [START, 0, self.read_len, self.address, END]
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len)
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-
-        SPI.write_readinto(buffered_cmd, buffered_response)
-
-        self.value = decode_read_response_int(unbuffered_cmd, buffered_response)
+        command  = bytearray(5)
+        response = bytearray(14)
+        command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
+        SPI.write_readinto(command, response)
+        self.value = (response[10] << 8) + response[9]
         self.stringVar.set(str(self.value))
-        print(f">><< CfgCombo.read {toHex(unbuffered_cmd)} -> {toHex(buffered_response)} ({self.value})")
+        print(f">><< CfgCombo.read {toHex(command)} -> {toHex(response)} ({self.value})")
 
     def SPIWrite(self):
-        unbuffered_cmd = [START, 0, self.write_len, self.address | WRITE, self.value]
-        unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len) 
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-
-        SPI.write_readinto(buffered_cmd, buffered_response)
-
-        print(f">> CfgCombo.write {toHex(buffered_response)}")
+        command = bytearray(7)
+        command = [0x3C, 0x00, 0x02, (self.address+0x80), self.value, 0xFF, 0x3E]
+        SPI.write(command, 0, 7)
+        print(f">> CfgCombo.write {toHex(command)}")
 
     def Update(self):
         newValue = 0
@@ -424,7 +406,7 @@ class cWinEEPROM:
         EEPROMWrCmd[69] = END
         self.SPI.write(EEPROMWrCmd, 0, 70)
         print(f">> EEPROM.write {EEPROMWrCmd}")
-        command = [START, 0x00, 0x02, 0xB0, page | WRITE, 0xFF, END]
+        command = [START, 0x00, 0x02, 0xB0, (0x80 + page), 0xFF, END]
         self.SPI.write(command, 0, 7)
         print(f">> EEPROM.write {toHex(command)}")
 # End Class cWinEEPROM
@@ -446,7 +428,6 @@ class cWinAreaScan:
         self.frame.pack()
         self.canvas.pack()
         # Enable Area Scan
-        command = bytearray(8)
         command = [START, 0x00, 0x03, 0x92, 0x00, 0x10, 0xFF, END]
         self.SPI.write(command, 0, 8)
         # Send a trigger
@@ -511,12 +492,12 @@ class cWinMain:
         ########################################################################
         # Create all of the config entries        
         ########################################################################
-
+        
         # MZ: In ENG-0150-C, the following codes are listed in the "Command Table":
         #
         # Description               Getter  Setter  Get Len Set Len Notes
         # ------------------------- ------- ------- ------- ------- -------- 
-        # FPGA Version              0x10    ----    1       --      "xx.y.zz"                           # MZ: should getter payload bytes be 8 (including opcode)?
+        # FPGA Version              0x10    ----    1       --      "xx.y.zz"                           # MZ: should getter payload bytes be 8 (incl
         # Integration Time          0x11    0x91    1       4       24-bit millisec                     # MZ: should getter payload bytes be 4?
         # Config Register           0x12    0x92    1       3       16-bit register                     # MZ: should getter payload bytes be 3?
         # Black Level               0x13    0x93    1       3       16-bit offset                       # MZ: should getter payload bytes be 3?
@@ -530,27 +511,32 @@ class cWinMain:
         #
         # Additional: 0xb0 is used for BOTH "write FPGA EEPROM buffer to EEPROM"
         #                               AND "read EEPROM data to FPGA buffer"; not sure how that works out
-
+        
         # Empty list for the config objects # Name              row   value     address
         self.configObjects = []             # ----------------- ----- --------- -------
-        # Create an object for the FPGA Revision (special case, we want this box read only)
-        self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00", 0x10, read_len=8)) 
-        self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
 
-        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=3)) # KLUDGE # MZ: integration time is 24-bit
-        self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0       , 0x13))
-        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100   , 0x14))
-        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250     , 0x50)) # Region 0
-        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750     , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 500     , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1500    , 0x53))
-        self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0       , 0x54)) # Region 1 (MZ: not in ENG-0150)
-        self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0       , 0x55))
-        self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0       , 0x56))
-        self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0       , 0x57))
-        self.configObjects.append(cCfgEntry("Desmile Offset"   , 12 , 0       , 0x58)) # Experimental (MZ: not in ENG-0150...also, not sure one int16 suffices?)
+
+
+
+        # Create an object for the FPGA Revision
+        self.configObjects.append(cCfgString("FPGA Revision"   , 0 ,"00.0.00",0x10))
+        # Special case, we want this box read only
+        self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
+        # Create all of the config entries        
+        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100   , 0x11))
+        self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0     , 0x13))
+        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100 , 0x14))
+        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250   , 0x50))
+        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750   , 0x51))
+        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 500   , 0x52))
+        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1500  , 0x53))
+        self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0     , 0x54))
+        self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0     , 0x55))
+        self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0     , 0x56))
+        self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0     , 0x57))
+        self.configObjects.append(cCfgEntry("Desmile Offset"   , 12 , 0     , 0x58))
         # Add the AD/OD combo boxes
-        self.configObjects.append(cCfgCombo(13, "Pixel Mode"))
+        self.configObjects.append(cCfgCombo(13, "PixelMode"))
         # Add the buttons
         self.btnCapture  = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
         self.btnCapture.grid(row=16, column=0)
@@ -564,40 +550,31 @@ class cWinMain:
         self.configFrame.grid_columnconfigure(1, minsize=120)
         for row in range(row_count):
             self.configFrame.grid_rowconfigure(row, minsize=30)
-
-        debug("writing initial values to FPGA")
+        # Write the initial values
         self.FPGAInit()
-
-        debug("starting acquisition loop")
+        # Launch the main loop
         self.acquireActive = True
         self.root.after(10, self.Acquire)
         self.root.mainloop()
 
-        debug("exiting")
-
     def Acquire(self):
         SPIBuf  = bytearray(2)
         spectra = []
-
         # Send and acquire trigger
-        debug("Acquire: raising trigger")
         self.trigger.value = True
 
         # Wait until the data is ready
-        debug("Acquire: blocking on DATA_READY")
         while not self.ready.value:
             pass
 
-        # Release the trigger
-        debug("Acquire: releasing trigger")
+        # Relase the trigger
         self.trigger.value = False
 
         # Read in the spectra
         while self.ready.value:
             self.SPI.readinto(SPIBuf, 0, 2)
-            pixel = (SPIBuf[0] << 8) | SPIBuf[1] # MZ: spectra is big-endian over SPI but little-endian (network order) over USB :-(
+            pixel = (SPIBuf[0] << 8) + SPIBuf[1]
             spectra.append(pixel)
-        debug(f"Acquire: read {len(spectra)} pixels")
 
         region0 = self.configObjects[7].value - self.configObjects[6].value
         region1 = self.configObjects[11].value - self.configObjects[10].value
@@ -660,34 +637,30 @@ class cWinMain:
             self.root.after(10, self.Acquire)
 
     def FPGAInit(self):
-        debug("performing FPGA Init")
-        response = bytearray(READY_POLL_LEN)
+        response = bytearray(2)
         # Read out any errant data
         while self.ready.value:
-            self.SPI.readinto(response, 0, READY_POLL_LEN)  # MZ: why do this as 16-bit words?
+            self.SPI.readinto(response, 0, 2)
         # Fetch the revision from the FPGA
-        self.configObjects[0].SPIRead()
+        self.configObjects[0].SPIRead(length=8)
         # Iterate through each of the config objects and write to the FPGA
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
 
     def FPGAUpdate(self):
-        debug("performing FPGA Update")
-        response = bytearray(READ_POLL_LEN)     # MZ: why do this as 16-bit words?
+        response = bytearray(2)
         # Read out any errant data
         while self.ready.value:
-            self.SPI.readinto(response, 0, READY_POLL_LEN)
+            self.SPI.readinto(response, 0, 2)
         # Iterate through each of the config objects and update to the FPGA if necessary
         for cfgObj in self.configObjects:
             cfgObj.Update()
 
     def openEEPROM(self):
-        debug("opening EEPROM")
         self.acquireActive = False
         self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
 
     def openAreaScan(self):
-        debug("opening Area Scan")
         self.acquireActive = False
         # Give time for the last acquisition to complete
         time.sleep(0.1)
