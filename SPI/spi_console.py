@@ -1,8 +1,8 @@
 import tkinter as tk
 import tkinter.ttk as ttk
 
-import argparse
 import logging
+import argparse
 import time
 import sys
 import os
@@ -164,6 +164,7 @@ class cCfgString:
         self.entry      = tk.Entry(cCfgString.frame, textvariable=self.stringVar, width = 8)
         self.entry.grid(row=row, column=1)
 
+    ##
     # Read a string from the FPGA. In this script, this is only used for the 
     # revision register.
     def SPIRead(self, length):
@@ -177,7 +178,6 @@ class cCfgString:
 
         # Set the text in the entry box
         self.stringVar.set(self.value)
-        print(f">><< CfgString[{self.name}] {toHex(command)} -> {toHex(response)} ({self.value})")
 
     # This script currently does not write any string data to the FPGA via SPI.
     # def SPIWrite(self):
@@ -224,8 +224,6 @@ class cCfgEntry:
         self.entry      = tk.Entry(cCfgEntry.frame, textvariable=self.stringVar, validate="key", validatecommand=(cCfgEntry.validate, '%S'), width = 5)
         self.entry.grid(row=row, column=1)
 
-    # YOU ARE HERE
-            
     ## Read an integer from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
@@ -322,7 +320,6 @@ class cCfgCombo:
         print(f">><< CfgCombo.read {toHex(command)} -> {toHex(response)} ({self.value})")
 
     def SPIWrite(self):
-        command = bytearray(7)
         command = [0x3C, 0x00, 0x02, (self.address+0x80), self.value, 0xFF, 0x3E]
         SPI.write(command, 0, 7)
         print(f">> CfgCombo.write {toHex(command)}")
@@ -406,7 +403,7 @@ class cWinEEPROM:
         EEPROMWrCmd[69] = END
         self.SPI.write(EEPROMWrCmd, 0, 70)
         print(f">> EEPROM.write {EEPROMWrCmd}")
-        command = [START, 0x00, 0x02, 0xB0, (0x80 + page), 0xFF, END]
+        command = [START, 0x00, 0x02, 0xB0, page | WRITE, 0xFF, END]
         self.SPI.write(command, 0, 7)
         print(f">> EEPROM.write {toHex(command)}")
 # End Class cWinEEPROM
@@ -514,27 +511,22 @@ class cWinMain:
         
         # Empty list for the config objects # Name              row   value     address
         self.configObjects = []             # ----------------- ----- --------- -------
-
-
-
-
-        # Create an object for the FPGA Revision
-        self.configObjects.append(cCfgString("FPGA Revision"   , 0 ,"00.0.00",0x10))
-        # Special case, we want this box read only
+        # Create an object for the FPGA Revision (special case, we want this box read only)
+        self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00", 0x10, read_len=8)) 
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
-        # Create all of the config entries        
-        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100   , 0x11))
-        self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0     , 0x13))
-        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100 , 0x14))
-        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250   , 0x50))
-        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750   , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 500   , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1500  , 0x53))
-        self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0     , 0x54))
-        self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0     , 0x55))
-        self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0     , 0x56))
-        self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0     , 0x57))
-        self.configObjects.append(cCfgEntry("Desmile Offset"   , 12 , 0     , 0x58))
+        self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=3)) # KLUDGE # MZ: integration time is 24-bit
+        self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0       , 0x13))
+        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100   , 0x14))
+        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250     , 0x50)) # Region 0
+        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750     , 0x51))
+        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 500     , 0x52))
+        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1500    , 0x53))
+        self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0       , 0x54)) # Region 1 (MZ: not in ENG-0150)
+        self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0       , 0x55))
+        self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0       , 0x56))
+        self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0       , 0x57))
+        self.configObjects.append(cCfgEntry("Desmile Offset"   , 12 , 0       , 0x58)) # Experimental (MZ: not in ENG-0150...also, not sure one int1
+
         # Add the AD/OD combo boxes
         self.configObjects.append(cCfgCombo(13, "PixelMode"))
         # Add the buttons
@@ -550,24 +542,29 @@ class cWinMain:
         self.configFrame.grid_columnconfigure(1, minsize=120)
         for row in range(row_count):
             self.configFrame.grid_rowconfigure(row, minsize=30)
-        # Write the initial values
+        
+        debug("writing initial values to FPGA")
         self.FPGAInit()
-        # Launch the main loop
+       
+        debug("starting acquisition loop")
         self.acquireActive = True
         self.root.after(10, self.Acquire)
         self.root.mainloop()
 
+        debug("exiting")
+
     def Acquire(self):
         SPIBuf  = bytearray(2)
         spectra = []
-        # Send and acquire trigger
+        
+        debug("Acquire: raising trigger")
         self.trigger.value = True
 
-        # Wait until the data is ready
+        debug("Acquire: blocking on DATA_READY")
         while not self.ready.value:
             pass
 
-        # Relase the trigger
+        debug("Acquire: releasing trigger")
         self.trigger.value = False
 
         # Read in the spectra
@@ -575,6 +572,7 @@ class cWinMain:
             self.SPI.readinto(SPIBuf, 0, 2)
             pixel = (SPIBuf[0] << 8) + SPIBuf[1]
             spectra.append(pixel)
+        debug(f"Acquire: read {len(spectra)} pixels")
 
         region0 = self.configObjects[7].value - self.configObjects[6].value
         region1 = self.configObjects[11].value - self.configObjects[10].value
@@ -637,6 +635,7 @@ class cWinMain:
             self.root.after(10, self.Acquire)
 
     def FPGAInit(self):
+        debug("performing FPGA Init")
         response = bytearray(2)
         # Read out any errant data
         while self.ready.value:
@@ -648,6 +647,7 @@ class cWinMain:
             self.configObjects[x].SPIWrite()
 
     def FPGAUpdate(self):
+        debug("performing FPGA Update")
         response = bytearray(2)
         # Read out any errant data
         while self.ready.value:
@@ -657,10 +657,12 @@ class cWinMain:
             cfgObj.Update()
 
     def openEEPROM(self):
+        debug("opening EEPROM")
         self.acquireActive = False
         self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
 
     def openAreaScan(self):
+        debug("opening Area Scan")
         self.acquireActive = False
         # Give time for the last acquisition to complete
         time.sleep(0.1)
