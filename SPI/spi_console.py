@@ -176,7 +176,7 @@ class cCfgString:
         # MZ: I seem able to read the 7-char FPGA version whether this length is
         #     set to 1 (original) or 8 (read_len)...why?
         unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 0)   # MZ: kludge (+1 to match "working" version)
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len)  # MZ: removed spurious "+1" in original
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
         # Write one buffer while reading the other
@@ -236,8 +236,8 @@ class cCfgEntry:
     ## Read an integer from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
-        unbuffered_cmd = [START, 0, self.read_len, self.address, END] # MZ: kludge (changed self.read_len to 1 to match working)
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 1) # MZ: kludge (added +1 to match working)
+        unbuffered_cmd = [START, 0, self.read_len, self.address, END] # MZ: changed 1 to self.read_len 
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) # MZ: removed +1 in orig
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
         # Write one buffer while reading the other
@@ -266,7 +266,7 @@ class cCfgEntry:
         if self.write_len > 3:
             txData  .append((self.value >> 16) & 0xff) # MSB
     
-        unbuffered_cmd = [START, 0x00, 3, self.address | WRITE] # MZ: kludge (replaced self.write_len with 3 to match working)
+        unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE] # MZ: kludge (replaced self.write_len with 3 to match working)
         unbuffered_cmd.extend(txData)
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
     
