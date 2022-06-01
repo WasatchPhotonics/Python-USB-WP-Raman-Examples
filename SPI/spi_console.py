@@ -38,7 +38,9 @@ crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
 args = None 
 
 def parseArgs(argv):
-    parser = argparse.ArgumentParser(description="GUI to test XS embedded spectrometers via SPI and FT232H adapter")
+    parser = argparse.ArgumentParser(
+        description="GUI to test XS embedded spectrometers via SPI and FT232H adapter",
+        epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer") # MZ: this seemed to help?
     parser.add_argument("--debug", action="store_true", help="output verbose debug messages")
     parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
     parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
@@ -266,20 +268,20 @@ class cCfgEntry:
         if self.write_len > 3:
             txData  .append((self.value >> 16) & 0xff) # MSB
     
-        unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE] # MZ: kludge (replaced self.write_len with 3 to match working)
+        unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE] # MZ: replaced 3 with self.write_len
         unbuffered_cmd.extend(txData)
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
     
-        # MZ: the -1 at the end was added as a kludge, because otherwise we find the trailing '>' at that offset.  This seems to be a bug?
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1) # KLUDGE - 1) # all write responses are just 3 bytes: [ '<'
+        # MZ: the -1 at the end was added as a kludge, because otherwise we find
+        #     a redundant '>' in the last byte.  This seems a bug, due to the 
+        #     fact that only 7 of the 8 unbuffered_cmd bytes are echoed back into
+        #     the read buffer.
+        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1 - 1) 
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
-        # SPI.write_readinto(buffered_cmd, buffered_response)
-        SPI.write(unbuffered_cmd, 0, 8) # MZ: kludge (replaced write_readinto with write to match working)
-        print(f">> CfgEntry[{self.name:16s}].write: {toHex(unbuffered_cmd)}")
-    
-        # result = int(buffered_response[-2]) # MZ: kludge (stopped checking result codes to match working)
-        # print(f">><< CfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
+        SPI.write_readinto(buffered_cmd, buffered_response)
+        result = int(buffered_response[-2]) 
+        print(f">><< CfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
@@ -303,9 +305,12 @@ class cCfgCombo:
     ##
     # Init class defines the objects name, default value, and FPGA Address
     # Creates a label for the item.
+    #
+    # @param write_len: defaults to 2 (we're writing both ADDR and the 1-byte value)
+    # @param read_len: defaults to 2 (we're reading both ADDR and the 1-byte value)
     def __init__(self, row, name, write_len=1, read_len=1):
         self.name       = name
-        self.value      = 3
+        self.value      = 0x03         # default to 00000011b (both AD and OD set to 12-bit)
         self.address    = 0x2B
         self.row        = row
         self.write_len  = write_len
@@ -343,7 +348,7 @@ class cCfgCombo:
     def SPIWrite(self):
         unbuffered_cmd = [START, 0, 2, self.address | WRITE, self.value] # MZ: kludge (replaced self.write_len with 2 per working)
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len) 
+        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1)  # MZ: kludge (replaced self.write_len with 1)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
         SPI.write_readinto(buffered_cmd, buffered_response) # MZ: original only seemed to write command[0:7] (I think)
 
