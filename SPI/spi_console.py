@@ -323,22 +323,26 @@ class cCfgCombo:
         self.comboBox.append(ttk.Combobox(cCfgCombo.frame, textvariable = self.stringVar[1], values=('10', '12'), state='readonly', width = 4))
         self.comboBox[1].grid(row=(row+1), column=1)
         self.comboBox[1].current(1)
-            
-    # Read a 16 bit integer from the FPGA. Used for everything else
+
+    # Read single byte from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
-        command  = bytearray(5)
-        response = bytearray(14)
-        command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
-        SPI.write_readinto(command, response)
-        self.value = (response[10] << 8) + response[9]
+        unbuffered_cmd = [START, 0, self.read_len, self.address, END]
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) # MZ: orig had bytearray(14) (3 bytes larger)
+        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+    
+        SPI.write_readinto(buffered_cmd, buffered_response)
+    
+        self.value = decode_read_response_int(unbuffered_cmd, buffered_response)
         self.stringVar.set(str(self.value))
-        print(f">><< CfgCombo.read {toHex(command)} -> {toHex(response)} ({self.value})")
-
+        print(f">><< CfgCombo.read {toHex(unbuffered_cmd)} -> {toHex(buffered_response)} ({self.value})")
+            
     def SPIWrite(self):
-        command = [0x3C, 0x00, 0x02, (self.address+0x80), self.value, 0xFF, 0x3E]
-        SPI.write(command, 0, 7)
-        print(f">> CfgCombo.write {toHex(command)}")
+        unbuffered_cmd = [START, 0, 2, self.address | WRITE, self.value] # MZ: kludge (replaced self.write_len with 2 per working)
+        unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
+        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len) 
+        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+        SPI.write_readinto(buffered_cmd, buffered_response) # MZ: original only seemed to write command[0:7] (I think)
 
     def Update(self):
         newValue = 0
