@@ -234,14 +234,14 @@ class cCfgEntry:
     ## Read an integer from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
-        command  = bytearray(5)
-        response = bytearray(14)
-        # A read command consists of opening and closing delimeters, the payload size (typically only 1 for the command byte),
-        # and the command/address.
-        # Refer to ENG-150 for additional information
-        command  = [0x3C, 0x00, 0x01, self.address, 0x3E]
-        SPI.write_readinto(command, response)
-        self.value = (response[10] << 8) + response[9]
+        unbuffered_cmd = [START, 0, self.read_len, self.address, END] # MZ: kludge (changed self.read_len to 1 to match working)
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 1) # MZ: kludge (added +1 to match working)
+        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+    
+        # Write one buffer while reading the other
+        SPI.write_readinto(buffered_cmd, buffered_response)
+        self.value = decode_read_response_int(unbuffered_cmd, buffered_response)
+    
         self.stringVar.set(str(self.value))
         print(f">><< CfgEntry[{self.name:16s}].read {toHex(command)} -> {toHex(response)} ({self.value})")
 
