@@ -167,14 +167,21 @@ class cCfgString:
     ##
     # Read a string from the FPGA. In this script, this is only used for the 
     # revision register.
-    def SPIRead(self, length):
-        command  = bytearray(5)
-        response = bytearray(len(command) + 6 + length) # MZ: should this be 18 instead of 19?
-        command = [0x3C, 0x00, 0x01, self.address, 0x3E]
-        cCfgString.SPI.write_readinto(command, response)
+    def SPIRead(self):
+    
+        # MZ: I seem able to read the 7-char FPGA version whether this length is
+        #     set to 1, 8 or other
+        # unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
+        unbuffered_cmd = [START, 0x00, 1, self.address, END]          # MZ: kludge
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 1)   # MZ: kludge (+1 to match "working" version)
+        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+        print(f"buffered_cmd:          {toHex(buffered_cmd)}")
+    
+        # Write one buffer while reading the other
+        cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
 
         # Decode the binary response into a string
-        self.value = response[9:16].decode() # MZ: changed from 10:16 to 9:16
+        self.value = decode_read_response_str(unbuffered_cmd, buffered_response)
 
         # Set the text in the entry box
         self.stringVar.set(self.value)
@@ -435,7 +442,7 @@ class cWinAreaScan:
             x = 0
             while not self.ready.value:
                 pass
-            self.SPI.readinto(SPIBuf, 0, 2)
+            self.SPI.readinto(SPIBuf, 0, READY_POLL_LEN)
             pixel = (SPIBuf[0] << 8) + SPIBuf[1]
             print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
             for x in range(1, columnCount):
@@ -636,22 +643,22 @@ class cWinMain:
 
     def FPGAInit(self):
         debug("performing FPGA Init")
-        response = bytearray(2)
+        response = bytearray(READY_POLL_LEN)
         # Read out any errant data
         while self.ready.value:
-            self.SPI.readinto(response, 0, 2)
+            self.SPI.readinto(response, 0, READY_POLL_LEN)
         # Fetch the revision from the FPGA
-        self.configObjects[0].SPIRead(length=8)
+        self.configObjects[0].SPIRead()
         # Iterate through each of the config objects and write to the FPGA
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
 
     def FPGAUpdate(self):
         debug("performing FPGA Update")
-        response = bytearray(2)
+        response = bytearray(READY_POLL_LEN)
         # Read out any errant data
         while self.ready.value:
-            self.SPI.readinto(response, 0, 2)
+            self.SPI.readinto(response, 0, READY_POLL_LEN)
         # Iterate through each of the config objects and update to the FPGA if necessary
         for cfgObj in self.configObjects:
             cfgObj.Update()
