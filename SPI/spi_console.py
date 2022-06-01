@@ -101,7 +101,7 @@ def buffer_bytearray(orig, size):
 #
 # @returns array of response payload bytes (everything after ADDR but before CRC)
 # @note only used for SPI "read" commands ("write" commands are much simpler)
-def decode_read_response(unbuffered_cmd, buffered_response):
+def decode_read_response(unbuffered_cmd, buffered_response, name):
     cmd_len = len(unbuffered_cmd)
     unbuffered_response = buffered_response[len(unbuffered_cmd):]
     response_data_len = (unbuffered_response[1] << 8) | unbuffered_response[2]
@@ -111,7 +111,8 @@ def decode_read_response(unbuffered_cmd, buffered_response):
     checkCRC(crc_received, crc_data)
 
     if args.debug:
-        print(f"unbuffered_cmd:        {toHex(unbuffered_cmd)}")
+        print(f"decode_read_response({name}):")
+        print(f"  unbuffered_cmd:      {toHex(unbuffered_cmd)}")
         print(f"  buffered_response:   {toHex(buffered_response)}")
         print(f"  cmd_len:             {cmd_len}")
         print(f"  unbuffered_response: {toHex(unbuffered_response)}")
@@ -123,13 +124,16 @@ def decode_read_response(unbuffered_cmd, buffered_response):
     return response_data
 
 ## @returns response payload as string
-def decode_read_response_str(unbuffered_cmd, buffered_response) -> str:
-    return decode_read_response(unbuffered_cmd, buffered_response).decode()
+def decode_read_response_str(unbuffered_cmd, buffered_response, name=None) -> str:
+    return decode_read_response(unbuffered_cmd, buffered_response, name).decode()
 
 ## @returns little-endian response payload as uint16
-def decode_read_response_int(unbuffered_cmd, buffered_response) -> int:
+def decode_read_response_int(unbuffered_cmd, buffered_response, name=None) -> int:
     response_data = decode_read_response(unbuffered_cmd, buffered_response)
-    return (response_data[1] << 8) | response_data[0] 
+    result = (response_data[1] << 8) | response_data[0] 
+    if args.debug:
+        print(f"  result:              {result}")
+    return result
 
 # Simple verification function for Integer inputs
 def fIntValidate(input):
@@ -170,18 +174,16 @@ class cCfgString:
     def SPIRead(self):
     
         # MZ: I seem able to read the 7-char FPGA version whether this length is
-        #     set to 1, 8 or other
-        # unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
-        unbuffered_cmd = [START, 0x00, 1, self.address, END]          # MZ: kludge
+        #     set to 1 (original) or 8 (read_len)...why?
+        unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
         buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len + 1)   # MZ: kludge (+1 to match "working" version)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-        print(f"buffered_cmd:          {toHex(buffered_cmd)}")
     
         # Write one buffer while reading the other
         cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
 
         # Decode the binary response into a string
-        self.value = decode_read_response_str(unbuffered_cmd, buffered_response)
+        self.value = decode_read_response_str(unbuffered_cmd, buffered_response, self.name)
 
         # Set the text in the entry box
         self.stringVar.set(self.value)
@@ -240,7 +242,7 @@ class cCfgEntry:
     
         # Write one buffer while reading the other
         SPI.write_readinto(buffered_cmd, buffered_response)
-        self.value = decode_read_response_int(unbuffered_cmd, buffered_response)
+        self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
     
         self.stringVar.set(str(self.value))
         print(f">><< CfgEntry[{self.name:16s}].read {toHex(command)} -> {toHex(response)} ({self.value})")
@@ -274,6 +276,7 @@ class cCfgEntry:
     
         # SPI.write_readinto(buffered_cmd, buffered_response)
         SPI.write(unbuffered_cmd, 0, 8) # MZ: kludge (replaced write_readinto with write to match working)
+        print(f">> CfgEntry[{self.name:16s}].write: {toHex(unbuffered_cmd)}")
     
         # result = int(buffered_response[-2]) # MZ: kludge (stopped checking result codes to match working)
         # print(f">><< CfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
@@ -333,7 +336,7 @@ class cCfgCombo:
     
         SPI.write_readinto(buffered_cmd, buffered_response)
     
-        self.value = decode_read_response_int(unbuffered_cmd, buffered_response)
+        self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
         self.stringVar.set(str(self.value))
         print(f">><< CfgCombo.read {toHex(unbuffered_cmd)} -> {toHex(buffered_response)} ({self.value})")
             
@@ -577,14 +580,14 @@ class cWinMain:
         SPIBuf  = bytearray(2)
         spectra = []
         
-        debug("Acquire: raising trigger")
+        # debug("Acquire: raising trigger")
         self.trigger.value = True
 
-        debug("Acquire: blocking on DATA_READY")
+        # debug("Acquire: blocking on DATA_READY")
         while not self.ready.value:
             pass
 
-        debug("Acquire: releasing trigger")
+        # debug("Acquire: releasing trigger")
         self.trigger.value = False
 
         # Read in the spectra
