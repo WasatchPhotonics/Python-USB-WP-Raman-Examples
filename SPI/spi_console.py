@@ -249,25 +249,34 @@ class cCfgEntry:
     # Write an integer to the FPGA.
     #
     # @verbatim
-    # >><< CfgEntry[Integration Time].write: [ 0x3c, 0x00, 0x03, 0x91, 0x64, 0x00, 0x6a, 0x3e, 0x00, 0x00, 0x00 ] -> [ 0x3e, 0x03, 0x03, 0x03, 0x03,
-    #                                           <    (_length_)  ADDR  (LSB Value)  CRC   >                             <     ?     ?     ?     ?   
-    #                                  offset:  0     1     2     3     4     5     6     7                             0     1     2     3     4   
-    #                                          \______________unbuffered_cmd______________/             MZ: I feel that \___this should be 8 bytes n
-    #                                          \__________________________buffered_cmd_________________________/        \_________________________bu
+    # >><< CfgEntry[Integration Time].write: [ 0x3c, 0x00, 0x03, 0x91, 0x64, 0x00, 0x6a, 0x3e, 0x00, 0x00, 0x00 ] -> [ 0x3e, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x3c, 0x00, 0x3e, 0x3e ] 
+    #                                           <    (_length_)  ADDR  (LSB Value)  CRC   >                             <     ?     ?     ?     ?     ?     ?     <  SUCCESS  >     >
+    #                                  offset:  0     1     2     3     4     5     6     7                             0     1     2     3     4     5     6     7     8     9    10
+    #                                           \_____________unbuffered_cmd______________/             MZ: I feel that \___this should be 8 bytes not 7____/
+    #                                          \__________________________buffered_cmd_________________________/        \_________________________buffered_response____________________/
     # @endverbatim
     def SPIWrite(self):
-        command = bytearray(8)
+    
         # Convert the int into bytes.
-        txData = bytearray(2)
-        txData[1]   = self.value >> 8
-        txData[0]   = self.value - (txData[1] << 8)
-        # A write command consists of opening and closing delimiters, the payload size which is data + 1 (for the command byte),
-        # the command/address with the MSB set for a write operation, the payload data, and the CRC. This function does not 
-        # caluculate the CRC nor read back the status.
-        # Refer to ENG-150 for additional information
-        command = [0x3C, 0x00, 0x03, (self.address+0x80), txData[0], txData[1], 0xFF, 0x3E]
-        SPI.write(command, 0, 8)
-        print(f">> CfgEntry[{self.name:16s}].write {toHex(command)}")
+        txData = []
+        txData      .append( self.value        & 0xff) # LSB
+        txData      .append((self.value >>  8) & 0xff)
+        if self.write_len > 3:
+            txData  .append((self.value >> 16) & 0xff) # MSB
+    
+        unbuffered_cmd = [START, 0x00, 3, self.address | WRITE] # MZ: kludge (replaced self.write_len with 3 to match working)
+        unbuffered_cmd.extend(txData)
+        unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
+    
+        # MZ: the -1 at the end was added as a kludge, because otherwise we find the trailing '>' at that offset.  This seems to be a bug?
+        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1) # KLUDGE - 1) # all write responses are just 3 bytes: [ '<'
+        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+    
+        # SPI.write_readinto(buffered_cmd, buffered_response)
+        SPI.write(unbuffered_cmd, 0, 8) # MZ: kludge (replaced write_readinto with write to match working)
+    
+        # result = int(buffered_response[-2]) # MZ: kludge (stopped checking result codes to match working)
+        # print(f">><< CfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
