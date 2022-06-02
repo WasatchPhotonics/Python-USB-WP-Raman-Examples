@@ -75,8 +75,24 @@ def checkCRC(crc_received, data):
     if crc_computed != crc_received:
         print(f"\nERROR *** CRC mismatch: received 0x{crc_received:02x}, computed 0x{crc_computed:02x}\n")
 
+## given a list or bytearray of data elements, return the checksum
 def computeCRC(data):
     return crc8(bytearray(data))
+
+## 
+# given a formatted SPI command of the form [START, L0, L1, ADDR, ...DATA..., CRC, END],
+# return command with CRC replaced with the computed checksum of [L0..DATA] as bytearray
+def fixCRC(cmd):
+    if cmd is None or len(cmd) < 7 or cmd[0] != START or cmd[-1] != END:
+        print(f"ERROR: fixCRC expects well-formatted SPI 'write' command: {cmd}")
+        return
+
+    index = len(cmd) - 2
+    checksum = computeCRC(bytearray(cmd[1:index]))
+    result = cmd[:index]
+    result.extend([checksum, cmd[-1]])
+    debug(f"fixCRC: cmd {toHex(cmd)} -> result {toHex(result)}")
+    return bytearray(result)
 
 ## @see ENG-0150-C section 3.2, "Configuration Set Response Packet"
 def errorCodeToString(code):
@@ -206,8 +222,8 @@ class cCfgString:
         self.stringVar.set(self.value)
 
     # This script currently does not write any string data to the FPGA via SPI.
-    # def SPIWrite(self):
-    #     pass
+    def SPIWrite(self):
+        pass
 
     def Update(self):
         pass
@@ -262,7 +278,6 @@ class cCfgEntry:
         self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
     
         self.stringVar.set(str(self.value))
-        print(f">><< CfgEntry[{self.name:16s}].read {toHex(command)} -> {toHex(response)} ({self.value})")
 
     ##
     # Write an integer to the FPGA.
@@ -286,6 +301,8 @@ class cCfgEntry:
         unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE] # MZ: replaced 3 with self.write_len
         unbuffered_cmd.extend(txData)
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
+
+        # unbuffered_cmd = fixCRC([START, 0x00, self.write_len, self.address | WRITE, txData[0], txData[1], 0xFF, END ]) # MZ: replaced 3 with self.write_len
     
         # MZ: the -1 at the end was added as a kludge, because otherwise we find
         #     a redundant '>' in the last byte.  This seems a bug, due to the 
@@ -296,7 +313,7 @@ class cCfgEntry:
     
         SPI.write_readinto(buffered_cmd, buffered_response)
         result = int(buffered_response[-2]) 
-        print(f">><< CfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
+        print(f">><< cCfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
@@ -358,11 +375,13 @@ class cCfgCombo:
     
         self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
         self.stringVar.set(str(self.value))
-        print(f">><< CfgCombo.read {toHex(unbuffered_cmd)} -> {toHex(buffered_response)} ({self.value})")
             
     def SPIWrite(self):
+        # unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, 0xFF, END ]) 
+
         unbuffered_cmd = [START, 0, self.write_len, self.address | WRITE, self.value] 
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
+
         buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
         SPI.write_readinto(buffered_cmd, buffered_response) 
@@ -376,10 +395,9 @@ class cCfgCombo:
         if self.value != newValue:
             self.value = newValue
             self.SPIWrite()
-
 # End Class cCfgCombo
 
-# EEPROM Control Window Class
+# EEPROM Control Window Class (not instantiated until window opened by button)
 class cWinEEPROM:
     
     def __init__(self, SPI, intValidate):
@@ -418,14 +436,20 @@ class cWinEEPROM:
         self.root.mainloop()
 
     def EEPROMRead(self):
-        EEPROMPage  = bytearray(74)
-        command     = bytearray(7)
         page        = int(self.pageStr.get())
-        command     = [START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END]
+
+
+        command          = [START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END]
+        # fixCRC([START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END])
+        # command = fixCRC([START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END])
+
         print(f">> EEPROM.read {toHex(command)}")
         self.SPI.write(command, 0, 7)
-        time.sleep(0.01)
+
+        time.sleep(0.01) # empirically deterined 10ms delay
+
         command = [START, 0x00, 0x01, 0x31, 0xFF, END]
+        EEPROMPage  = bytearray(74)
         self.SPI.write_readinto(command, EEPROMPage)
         values = []
         for x in range(0, 64):
