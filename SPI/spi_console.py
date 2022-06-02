@@ -1,3 +1,18 @@
+"""
+Changes:
+- cmd-line options for READY and TRIGGER pins
+- using write_readinto() rather than write (and ideally read_writeinto instead of read) so that both read/write buffers are always visible, managed and debuggable
+- ensuring read/write buffer lengths match (per docs)
+- generate CRC on writes
+- validate CRC on reads
+- check error code on writes
+- support 24-bit integration time
+- user feedback on 'import' failures
+- reduced READY_POLL_LEN from 2 to 1
+- named constants to reduce opportunity for error
+- identify deltas from API docs
+"""
+
 import tkinter as tk
 import tkinter.ttk as ttk
 
