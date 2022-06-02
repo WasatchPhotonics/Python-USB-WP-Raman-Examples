@@ -30,7 +30,7 @@ import crcmod.predefined
 VERSION="1.0.0"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # MZ: does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
-READY_POLL_LEN = 2
+READY_POLL_LEN = 1
 START = 0x3c # <
 END   = 0x3e # >
 WRITE = 0x80
@@ -463,7 +463,7 @@ class cWinAreaScan:
             x = 0
             while not self.ready.value:
                 pass
-            self.SPI.readinto(SPIBuf, 0, READY_POLL_LEN)
+            self.SPI.readinto(SPIBuf, 0, len(SPIBuf))
             pixel = (SPIBuf[0] << 8) + SPIBuf[1]
             print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
             for x in range(1, columnCount):
