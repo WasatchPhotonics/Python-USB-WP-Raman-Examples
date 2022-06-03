@@ -1,23 +1,29 @@
 """
 Changes:
-- cmd-line options for READY and TRIGGER pins
-- using write_readinto() rather than write (and ideally read_writeinto instead of read) so that both read/write buffers are always visible, managed and debuggable
-- ensuring read/write buffer lengths match (per docs)
-- generate CRC on writes
-- validate CRC on reads
-- check error code on writes
-- support 24-bit integration time
-- user feedback on 'import' failures
-- reduced READY_POLL_LEN from 2 to 1
-- named constants to reduce opportunity for error
-- identify deltas from API docs
+    - cmd-line options for READY and TRIGGER pins
+    - using write_readinto() rather than write (and ideally read_writeinto instead of read) so that both read/write buffers are always visible, managed and debuggable
+    - ensuring read/write buffer lengths match (per docs)
+    - generate CRC on writes
+    - validate CRC on reads
+    - check error code on writes
+    - support 24-bit integration time
+    - user feedback on 'import' failures
+    - reduced READY_POLL_LEN from 2 to 1
+    - named constants to reduce opportunity for error
+    - identify deltas from API docs
+
+Observations:
+    - When I'm away from testing for awhile (10min+?) I often have to power-cycle
+      the spectrometer when I resume.  This could be an problem with the FT232H 
+      dongle or my laptop of course. 
 """
 
 import tkinter as tk
 import tkinter.ttk as ttk
 
-import logging
+import threading
 import argparse
+import logging
 import time
 import sys
 import os
@@ -41,7 +47,7 @@ import busio
 
 import crcmod.predefined
 
-# globals
+# constants
 VERSION="1.0.0"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # MZ: does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
@@ -49,8 +55,12 @@ READY_POLL_LEN = 1
 START = 0x3c # <
 END   = 0x3e # >
 WRITE = 0x80
+CRC   = 0xff # for readability
+
+# globals
 crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
 args = None 
+lock = threading.Lock()
 
 def parseArgs(argv):
     parser = argparse.ArgumentParser(
@@ -59,6 +69,7 @@ def parseArgs(argv):
     parser.add_argument("--debug", action="store_true", help="output verbose debug messages")
     parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
     parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
+    parser.add_argument("--paused", action="store_true", help="launch with acquisition paused")
     return parser.parse_args(argv[1:])
 
 def debug(msg):
@@ -83,7 +94,7 @@ def computeCRC(data):
 # given a formatted SPI command of the form [START, L0, L1, ADDR, ...DATA..., CRC, END],
 # return command with CRC replaced with the computed checksum of [L0..DATA] as bytearray
 def fixCRC(cmd):
-    if cmd is None or len(cmd) < 7 or cmd[0] != START or cmd[-1] != END:
+    if cmd is None or len(cmd) < 6 or cmd[0] != START or cmd[-1] != END:
         print(f"ERROR: fixCRC expects well-formatted SPI 'write' command: {cmd}")
         return
 
@@ -91,7 +102,7 @@ def fixCRC(cmd):
     checksum = computeCRC(bytearray(cmd[1:index]))
     result = cmd[:index]
     result.extend([checksum, cmd[-1]])
-    debug(f"fixCRC: cmd {toHex(cmd)} -> result {toHex(result)}")
+    # debug(f"fixCRC: cmd {toHex(cmd)} -> result {toHex(result)}")
     return bytearray(result)
 
 ## @see ENG-0150-C section 3.2, "Configuration Set Response Packet"
@@ -134,9 +145,9 @@ def buffer_bytearray(orig, size):
 #
 # @returns array of response payload bytes (everything after ADDR but before CRC)
 # @note only used for SPI "read" commands ("write" commands are much simpler)
-def decode_read_response(unbuffered_cmd, buffered_response, name):
+def decode_read_response(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0):
     cmd_len = len(unbuffered_cmd)
-    unbuffered_response = buffered_response[len(unbuffered_cmd):]
+    unbuffered_response = buffered_response[len(unbuffered_cmd) - missing_echo_len:]
     response_data_len = (unbuffered_response[1] << 8) | unbuffered_response[2]
     response_data = unbuffered_response[4 : 4 + response_data_len - 1]
     crc_received = unbuffered_response[-2]
@@ -144,7 +155,7 @@ def decode_read_response(unbuffered_cmd, buffered_response, name):
     checkCRC(crc_received, crc_data)
 
     if args.debug:
-        print(f"decode_read_response({name}):")
+        print(f"decode_read_response({name}, missing={missing_echo_len}):")
         print(f"  unbuffered_cmd:      {toHex(unbuffered_cmd)}")
         print(f"  buffered_response:   {toHex(buffered_response)}")
         print(f"  cmd_len:             {cmd_len}")
@@ -157,12 +168,12 @@ def decode_read_response(unbuffered_cmd, buffered_response, name):
     return response_data
 
 ## @returns response payload as string
-def decode_read_response_str(unbuffered_cmd, buffered_response, name=None) -> str:
-    return decode_read_response(unbuffered_cmd, buffered_response, name).decode()
+def decode_read_response_str(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0) -> str:
+    return decode_read_response(unbuffered_cmd, buffered_response, name, missing_echo_len).decode()
 
 ## @returns little-endian response payload as uint16
-def decode_read_response_int(unbuffered_cmd, buffered_response, name=None) -> int:
-    response_data = decode_read_response(unbuffered_cmd, buffered_response)
+def decode_read_response_int(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0) -> int:
+    response_data = decode_read_response(unbuffered_cmd, buffered_response, name, missing_echo_len)
     result = (response_data[1] << 8) | response_data[0] 
     if args.debug:
         print(f"  result:              {result}")
@@ -208,15 +219,21 @@ class cCfgString:
     
         # MZ: I seem able to read the 7-char FPGA version whether this length is
         #     set to 1 (original) or 8 (read_len)...why?
-        unbuffered_cmd = [START, 0x00, self.read_len, self.address, END]          
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len)  # MZ: removed spurious "+1" in original
+
+        # MZ: testing with CRC
+        # unbuffered_cmd = [START, 0x00, self.read_len, self.address, END] # MZ: why does this command not get a CRC?  Should it?
+        # buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len)  # MZ: removed spurious "+1" in original
+
+        unbuffered_cmd = fixCRC([START, 0x00, self.read_len, self.address, CRC, END]) 
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len - 1)  
+
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
         # Write one buffer while reading the other
         cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
 
         # Decode the binary response into a string
-        self.value = decode_read_response_str(unbuffered_cmd, buffered_response, self.name)
+        self.value = decode_read_response_str(unbuffered_cmd, buffered_response, self.name, missing_echo_len=1)
 
         # Set the text in the entry box
         self.stringVar.set(self.value)
@@ -302,7 +319,7 @@ class cCfgEntry:
         unbuffered_cmd.extend(txData)
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
 
-        # unbuffered_cmd = fixCRC([START, 0x00, self.write_len, self.address | WRITE, txData[0], txData[1], 0xFF, END ]) # MZ: replaced 3 with self.write_len
+        # unbuffered_cmd = fixCRC([START, 0x00, self.write_len, self.address | WRITE, txData[0], txData[1], CRC, END ]) # MZ: replaced 3 with self.write_len
     
         # MZ: the -1 at the end was added as a kludge, because otherwise we find
         #     a redundant '>' in the last byte.  This seems a bug, due to the 
@@ -377,7 +394,7 @@ class cCfgCombo:
         self.stringVar.set(str(self.value))
             
     def SPIWrite(self):
-        # unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, 0xFF, END ]) 
+        # unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, CRC, END ]) 
 
         unbuffered_cmd = [START, 0, self.write_len, self.address | WRITE, self.value] 
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
@@ -435,28 +452,52 @@ class cWinEEPROM:
         self.EEPROMRead()
         self.root.mainloop()
 
+    ##
+    # @para API (ENG-0150-C)
+    #
+    # 5.3 Read EEPROM
+    #
+    # Send the command to get the FPGA to read the EEPROM:
+    #   [0x3C, 0x00, 0x02, 0xB0, 0x4Y, CRC, 0x3E]    Where Y is the page number of the EEPROM you wish to read.
+    #  
+    # Wait until SPEC_BUSY is deasserted.
+    #  
+    # Read back the buffer:
+    #   [0x3C, 0x00, 0x01, 0x31, 0x24, 0x3E] (Followed by enough bytes (64) of padding to read all the buffer out).
+    #    START \_length_/  ADDR  CRC  END   MZ: why does an EEPROM 'read' command get a CRC, when cCfgString.SPIRead() does not?
+    #
+    # @warning MZ: 0x4Y only supports 10 EEPROM pages: eventual schema should support 512 pages (okay for now)
     def EEPROMRead(self):
-        page        = int(self.pageStr.get())
+        page = int(self.pageStr.get())
 
+        with lock:
+            # MZ: is 0xb0 treated as a 'write' or a 'read'?  It has the 0x80 bit high...
 
-        command          = [START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END]
-        # fixCRC([START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END])
-        # command = fixCRC([START, 0x00, 0x02, 0xB0, (0x40 + page), 0xFF, END])
+            # length is 0x0002 because it's the length of (addr, page_offset), not 
+            # the length of the page we're intending to read (which would be 0x0020)
+            # (this is a WRITE command to setup the subsequent READ operation)
+            unbuffered_cmd = fixCRC([START, 0, 2, 0xB0, (0x40 + page), CRC, END])
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)  # MZ: guessing
+            buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
 
-        print(f">> EEPROM.read {toHex(command)}")
-        self.SPI.write(command, 0, 7)
+            print(f">> EEPROM.read {toHex(buffered_cmd)}")
+            self.SPI.write_readinto(buffered_cmd, buffered_response)
 
-        time.sleep(0.01) # empirically deterined 10ms delay
+            # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
+            time.sleep(0.01) # empirically deterined 10ms delay
 
-        command = [START, 0x00, 0x01, 0x31, 0xFF, END]
-        EEPROMPage  = bytearray(74)
-        self.SPI.write_readinto(command, EEPROMPage)
-        values = []
-        for x in range(0, 64):
-            value = str(hex(EEPROMPage[x+9]))
-            self.valStrings[x].set(value)
-            values.append(value)
-        print(f">><< EEPROM.read {toHex(command)} -> {toHex(EEPROMPage)}")
+            # MZ: original (and API) have length 1 here...why?  Should this not be at least 65 (addr + data)? 
+            unbuffered_cmd = fixCRC([START, 0, 1, 0x31, CRC, END]) 
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: guessing (and including kludged -1)
+            buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+            self.SPI.write_readinto(buffered_cmd, buffered_response)
+
+        values = decode_read_response(unbuffered_cmd, buffered_response, "EEPROMRead", missing_echo_len=1)
+        debug(f"decoded {len(values)} values from EEPROM")
+
+        # update to form
+        for x in range(max(64, len(values))):
+            self.valStrings[x].set(hex(values[x]))
 
     def EEPROMWrite(self):
         page        = int(self.pageStr.get())
@@ -470,7 +511,7 @@ class cWinEEPROM:
         EEPROMWrCmd[69] = END
         self.SPI.write(EEPROMWrCmd, 0, 70)
         print(f">> EEPROM.write {EEPROMWrCmd}")
-        command = [START, 0x00, 0x02, 0xB0, page | WRITE, 0xFF, END]
+        command = [START, 0x00, 0x02, 0xB0, page | WRITE, CRC, END]
         self.SPI.write(command, 0, 7)
         print(f">> EEPROM.write {toHex(command)}")
 # End Class cWinEEPROM
@@ -492,7 +533,7 @@ class cWinAreaScan:
         self.frame.pack()
         self.canvas.pack()
         # Enable Area Scan
-        command = [START, 0x00, 0x03, 0x92, 0x00, 0x10, 0xFF, END]
+        command = [START, 0x00, 0x03, 0x92, 0x00, 0x10, CRC, END]
         self.SPI.write(command, 0, 8)
         # Send a trigger
         self.trigger.value = True
@@ -517,7 +558,7 @@ class cWinAreaScan:
         # Clear the trigger
         self.trigger.value = False
         # Disable Area Scan
-        command = [START, 0x00, 0x03, 0x92, 0x00, 0x00, 0xFF, END]
+        command = [START, 0x00, 0x03, 0x92, 0x00, 0x00, CRC, END]
         self.SPI.write(command, 0, 8)
         self.root.mainloop()
 
@@ -613,33 +654,39 @@ class cWinMain:
         debug("writing initial values to FPGA")
         self.FPGAInit()
        
-        debug("starting acquisition loop")
-        self.acquireActive = True
-        self.root.after(10, self.Acquire)
+        with lock:
+            if not args.paused:
+                debug("starting acquisition loop")
+                self.acquireActive = True
+                self.root.after(10, self.Acquire)
+
         self.root.mainloop()
 
         debug("exiting")
 
     def Acquire(self):
-        SPIBuf  = bytearray(2)
-        spectra = []
-        
-        # debug("Acquire: raising trigger")
-        self.trigger.value = True
+        with lock:
+            if not self.acquireActive:
+                return
 
-        # debug("Acquire: blocking on DATA_READY")
-        while not self.ready.value:
-            pass
+            # debug("Acquire: raising trigger")
+            self.trigger.value = True
 
-        # debug("Acquire: releasing trigger")
-        self.trigger.value = False
+            # debug("Acquire: blocking on DATA_READY")
+            while not self.ready.value:
+                pass
 
-        # Read in the spectra
-        while self.ready.value:
-            self.SPI.readinto(SPIBuf, 0, 2)
-            pixel = (SPIBuf[0] << 8) + SPIBuf[1]
-            spectra.append(pixel)
-        debug(f"Acquire: read {len(spectra)} pixels")
+            # debug("Acquire: releasing trigger")
+            self.trigger.value = False
+
+            # Read in the spectra
+            SPIBuf  = bytearray(2)
+            spectra = []
+            while self.ready.value:
+                self.SPI.readinto(SPIBuf, 0, 2)
+                pixel = (SPIBuf[0] << 8) + SPIBuf[1]
+                spectra.append(pixel)
+            debug(f"Acquire: read {len(spectra)} pixels")
 
         region0 = self.configObjects[7].value - self.configObjects[6].value
         region1 = self.configObjects[11].value - self.configObjects[10].value
@@ -725,18 +772,21 @@ class cWinMain:
 
     def openEEPROM(self):
         debug("opening EEPROM")
-        self.acquireActive = False
+        with lock:
+            self.acquireActive = False
         self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
 
     def openAreaScan(self):
         debug("opening Area Scan")
-        self.acquireActive = False
+        with lock:
+            self.acquireActive = False
         # Give time for the last acquisition to complete
         time.sleep(0.1)
         lineCount   = self.configObjects[5].value - self.configObjects[4].value
         columnCount = self.configObjects[7].value - self.configObjects[6].value
         self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
-        self.acquireActive = True
+        with lock:
+            self.acquireActive = True
         self.root.after(10, self.Acquire)
 
 # End Class cWinMain
