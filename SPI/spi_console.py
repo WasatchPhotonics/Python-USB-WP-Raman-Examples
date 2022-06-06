@@ -497,7 +497,7 @@ class cWinEEPROM:
 
         # update to form
         for x in range(max(64, len(values))):
-            self.valStrings[x].set(hex(values[x]))
+            self.valStrings[x].set(f"{values[x]:02x}")
 
     def EEPROMWrite(self):
         page        = int(self.pageStr.get())
@@ -643,7 +643,12 @@ class cWinMain:
         self.btnEEPROM   = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
         self.btnEEPROM.grid(row=17, column=0)
         self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
-        self.btnAreaScan.grid(row=18, column=1)
+        self.btnAreaScan.grid(row=16, column=1)
+
+        self.textStart = tk.StringVar()
+        self.textStart.set("???")
+        self.btnStart = tk.Button(self.configFrame, textvariable=self.textStart, command=self.toggleStart)
+        self.btnStart.grid(row=17, column=1)
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
         self.configFrame.grid_columnconfigure(0, minsize=120)
@@ -654,15 +659,27 @@ class cWinMain:
         debug("writing initial values to FPGA")
         self.FPGAInit()
        
-        with lock:
-            if not args.paused:
-                debug("starting acquisition loop")
-                self.acquireActive = True
-                self.root.after(10, self.Acquire)
+        self.stop() if args.paused else self.start()
 
         self.root.mainloop()
 
         debug("exiting")
+
+    def start(self):
+        with lock:
+            debug("starting acquisition loop")
+            self.textStart.set("Stop")
+            self.acquireActive = True
+            self.root.after(10, self.Acquire)
+
+    def stop(self):
+        with lock:
+            debug("pausing acquisition loop")
+            self.textStart.set("Start")
+            self.acquireActive = False
+
+    def toggleStart(self):
+        self.stop() if self.acquireActive else self.start()
 
     def Acquire(self):
         with lock:
