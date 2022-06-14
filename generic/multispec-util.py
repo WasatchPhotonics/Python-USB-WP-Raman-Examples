@@ -151,9 +151,9 @@ class Fixture(object):
             [self.set_trigger_source(dev, 0) for dev in self.devices]
 
     def list(self):
-        print("PID\tModel\tSerial\tFormat\tPixels\tFW\tFPGA")
+        print("%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA"))
         for dev in self.devices:
-            print("0x%04x\t%s\t%s\t%d\t%d\t%s\t%s" % (
+            print("0x%04x %-16s %-16s %3d %6d %-10s %-10s" % (
                 dev.idProduct, 
                 dev.eeprom["model"], 
                 dev.eeprom["serial_number"],
