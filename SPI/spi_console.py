@@ -11,6 +11,9 @@ Changes:
     - reduced READY_POLL_LEN from 2 to 1
     - named constants to reduce opportunity for error
     - identify deltas from API docs
+    - added CRC byte to cCfgString.SPIRead request
+    - wrap acquireActive in mutex
+    - added play/pause button
 
 Observations:
     - When I'm away from testing for awhile (10min+?) I often have to power-cycle
@@ -179,6 +182,28 @@ def decode_read_response_int(unbuffered_cmd, buffered_response, name=None, missi
         print(f"  result:              {result}")
     return result
 
+def decode_write_response(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0):
+    cmd_len = len(unbuffered_cmd)
+    unbuffered_response = buffered_response[len(unbuffered_cmd) - missing_echo_len:]
+    response_data_len = (unbuffered_response[1] << 8) | unbuffered_response[2]
+    response_data = unbuffered_response[4 : 4 + response_data_len - 1]
+    crc_received = unbuffered_response[-2]
+    crc_data = unbuffered_response[1 : -2]
+    checkCRC(crc_received, crc_data)
+
+    if args.debug:
+        print(f"decode_read_response({name}, missing={missing_echo_len}):")
+        print(f"  unbuffered_cmd:      {toHex(unbuffered_cmd)}")
+        print(f"  buffered_response:   {toHex(buffered_response)}")
+        print(f"  cmd_len:             {cmd_len}")
+        print(f"  unbuffered_response: {toHex(unbuffered_response)}")
+        print(f"  response_data_len:   {response_data_len}")
+        print(f"  response_data:       {toHex(response_data)}")
+        print(f"  crc_received:        {hex(crc_received)}")
+        print(f"  crc_data:            {toHex(crc_data)}")
+
+    return response_data
+
 # Simple verification function for Integer inputs
 def fIntValidate(input):
     if input.isdigit():
@@ -318,8 +343,6 @@ class cCfgEntry:
         unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE] # MZ: replaced 3 with self.write_len
         unbuffered_cmd.extend(txData)
         unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
-
-        # unbuffered_cmd = fixCRC([START, 0x00, self.write_len, self.address | WRITE, txData[0], txData[1], CRC, END ]) # MZ: replaced 3 with self.write_len
     
         # MZ: the -1 at the end was added as a kludge, because otherwise we find
         #     a redundant '>' in the last byte.  This seems a bug, due to the 
@@ -394,11 +417,7 @@ class cCfgCombo:
         self.stringVar.set(str(self.value))
             
     def SPIWrite(self):
-        # unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, CRC, END ]) 
-
-        unbuffered_cmd = [START, 0, self.write_len, self.address | WRITE, self.value] 
-        unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
-
+        unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, self.value, CRC, END])
         buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
         SPI.write_readinto(buffered_cmd, buffered_response) 
@@ -472,23 +491,31 @@ class cWinEEPROM:
 
         with lock:
             # MZ: is 0xb0 treated as a 'write' or a 'read'?  It has the 0x80 bit high...
+            #     therefore, treating as a WRITE, therefore, reading response
 
             # length is 0x0002 because it's the length of (addr, page_offset), not 
             # the length of the page we're intending to read (which would be 0x0020)
             # (this is a WRITE command to setup the subsequent READ operation)
             unbuffered_cmd = fixCRC([START, 0, 2, 0xB0, (0x40 + page), CRC, END])
-            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)  # MZ: guessing
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)  
             buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
 
-            print(f">> EEPROM.read {toHex(buffered_cmd)}")
             self.SPI.write_readinto(buffered_cmd, buffered_response)
 
+            # MZ: I tried reading a "write response" after the 0xb0 (EEPROM_READ_REQUEST) 
+            #     with its one-byte payload (EEPROM page index), but all I get is a zero 
+            #     followed by a run of START bytes.
+            #
+            # result = int(buffered_response[-2]) 
+            # print(f">><< EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
+            print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
+
             # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
-            time.sleep(0.01) # empirically deterined 10ms delay
+            time.sleep(0.01) # empirically determined 10ms delay
 
             # MZ: original (and API) have length 1 here...why?  Should this not be at least 65 (addr + data)? 
-            unbuffered_cmd = fixCRC([START, 0, 1, 0x31, CRC, END]) 
-            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: guessing (and including kludged -1)
+            unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END]) 
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: including kludged -1
             buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
             self.SPI.write_readinto(buffered_cmd, buffered_response)
 
