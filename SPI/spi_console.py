@@ -640,7 +640,7 @@ class cWinMain:
         self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00", 0x10, read_len=8)) 
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
         self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
-        self.configObjects.append(cCfgEntry("Black Level",     , 2  , 0       , 0x13))
+        self.configObjects.append(cCfgEntry("Black Level"      , 2  , 0       , 0x13))
         self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100   , 0x14))
         self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250     , 0x50)) # Region 0
         self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750     , 0x51))
