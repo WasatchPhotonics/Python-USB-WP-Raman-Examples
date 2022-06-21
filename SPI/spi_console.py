@@ -1,19 +1,7 @@
 """
-Changes:
-    - cmd-line options for READY and TRIGGER pins
-    - using write_readinto() rather than write (and ideally read_writeinto instead of read) so that both read/write buffers are always visible, managed and debuggable
-    - ensuring read/write buffer lengths match (per docs)
-    - generate CRC on writes
-    - validate CRC on reads
-    - check error code on writes
-    - support 24-bit integration time
-    - user feedback on 'import' failures
-    - reduced READY_POLL_LEN from 2 to 1
-    - named constants to reduce opportunity for error
-    - identify deltas from API docs
-    - added CRC byte to cCfgString.SPIRead request
-    - wrap acquireActive in mutex
-    - added play/pause button
+Troubleshooting:
+    - If it seems to "freeze" at startup, make sure you're setting your READY / 
+      TRIGGER pins correctly.
 
 Observations:
     - When I'm away from testing for awhile (10min+?) I often have to power-cycle
@@ -227,6 +215,7 @@ class cCfgString:
     #                  version number (1 ADDR plus 7 ASCII).
     def __init__(self, name, row, value, address, read_len=8):
         self.name       = name
+        self.row        = row
         self.value      = str(value)
         self.address    = int(address)
         self.read_len   = read_len
@@ -297,6 +286,7 @@ class cCfgEntry:
     #                   are uint16 (ADDR, LSB, MSB).
     def __init__(self, name, row, value, address, read_len=3, write_len=3):
         self.name       = name
+        self.row        = row
         self.value      = int(value)
         self.address    = int(address) & 0x7f   # ensure 7-bit
         self.write_len  = write_len
@@ -650,12 +640,12 @@ class cWinMain:
         self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00", 0x10, read_len=8)) 
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
         self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
-        self.configObjects.append(cCfgEntry("Detector Offset"  , 2  , 0       , 0x13))
+        self.configObjects.append(cCfgEntry("Black Level",     , 2  , 0       , 0x13))
         self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100   , 0x14))
         self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250     , 0x50)) # Region 0
         self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750     , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 500     , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1500    , 0x53))
+        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 12      , 0x52))
+        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1932    , 0x53))
         self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0       , 0x54)) # Region 1 (MZ: not in ENG-0150)
         self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0       , 0x55))
         self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0       , 0x56))
@@ -664,6 +654,11 @@ class cWinMain:
 
         # Add the AD/OD combo boxes
         self.configObjects.append(cCfgCombo(13, "PixelMode"))
+
+        self.configMap = {}
+        for obj in self.configObjects:
+            self.configMap[obj.name] = obj.row
+
         # Add the buttons
         self.btnCapture  = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
         self.btnCapture.grid(row=16, column=0)
@@ -685,6 +680,8 @@ class cWinMain:
         
         debug("writing initial values to FPGA")
         self.FPGAInit()
+
+        self.firstSpectrum = True
        
         self.stop() if args.paused else self.start()
 
@@ -708,6 +705,10 @@ class cWinMain:
     def toggleStart(self):
         self.stop() if self.acquireActive else self.start()
 
+    def getValue(self, name):
+        index = self.configMap[name]
+        return self.configObjects[index].value
+
     def Acquire(self):
         with lock:
             if not self.acquireActive:
@@ -730,50 +731,68 @@ class cWinMain:
                 self.SPI.readinto(SPIBuf, 0, 2)
                 pixel = (SPIBuf[0] << 8) + SPIBuf[1]
                 spectra.append(pixel)
-            debug(f"Acquire: read {len(spectra)} pixels")
+            # debug(f"Acquire: read {len(spectra)} pixels") # MZ: by default we get back 1000, which is correctly 1500 - 500 
 
-        region0 = self.configObjects[7].value - self.configObjects[6].value
-        region1 = self.configObjects[11].value - self.configObjects[10].value
-        region1Active = self.configObjects[9].value != 0
+        region0 = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
+        region1 = self.getValue("Stop Column 1") - self.getValue("Start Column 1")
+        region1Active = self.getValue("Stop Line 1") != 0
 
+        desmileOffset = self.getValue("Desmile Offset")
         maxvalue0 = 0
         minvalue0 = 65536
         maxvalue1 = 0
         minvalue1 = 65536
         spectraBinned0 = []
         spectraBinned1 = []
-        for x in range(self.configObjects[12].value, region0, 2):
-            pixel = int((spectra[x-1] + spectra[x]) / 2)
-            if pixel > maxvalue0:
-                maxvalue0 = pixel
-            if pixel < minvalue0:
-                minvalue0 = pixel
-            spectraBinned0.append(pixel)
 
-        if region1Active:
-            for x in range((region0+1), (region0+region1), 2):
-                pixel = int((spectra[x-1] + spectra[x]) / 2)
-                if pixel > maxvalue1:
-                    maxvalue1 = pixel
-                if pixel < minvalue1:
-                    minvalue1 = pixel
-                spectraBinned1.append(pixel)
+        if self.firstSpectrum:
+            debug(f"len(spectra) {len(spectra)}, desmileOffset {desmileOffset}, region0 {region0}")
+            self.firstSpectrum = False
+
+        try:
+            for x in range(desmileOffset, region0, 2):
+                if x < len(spectra):
+                    pixel = int((spectra[x-1] + spectra[x]) / 2)
+                    if pixel > maxvalue0:
+                        maxvalue0 = pixel
+                    if pixel < minvalue0:
+                        minvalue0 = pixel
+                    spectraBinned0.append(pixel)
+
+            if region1Active:
+                for x in range((region0+1), (region0+region1), 2):
+                    pixel = int((spectra[x-1] + spectra[x]) / 2)
+                    if pixel > maxvalue1:
+                        maxvalue1 = pixel
+                    if pixel < minvalue1:
+                        minvalue1 = pixel
+                    spectraBinned1.append(pixel)
+        except:
+            debug("ignoring graph error")
+            return
 
         # Draw the graph
         scale0 = maxvalue0 - minvalue0
+
+        WIDTH=1160
+        HEIGHT=340
+        LEFT=40
+        TOP=380
+        TOP2=790
+
         if scale0 != 0:
             midvalue = int(minvalue0 + (scale0/2))
-            self.canvas.delete("all")
+            self.canvas.delete("all") # delete previous contents
             self.canvas.create_text(20,20,text=str(maxvalue0), fill="white")
             self.canvas.create_text(20,200,text=str(midvalue), fill="white")
             self.canvas.create_text(20,380,text=str(minvalue0), fill="white")
             self.canvas.create_line(0, 405, 1400, 405, fill="light grey", width=10)
             spectraCount = len(spectraBinned0)
             for x in range(1, spectraCount):
-                x0 = int((x/spectraCount)*1160) + 40
-                y0 = 380 - int(((spectraBinned0[(x-1)]-minvalue0)/scale0)*340)
-                x1 = int(((x+1)/spectraCount)*1160) + 40
-                y1 = 380 - int(((spectraBinned0[x]-minvalue0)/scale0)*340)
+                x0 = int((x/spectraCount)*WIDTH) + LEFT
+                y0 = TOP - int(((spectraBinned0[(x-1)]-minvalue0)/scale0)*HEIGHT)
+                x1 = int(((x+1)/spectraCount)*WIDTH) + LEFT
+                y1 = TOP - int(((spectraBinned0[x]-minvalue0)/scale0)*HEIGHT)
                 self.canvas.create_line(x0, y0, x1, y1, fill="green", width=1)
         if region1Active:
             scale1 = maxvalue1 - minvalue1
@@ -783,10 +802,10 @@ class cWinMain:
             self.canvas.create_text(20,790,text=str(minvalue0), fill="white")
             spectraCount = len(spectraBinned1)
             for x in range(1, spectraCount):
-                x0 = int((x/spectraCount)*1160) + 40
-                y0 = 790 - int(((spectraBinned1[(x-1)]-minvalue1)/scale1)*340)
-                x1 = int(((x+1)/spectraCount)*1160) + 40
-                y1 = 790 - int(((spectraBinned1[x]-minvalue1)/scale1)*340)
+                x0 = int((x/spectraCount)*WIDTH) + LEFT
+                y0 = TOP2 - int(((spectraBinned1[(x-1)]-minvalue1)/scale1)*HEIGHT)
+                x1 = int(((x+1)/spectraCount)*WIDTH) + LEFT
+                y1 = TOP2 - int(((spectraBinned1[x]-minvalue1)/scale1)*HEIGHT)
                 self.canvas.create_line(x0, y0, x1, y1, fill="blue", width=1)
 
         if (self.acquireActive):
@@ -814,6 +833,8 @@ class cWinMain:
         for cfgObj in self.configObjects:
             cfgObj.Update()
 
+        self.firstSpectrum = True
+
     def openEEPROM(self):
         debug("opening EEPROM")
         with lock:
@@ -826,8 +847,8 @@ class cWinMain:
             self.acquireActive = False
         # Give time for the last acquisition to complete
         time.sleep(0.1)
-        lineCount   = self.configObjects[5].value - self.configObjects[4].value
-        columnCount = self.configObjects[7].value - self.configObjects[6].value
+        lineCount   = self.getValue("Stop Line 0") - self.getValue("Start Line 0")
+        columnCount = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
         self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
         with lock:
             self.acquireActive = True
