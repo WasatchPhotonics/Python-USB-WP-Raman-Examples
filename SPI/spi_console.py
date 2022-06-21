@@ -61,6 +61,7 @@ def parseArgs(argv):
     parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
     parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
     parser.add_argument("--paused", action="store_true", help="launch with acquisition paused")
+    parser.add_argument("--gain", type=int, help="default gain (default 0, noting this is a 'FunkyFloat' where 0x01e7 = 1.9)", default=0)
     return parser.parse_args(argv[1:])
 
 def debug(msg):
@@ -641,7 +642,7 @@ class cWinMain:
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
         self.configObjects.append(cCfgEntry("Integration Time" , 1  , 100     , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
         self.configObjects.append(cCfgEntry("Black Level"      , 2  , 0       , 0x13))
-        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , 0x100   , 0x14))
+        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  ,args.gain, 0x14))
         self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250     , 0x50)) # Region 0
         self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750     , 0x51))
         self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 12      , 0x52))
