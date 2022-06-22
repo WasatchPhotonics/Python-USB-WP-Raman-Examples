@@ -58,6 +58,7 @@ START = 0x3c                # <
 END   = 0x3e                # >
 WRITE = 0x80               
 CRC   = 0xff                # for readability
+SUPPORT_MULTIPLE_ROI=False  # not there yet
 
 ################################################################################
 #                                                                              #
@@ -819,9 +820,9 @@ class cWinMain:
             spectra = []
             while self.ready.value:
                 self.SPI.readinto(SPIBuf, 0, 2)
-                pixel = (SPIBuf[0] << 8) + SPIBuf[1]
+                pixel = (SPIBuf[0] << 8) | SPIBuf[1] # little-endian demarshalling
                 spectra.append(pixel)
-            # debug(f"Acquire: read {len(spectra)} pixels") # MZ: by default we get back 1000, which is correctly 1500 - 500 
+            # debug(f"Acquire: read {len(spectra)} pixels") 
 
         region0 = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
         region1 = self.getValue("Stop Column 1") - self.getValue("Start Column 1")
@@ -840,23 +841,32 @@ class cWinMain:
             self.firstSpectrum = False
 
         try:
-            for x in range(desmileOffset, region0, 2):
-                if x < len(spectra):
-                    pixel = int((spectra[x-1] + spectra[x]) / 2)
-                    if pixel > maxvalue0:
-                        maxvalue0 = pixel
-                    if pixel < minvalue0:
-                        minvalue0 = pixel
-                    spectraBinned0.append(pixel)
+            if SUPPORT_MULTIPLE_ROI:
+                for x in range(desmileOffset, region0, 2):
+                    if x < len(spectra):
+                        pixel = int((spectra[x-1] + spectra[x]) / 2)
+                        if pixel > maxvalue0:
+                            maxvalue0 = pixel
+                        if pixel < minvalue0:
+                            minvalue0 = pixel
+                        spectraBinned0.append(pixel)
 
-            if region1Active:
-                for x in range((region0+1), (region0+region1), 2):
-                    pixel = int((spectra[x-1] + spectra[x]) / 2)
-                    if pixel > maxvalue1:
-                        maxvalue1 = pixel
-                    if pixel < minvalue1:
-                        minvalue1 = pixel
-                    spectraBinned1.append(pixel)
+                if region1Active:
+                    for x in range((region0+1), (region0+region1), 2):
+                        pixel = int((spectra[x-1] + spectra[x]) / 2)
+                        if pixel > maxvalue1:
+                            maxvalue1 = pixel
+                        if pixel < minvalue1:
+                            minvalue1 = pixel
+                        spectraBinned1.append(pixel)
+            else:
+                # We're not yet ready to play with multiple ROI.  For now
+                # just graph every pixel received.
+                for x in range(len(spectra)):
+                    pixel = int((spectra[x-1] + spectra[x]) / 2) # MZ: 2x2 binning
+                    maxvalue0 = max(maxvalue0, pixel)
+                    minvalue0 = min(minvalue0, pixel)
+                    spectraBinned0.append(pixel)
         except:
             debug("ignoring graph error")
             return
