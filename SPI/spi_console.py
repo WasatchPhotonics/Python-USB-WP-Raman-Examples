@@ -412,6 +412,11 @@ class cCfgEntry:
             self.value = int(self.stringVar.get())
             self.SPIWrite()
 
+    # Override the value in the GUI widget then update to device
+    def Override(self, value):
+        self.stringVar.set(value)
+        self.Update()
+
 ################################################################################
 #                                                                              #
 #                                 cCfgCombo                                    #
@@ -748,7 +753,7 @@ class cWinMain:
         # store a key-value dict for name-based lookups
         self.configMap = {}
         for obj in self.configObjects:
-            self.configMap[obj.name] = obj.row
+            self.configMap[obj.name] = obj
 
         # Add the buttons
         self.btnCapture  = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
@@ -796,9 +801,11 @@ class cWinMain:
     def toggleStart(self):
         self.stop() if self.acquireActive else self.start()
 
-    def getValue(self, name):
-        index = self.configMap[name]
-        return self.configObjects[index].value
+    def getValue(self, name) -> int:
+        if name not in self.configMap:
+            print(f"getValue: ERROR: unknown name {name}")
+            return 0
+        return self.configMap[name].value
 
     def Acquire(self):
         with lock:
@@ -922,6 +929,9 @@ class cWinMain:
         # Iterate through each of the config objects and write to the FPGA
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
+
+        # MZ: KLUDGE: NOW change start-col (this will be the SECOND setting of this value, BEFORE taking spectra but AFTER other attributes)
+        # self.configMap["Start Column 0"].Override(300)
 
     def FPGAUpdate(self):
         debug("performing FPGA Update")
