@@ -9,9 +9,16 @@ Observations:
       dongle or my laptop of course. 
 """
 
+################################################################################
+#                                                                              #
+#                               Dependencies                                   #
+#                                                                              #
+################################################################################
+
 import tkinter as tk
 import tkinter.ttk as ttk
 
+import crcmod.predefined
 import threading
 import argparse
 import logging
@@ -19,7 +26,7 @@ import time
 import sys
 import os
 
-os.environ["BLINKA_FT232H"] = "1"
+os.environ["BLINKA_FT232H"] = "1" # must be before 'board'
 try:
     import board
 except RuntimeError as ex:
@@ -36,19 +43,28 @@ except FtdiError as ex:
 import digitalio
 import busio
 
-import crcmod.predefined
+################################################################################
+#                                                                              #
+#                                 Constants                                    #
+#                                                                              #
+################################################################################
 
-# constants
-VERSION="1.0.0"
+VERSION = "1.1.0"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # MZ: does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
-READY_POLL_LEN = 1
-START = 0x3c # <
-END   = 0x3e # >
-WRITE = 0x80
-CRC   = 0xff # for readability
+READY_POLL_LEN = 2          # 1 seems to work
+TWENTY_MHZ = 20000000
+START = 0x3c                # <
+END   = 0x3e                # >
+WRITE = 0x80               
+CRC   = 0xff                # for readability
 
-# globals
+################################################################################
+#                                                                              #
+#                                  Globals                                     #
+#                                                                              #
+################################################################################
+
 crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
 args = None 
 lock = threading.Lock()
@@ -56,13 +72,20 @@ lock = threading.Lock()
 def parseArgs(argv):
     parser = argparse.ArgumentParser(
         description="GUI to test XS embedded spectrometers via SPI and FT232H adapter",
-        epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer") # MZ: this seemed to help?
-    parser.add_argument("--debug", action="store_true", help="output verbose debug messages")
-    parser.add_argument("--ready-pin", type=str, default="D5", help="FT232H pin for DATA_READY (default D5)")
-    parser.add_argument("--trigger-pin", type=str, default="D6", help="FT232H pin for TRIGGER (efault D6)")
-    parser.add_argument("--paused", action="store_true", help="launch with acquisition paused")
-    parser.add_argument("--gain-db", type=int, help="default gain in dB (default 0, noting this is a 'FunkyFloat' where 0x01e7 = 1.9)", default=0)
-    parser.add_argument("--integration-time-ms", type=int, help="default integration time in ms (default 10)", default=10)
+        epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter) 
+    parser.add_argument("--baud-hz",             type=int,              default=TWENTY_MHZ, help="baud rate")
+    parser.add_argument("--ready-pin",           type=str,              default="D5",       help="FT232H pin for DATA_READY")
+    parser.add_argument("--trigger-pin",         type=str,              default="D6",       help="FT232H pin for TRIGGER")
+    parser.add_argument("--integration-time-ms", type=int,              default=10,         help="startup integration time in ms")
+    parser.add_argument("--gain-db",             type=int,              default=0,          help="startup gain in dB (FunkyFloat e.g. 0x01e7 = 1.9)")
+    parser.add_argument("--black-level",         type=int,              default=0,          help="startup black level")
+    parser.add_argument("--start-col",           type=int,              default=12,         help="startup ROI left")
+    parser.add_argument("--stop-col",            type=int,              default=1932,       help="startup ROI right")
+    parser.add_argument("--start-line",          type=int,              default=250,        help="startup ROI top")
+    parser.add_argument("--stop-line",           type=int,              default=750,        help="startup ROI bottom")
+    parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
+    parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     return parser.parse_args(argv[1:])
 
 def debug(msg):
@@ -203,7 +226,13 @@ def fIntValidate(input):
     else:
         return False
 
-# Class for the revision register
+################################################################################
+#                                                                              #
+#                                 cCfgString                                   #
+#                                                                              #
+################################################################################
+
+## Used to read FPGA revision
 class cCfgString:
 
     frame = None
@@ -261,7 +290,13 @@ class cCfgString:
     def Update(self):
         pass
         
-# Class for configuration entries
+################################################################################
+#                                                                              #
+#                                 cCfgEntry                                    #
+#                                                                              #
+################################################################################
+
+## Used to write integral values
 class cCfgEntry:
 
     # Static class variables used for comms
@@ -352,10 +387,15 @@ class cCfgEntry:
         if self.value != int(self.stringVar.get()):
             self.value = int(self.stringVar.get())
             self.SPIWrite()
-# End Class cCfgEntry
+
+################################################################################
+#                                                                              #
+#                                 cCfgCombo                                    #
+#                                                                              #
+################################################################################
 
 ##
-# Encapsulate both comboBoxes used to specify the combined PixelMode attribute.
+# Encapsulate both GUI comboBoxes used to specify the marshalled PixelMode.
 #
 # There is only ONE CfgCombo object instance; it is rendered as TWO comboBoxes 
 # on-screen, allowing convenient setting of either of its two component values.
@@ -423,9 +463,14 @@ class cCfgCombo:
         if self.value != newValue:
             self.value = newValue
             self.SPIWrite()
-# End Class cCfgCombo
 
-# EEPROM Control Window Class (not instantiated until window opened by button)
+################################################################################
+#                                                                              #
+#                                 cWinEEPROM                                   #
+#                                                                              #
+################################################################################
+
+## EEPROM Control Window Class (instantiated via button event)
 class cWinEEPROM:
     
     def __init__(self, SPI, intValidate):
@@ -533,9 +578,14 @@ class cWinEEPROM:
         command = [START, 0x00, 0x02, 0xB0, page | WRITE, CRC, END]
         self.SPI.write(command, 0, 7)
         print(f">> EEPROM.write {toHex(command)}")
-# End Class cWinEEPROM
 
-# Class container for the area scan window
+################################################################################
+#                                                                              #
+#                                cWinAreaScan                                  #
+#                                                                              #
+################################################################################
+
+## Class container for the area scan window
 class cWinAreaScan:
 
     def __init__(self, SPI, ready, trigger, lineCount, columnCount):
@@ -581,7 +631,13 @@ class cWinAreaScan:
         self.SPI.write(command, 0, 8)
         self.root.mainloop()
 
-# Class container for the main window and all of its elements
+################################################################################
+#                                                                              #
+#                                 cWinMain                                     #
+#                                                                              #
+################################################################################
+
+## Class container for the main window and all of its elements
 class cWinMain:
 
     def __init__(self, SPI, ready, trigger, intValidate):
@@ -642,12 +698,12 @@ class cWinMain:
         self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00"                  , 0x10, read_len=8)) 
         self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
         self.configObjects.append(cCfgEntry("Integration Time" , 1  , args.integration_time_ms  , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
-        self.configObjects.append(cCfgEntry("Black Level"      , 2  , 0                         , 0x13))
+        self.configObjects.append(cCfgEntry("Black Level"      , 2  , args.black_level          , 0x13))
         self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , args.gain_db              , 0x14))
-        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , 250                       , 0x50)) # Region 0
-        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , 750                       , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , 12                        , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , 1932                      , 0x53))
+        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , args.start_line           , 0x50)) # Region 0
+        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , args.stop_line            , 0x51))
+        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , args.start_col            , 0x52))
+        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , args.stop_col             , 0x53))
         self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0                         , 0x54)) # Region 1 (MZ: not in ENG-0150)
         self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0                         , 0x55))
         self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0                         , 0x56))
@@ -657,6 +713,7 @@ class cWinMain:
         # Add the AD/OD combo boxes
         self.configObjects.append(cCfgCombo(13, "PixelMode"))
 
+        # store a key-value dict for name-based lookups
         self.configMap = {}
         for obj in self.configObjects:
             self.configMap[obj.name] = obj.row
@@ -856,9 +913,11 @@ class cWinMain:
             self.acquireActive = True
         self.root.after(10, self.Acquire)
 
-# End Class cWinMain
-
-###############Begin Main################
+################################################################################
+#                                                                              #
+#                                   main()                                     #
+#                                                                              #
+################################################################################
 
 # parse command-line args (user may need different trigger/ready pins)
 args = parseArgs(sys.argv)
@@ -880,8 +939,7 @@ while not SPI.try_lock():
     pass
 
 # Configure the SPI bus
-TWENTY_MHZ = 20000000
-SPI.configure(baudrate=TWENTY_MHZ, phase=0, polarity=0, bits=8)
+SPI.configure(baudrate=args.baud_hz, phase=0, polarity=0, bits=8)
 
 # Create the main window and pass in the handles
 winSIG = cWinMain(SPI, ready, trigger, fIntValidate)
