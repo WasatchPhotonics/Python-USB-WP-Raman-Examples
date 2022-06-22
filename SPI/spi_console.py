@@ -66,8 +66,8 @@ CRC   = 0xff                # for readability
 ################################################################################
 
 crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
-args = None 
 lock = threading.Lock()
+args = None 
 
 def parseArgs(argv):
     parser = argparse.ArgumentParser(
@@ -122,12 +122,22 @@ def fixCRC(cmd):
     return bytearray(result)
 
 ## @see ENG-0150-C section 3.2, "Configuration Set Response Packet"
-def errorCodeToString(code):
+def errorCodeToString(code) -> str:
     if   code == 0: return "SUCCESS"
     elif code == 1: return "ERROR_LENGTH"
     elif code == 2: return "ERROR_CRC"
     elif code == 3: return "ERROR_UNRECOGNIZED_COMMAND"
     else          : return "ERROR_UNDEFINED"
+
+## @param response (Input): the last 3 bytes of the device's response to a SPI write command
+def validateWriteResponse(response) -> str:
+    if len(response) != 3:
+        return f"invalid response length: {response}"
+    if response[0] != START:
+        return f"invalid response START marker: {response}"
+    if response[2] != END:
+        return f"invalid response END marker: {response}"
+    return errorCodeToString(response[1])
 
 ## 
 # Given an existing list or bytearray, copy the contents into a new bytearray of
@@ -195,7 +205,7 @@ def decode_read_response_int(unbuffered_cmd, buffered_response, name=None, missi
         print(f"  result:              {result}")
     return result
 
-def decode_write_response(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0):
+def decode_write_response_UNUSED(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0):
     cmd_len = len(unbuffered_cmd)
     unbuffered_response = buffered_response[len(unbuffered_cmd) - missing_echo_len:]
     response_data_len = (unbuffered_response[1] << 8) | unbuffered_response[2]
@@ -225,6 +235,13 @@ def fIntValidate(input):
         return True
     else:
         return False
+
+def waitForReady(spi, ready, flush=False):
+    debug(f"waiting for ready (flush {flush})")
+    response = bytearray(READY_POLL_LEN)
+    while ready.value:
+        if flush:
+            spi.readinto(response, 0, READY_POLL_LEN)
 
 ################################################################################
 #                                                                              #
@@ -275,7 +292,8 @@ class cCfgString:
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
         # Write one buffer while reading the other
-        cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
+        with lock:
+            cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
 
         # Decode the binary response into a string
         self.value = decode_read_response_str(unbuffered_cmd, buffered_response, self.name, missing_echo_len=1)
@@ -303,6 +321,7 @@ class cCfgEntry:
     frame       = None
     validate    = None
     SPI         = None
+    ready       = None
 
     ##
     # Init class defines the objects name, default value, and FPGA Address
@@ -343,7 +362,8 @@ class cCfgEntry:
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
         # Write one buffer while reading the other
-        SPI.write_readinto(buffered_cmd, buffered_response)
+        with lock:
+            self.SPI.write_readinto(buffered_cmd, buffered_response)
         self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
     
         self.stringVar.set(str(self.value))
@@ -377,10 +397,13 @@ class cCfgEntry:
         #     the read buffer.
         buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1 - 1) 
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-    
-        SPI.write_readinto(buffered_cmd, buffered_response)
-        result = int(buffered_response[-2]) 
-        print(f">><< cCfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
+
+        with lock:
+            waitForReady(self.SPI, self.ready)
+            self.SPI.write_readinto(buffered_cmd, buffered_response)
+
+        errorMsg = validateWriteResponse(buffered_response[-3:])
+        print(f">><< cCfgEntry[{self.name:16s}].write: {toHex(buffered_cmd)} -> {toHex(buffered_response)} ({errorMsg})")
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self):
@@ -443,7 +466,8 @@ class cCfgCombo:
         buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) # MZ: orig had bytearray(14) (3 bytes larger)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
     
-        SPI.write_readinto(buffered_cmd, buffered_response)
+        with lock:
+            SPI.write_readinto(buffered_cmd, buffered_response)
     
         self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
         self.stringVar.set(str(self.value))
@@ -452,7 +476,8 @@ class cCfgCombo:
         unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, self.value, CRC, END])
         buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-        SPI.write_readinto(buffered_cmd, buffered_response) 
+        with lock:
+            SPI.write_readinto(buffered_cmd, buffered_response) 
 
     def Update(self):
         newValue = 0
@@ -573,11 +598,13 @@ class cWinEEPROM:
 
         EEPROMWrCmd[68] = 0xFF
         EEPROMWrCmd[69] = END
-        self.SPI.write(EEPROMWrCmd, 0, 70)
-        print(f">> EEPROM.write {EEPROMWrCmd}")
         command = [START, 0x00, 0x02, 0xB0, page | WRITE, CRC, END]
-        self.SPI.write(command, 0, 7)
-        print(f">> EEPROM.write {toHex(command)}")
+
+        with lock:
+            self.SPI.write(EEPROMWrCmd, 0, 70)
+            debug(f">> EEPROM.write {EEPROMWrCmd}")
+            self.SPI.write(command, 0, 7)
+            debug(f">> EEPROM.write {toHex(command)}")
 
 ################################################################################
 #                                                                              #
@@ -601,34 +628,37 @@ class cWinAreaScan:
         #   self.canvas.create_image((columnCount/2, lineCount/2), image=self.image, state="normal")
         self.frame.pack()
         self.canvas.pack()
-        # Enable Area Scan
-        command = [START, 0x00, 0x03, 0x92, 0x00, 0x10, CRC, END]
-        self.SPI.write(command, 0, 8)
-        # Send a trigger
-        self.trigger.value = True
-        # Wait until the data is ready
-        SPIBuf  = bytearray(2)
-        for y in range(1, lineCount):
-            x = 0
-            while not self.ready.value:
-                pass
-            self.SPI.readinto(SPIBuf, 0, len(SPIBuf))
-            pixel = (SPIBuf[0] << 8) + SPIBuf[1]
-            print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
-            for x in range(1, columnCount):
-                self.SPI.readinto(SPIBuf, 0, 2)
-                pixel = (((SPIBuf[0] << 8) + SPIBuf[1]) >> 4)
-                pixelHex = hex(pixel)
-                pixelHex = pixelHex[2:].zfill(2)
-                color = "#" + pixelHex + pixelHex + pixelHex
-                #self.image.put(color, (x,y))
-                self.canvas.create_line(x-1, y, x, y, fill=color, width=1)
+        with lock:
+            # Enable Area Scan
+            command = [START, 0x00, 0x03, 0x92, 0x00, 0x10, CRC, END]
+            self.SPI.write(command, 0, 8)
+            # Send a trigger
+            self.trigger.value = True
+            # Wait until the data is ready
+            SPIBuf  = bytearray(2)
+            for y in range(1, lineCount):
+                x = 0
+                while not self.ready.value:
+                    pass
+                self.SPI.readinto(SPIBuf, 0, len(SPIBuf))
+                pixel = (SPIBuf[0] << 8) + SPIBuf[1]
+                print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
+                for x in range(1, columnCount):
+                    self.SPI.readinto(SPIBuf, 0, 2)
+                    pixel = (((SPIBuf[0] << 8) + SPIBuf[1]) >> 4)
+                    pixelHex = hex(pixel)
+                    pixelHex = pixelHex[2:].zfill(2)
+                    color = "#" + pixelHex + pixelHex + pixelHex
+                    #self.image.put(color, (x,y))
+                    self.canvas.create_line(x-1, y, x, y, fill=color, width=1)
                 
-        # Clear the trigger
-        self.trigger.value = False
-        # Disable Area Scan
-        command = [START, 0x00, 0x03, 0x92, 0x00, 0x00, CRC, END]
-        self.SPI.write(command, 0, 8)
+            # Clear the trigger
+            self.trigger.value = False
+
+            # Disable Area Scan
+            command = [START, 0x00, 0x03, 0x92, 0x00, 0x00, CRC, END]
+            self.SPI.write(command, 0, 8)
+
         self.root.mainloop()
 
 ################################################################################
@@ -651,6 +681,7 @@ class cWinMain:
         # Pass the SPI Comm handle
         cCfgString.SPI = self.SPI
         cCfgEntry.SPI  = self.SPI
+        cCfgEntry.ready= self.ready
         cCfgCombo.SPI  = self.SPI
         # Register the integer validation callback
         self.cbIntValidate = self.root.register(intValidate)
@@ -872,22 +903,21 @@ class cWinMain:
 
     def FPGAInit(self):
         debug("performing FPGA Init")
-        response = bytearray(READY_POLL_LEN)
-        # Read out any errant data
-        while self.ready.value:
-            self.SPI.readinto(response, 0, READY_POLL_LEN)
+        with lock:
+            waitForReady(self.SPI, self.ready, flush=True)
+
         # Fetch the revision from the FPGA
         self.configObjects[0].SPIRead()
+
         # Iterate through each of the config objects and write to the FPGA
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
 
     def FPGAUpdate(self):
         debug("performing FPGA Update")
-        response = bytearray(READY_POLL_LEN)
-        # Read out any errant data
-        while self.ready.value:
-            self.SPI.readinto(response, 0, READY_POLL_LEN)
+        with lock:
+            waitForReady(self.SPI, self.ready, flush=True)
+
         # Iterate through each of the config objects and update to the FPGA if necessary
         for cfgObj in self.configObjects:
             cfgObj.Update()
@@ -904,8 +934,8 @@ class cWinMain:
         debug("opening Area Scan")
         with lock:
             self.acquireActive = False
-        # Give time for the last acquisition to complete
-        time.sleep(0.1)
+        # Give time for the last acquisition to complete 
+        time.sleep(0.1 + args.integration_time_ms / 1000.0)
         lineCount   = self.getValue("Stop Line 0") - self.getValue("Start Line 0")
         columnCount = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
         self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
