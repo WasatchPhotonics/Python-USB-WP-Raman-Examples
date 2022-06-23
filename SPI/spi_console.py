@@ -31,6 +31,7 @@ try:
     import board
 except RuntimeError as ex:
     print("No FT232H connected.\n")
+    print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
     raise(ex)
 except ValueError as ex:
     print("If you are receiving 'no backend available' errors, try the following:\n")
@@ -39,6 +40,7 @@ except ValueError as ex:
     raise(ex)
 except FtdiError as ex:
     print("No FT232H connected.\n")
+    print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
     raise(ex)
 import digitalio
 import busio
