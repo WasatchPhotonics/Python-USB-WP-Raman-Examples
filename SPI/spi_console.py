@@ -77,16 +77,18 @@ def parseArgs(argv):
         description="GUI to test XS embedded spectrometers via SPI and FT232H adapter",
         epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter) 
-    parser.add_argument("--baud-hz",             type=int,              default=TWENTY_MHZ, help="baud rate")
+    parser.add_argument("--baud-mhz",            type=int,              default=10,         help="baud rate in MHz")
     parser.add_argument("--ready-pin",           type=str,              default="D5",       help="FT232H pin for DATA_READY")
     parser.add_argument("--trigger-pin",         type=str,              default="D6",       help="FT232H pin for TRIGGER")
-    parser.add_argument("--integration-time-ms", type=int,              default=10,         help="startup integration time in ms")
-    parser.add_argument("--gain-db",             type=int,              default=0,          help="startup gain in dB (FunkyFloat e.g. 0x01e7 = 1.9)")
+    parser.add_argument("--integration-time-ms", type=int,              default=3,          help="startup integration time in ms")
+    parser.add_argument("--gain-db",             type=int,              default=24,         help="startup gain in INTEGRAL dB (24 sent as FunkyFloat 0x1800)")
     parser.add_argument("--black-level",         type=int,              default=0,          help="startup black level")
     parser.add_argument("--start-col",           type=int,              default=12,         help="startup ROI left")
     parser.add_argument("--stop-col",            type=int,              default=1932,       help="startup ROI right")
     parser.add_argument("--start-line",          type=int,              default=250,        help="startup ROI top")
     parser.add_argument("--stop-line",           type=int,              default=750,        help="startup ROI bottom")
+    parser.add_argument("--delay-ms",            type=int,              default=100,        help="delay between acquisitions")
+    parser.add_argument("--width",               type=int,              default=1160,       help="graph width")
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     return parser.parse_args(argv[1:])
@@ -246,6 +248,18 @@ def waitForReady(spi, ready, flush=False):
         if flush:
             spi.readinto(response, 0, READY_POLL_LEN)
 
+##
+# Convert a (potentially) floating-point value into the big-endian 16-bit "Funky
+# Float" used for detector gain in the FPGA on both Hamamatsu and IMX sensors.
+#
+# @see https://wasatchphotonics.com/api/Wasatch.NET/class_wasatch_n_e_t_1_1_funky_float.html
+def gain_to_ff(gain):
+    msb = int(round(gain, 5)) & 0xff
+    lsb = int((gain - msb) * 256) & 0xff
+    raw = (msb << 8) | lsb
+    debug(f"gain_to_ff: {gain:0.3f} -> dec {raw} (0x{raw:04x})")
+    return raw
+
 ################################################################################
 #                                                                              #
 #                                 cCfgString                                   #
@@ -357,6 +371,12 @@ class cCfgEntry:
         self.entry      = tk.Entry(cCfgEntry.frame, textvariable=self.stringVar, validate="key", validatecommand=(cCfgEntry.validate, '%S'), width = 5)
         self.entry.grid(row=row, column=1)
 
+    def getTransmitValue(self):
+        if self.name == "Detector Gain":
+            return gain_to_ff(self.value)
+        
+        return self.value
+
     ## Read an integer from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
@@ -382,13 +402,15 @@ class cCfgEntry:
     #                                          \__________________________buffered_cmd_________________________/        \_________________________buffered_response____________________/
     # @endverbatim
     def SPIWrite(self):
-    
+
+        value = self.getTransmitValue()
+
         # Convert the int into bytes.
         txData = []
-        txData      .append( self.value        & 0xff) # LSB
-        txData      .append((self.value >>  8) & 0xff)
+        txData      .append( value        & 0xff) # LSB
+        txData      .append((value >>  8) & 0xff)
         if self.write_len > 3:
-            txData  .append((self.value >> 16) & 0xff) # MSB
+            txData  .append((value >> 16) & 0xff) # MSB
     
         unbuffered_cmd = [START, 0x00, self.write_len, self.address | WRITE] # MZ: replaced 3 with self.write_len
         unbuffered_cmd.extend(txData)
@@ -765,10 +787,16 @@ class cWinMain:
         self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
         self.btnAreaScan.grid(row=16, column=1)
 
+        # start button (has changeable start/stop text)
         self.textStart = tk.StringVar()
         self.textStart.set("???")
         self.btnStart = tk.Button(self.configFrame, textvariable=self.textStart, command=self.toggleStart)
         self.btnStart.grid(row=17, column=1)
+
+        # save/clear buttons
+        #self.btnSave = tk.Button(self.configFrame, text="Save", command=self.save)
+        #self.btnClear = tk.Button(self.configFrame, text="Clear", command=self.clear)
+        
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
         self.configFrame.grid_columnconfigure(0, minsize=120)
@@ -792,7 +820,7 @@ class cWinMain:
             debug("starting acquisition loop")
             self.textStart.set("Stop")
             self.acquireActive = True
-            self.root.after(10, self.Acquire)
+            self.root.after(args.delay_ms, self.Acquire)
 
     def stop(self):
         with lock:
@@ -917,8 +945,8 @@ class cWinMain:
                 y1 = TOP2 - int(((spectraBinned1[x]-minvalue1)/scale1)*HEIGHT)
                 self.canvas.create_line(x0, y0, x1, y1, fill="blue", width=1)
 
-        if (self.acquireActive):
-            self.root.after(10, self.Acquire)
+        if self.acquireActive:
+            self.root.after(args.delay_ms, self.Acquire)
 
     def FPGAInit(self):
         debug("performing FPGA Init")
@@ -963,7 +991,7 @@ class cWinMain:
         self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
         with lock:
             self.acquireActive = True
-        self.root.after(10, self.Acquire)
+        self.root.after(args.delay_ms, self.Acquire)
 
 ################################################################################
 #                                                                              #
@@ -991,7 +1019,7 @@ while not SPI.try_lock():
     pass
 
 # Configure the SPI bus
-SPI.configure(baudrate=args.baud_hz, phase=0, polarity=0, bits=8)
+SPI.configure(baudrate=args.baud_mhz * 1e6, phase=0, polarity=0, bits=8)
 
 # Create the main window and pass in the handles
 winSIG = cWinMain(SPI, ready, trigger, fIntValidate)
