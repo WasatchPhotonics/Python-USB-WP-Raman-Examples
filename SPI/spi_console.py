@@ -88,7 +88,7 @@ def parseArgs(argv):
     parser.add_argument("--start-line",          type=int,              default=250,        help="startup ROI top")
     parser.add_argument("--stop-line",           type=int,              default=750,        help="startup ROI bottom")
     parser.add_argument("--delay-ms",            type=int,              default=100,        help="delay between acquisitions")
-    parser.add_argument("--width",               type=int,              default=1160,       help="graph width")
+    parser.add_argument("--width",               type=int,              default=1200,       help="GUI width")
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     return parser.parse_args(argv[1:])
@@ -241,12 +241,19 @@ def fIntValidate(input):
     else:
         return False
 
-def waitForReady(spi, ready, flush=False):
-    debug(f"waiting for ready (flush {flush})")
-    response = bytearray(READY_POLL_LEN)
+def flushInputBuffer(ready, spi):
+    count = 0
+    junk = bytearray(READY_POLL_LEN)
     while ready.value:
-        if flush:
-            spi.readinto(response, 0, READY_POLL_LEN)
+        spi.readinto(junk, 0, READY_POLL_LEN)
+        count += 1
+    if count > 0:
+        debug(f"flushed {count} bytes from input buffer")
+
+def waitForDataReady(ready):
+    #debug("waiting for data ready...")
+    while not ready.value:
+        pass
 
 ##
 # Convert a (potentially) floating-point value into the big-endian 16-bit "Funky
@@ -424,7 +431,7 @@ class cCfgEntry:
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
 
         with lock:
-            waitForReady(self.SPI, self.ready)
+            flushInputBuffer(self.ready, self.SPI)
             self.SPI.write_readinto(buffered_cmd, buffered_response)
 
         errorMsg = validateWriteResponse(buffered_response[-3:])
@@ -668,8 +675,7 @@ class cWinAreaScan:
             SPIBuf  = bytearray(2)
             for y in range(1, lineCount):
                 x = 0
-                while not self.ready.value:
-                    pass
+                waitForDataReady(self.ready)
                 self.SPI.readinto(SPIBuf, 0, len(SPIBuf))
                 pixel = (SPIBuf[0] << 8) + SPIBuf[1]
                 print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
@@ -701,38 +707,44 @@ class cWinAreaScan:
 class cWinMain:
 
     def __init__(self, SPI, ready, trigger, intValidate):
-        # Register the handles
         self.SPI        = SPI
         self.ready      = ready
         self.trigger    = trigger
-        # Create and title a window
+
+        self.lastSpectrum = None
+        self.clear()
+
+        self.colors = ["red", "blue", "cyan", "magenta", "yellow", "orange", "indigo", "violet", "white"]
+
         self.root = tk.Tk()
         self.root.title(f"SPI SIG Version {VERSION}")
-        # Pass the SPI Comm handle
+
         cCfgString.SPI = self.SPI
         cCfgEntry.SPI  = self.SPI
         cCfgEntry.ready= self.ready
         cCfgCombo.SPI  = self.SPI
-        # Register the integer validation callback
+
         self.cbIntValidate = self.root.register(intValidate)
-        # Pass it to the Entry class
         cCfgEntry.validate = self.cbIntValidate        
-        # Create a frame for the configuration objects
+
         self.configFrame = tk.Frame(self.root)
         self.configFrame.grid(row=0, column=0)
-        # Pass it to the config object classes
+        
         cCfgString.frame = self.configFrame
         cCfgEntry.frame  = self.configFrame
         cCfgCombo.frame  = self.configFrame
-        # Create frame for drawing. 
+       
         self.drawFrame= tk.Frame(self.root)
-        self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=1200)
+        self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=args.width) # base on width?
         self.canvas.pack()
         self.drawFrame.grid(row=0, column=1)
 
         ########################################################################
         # Create all of the config entries        
         ########################################################################
+
+        def rows() -> int:
+            return len(self.configObjects)
         
         # MZ: In ENG-0150-C, the following codes are listed in the "Command Table":
         #
@@ -753,49 +765,46 @@ class cWinMain:
         # Additional: 0xb0 is used for BOTH "write FPGA EEPROM buffer to EEPROM"
         #                               AND "read EEPROM data to FPGA buffer"; not sure how that works out
         
-        # Empty list for the config objects # Name              row   value     address
-        self.configObjects = []             # ----------------- ----- --------- -------
+        # Empty list for the config objects # Name              row     value                       address
+        self.configObjects = []             # ----------------- ------- --------------------------- -------
         # Create an object for the FPGA Revision (special case, we want this box read only)
-        self.configObjects.append(cCfgString("FPGA Revision"   , 0 , "00.0.00"                  , 0x10, read_len=8)) 
-        self.configObjects[0].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
-        self.configObjects.append(cCfgEntry("Integration Time" , 1  , args.integration_time_ms  , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
-        self.configObjects.append(cCfgEntry("Black Level"      , 2  , args.black_level          , 0x13))
-        self.configObjects.append(cCfgEntry("Detector Gain"    , 3  , args.gain_db              , 0x14))
-        self.configObjects.append(cCfgEntry("Start Line 0"     , 4  , args.start_line           , 0x50)) # Region 0
-        self.configObjects.append(cCfgEntry("Stop Line 0"      , 5  , args.stop_line            , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column 0"   , 6  , args.start_col            , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column 0"    , 7  , args.stop_col             , 0x53))
-        self.configObjects.append(cCfgEntry("Start Line 1"     , 8  , 0                         , 0x54)) # Region 1 (MZ: not in ENG-0150)
-        self.configObjects.append(cCfgEntry("Stop Line 1"      , 9  , 0                         , 0x55))
-        self.configObjects.append(cCfgEntry("Start Column 1"   , 10 , 0                         , 0x56))
-        self.configObjects.append(cCfgEntry("Stop Column 1"    , 11 , 0                         , 0x57))
-        self.configObjects.append(cCfgEntry("Desmile Offset"   , 12 , 0                         , 0x58)) # Experimental (MZ: not in ENG-0150...also, not sure one int1
+        self.configObjects.append(cCfgString("FPGA Revision"   , rows(), "00.0.00"                 , 0x10, read_len=8))
+        self.configObjects[rows()-1].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
+        self.configObjects.append(cCfgEntry("Integration Time" , rows(), args.integration_time_ms  , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
+        self.configObjects.append(cCfgEntry("Black Level"      , rows(), args.black_level          , 0x13))
+        self.configObjects.append(cCfgEntry("Detector Gain"    , rows(), args.gain_db              , 0x14))
+        self.configObjects.append(cCfgEntry("Start Line 0"     , rows(), args.start_line           , 0x50)) # Region 0
+        self.configObjects.append(cCfgEntry("Stop Line 0"      , rows(), args.stop_line            , 0x51))
+        self.configObjects.append(cCfgEntry("Start Column 0"   , rows(), args.start_col            , 0x52))
+        self.configObjects.append(cCfgEntry("Stop Column 0"    , rows(), args.stop_col             , 0x53))
 
         # Add the AD/OD combo boxes
-        self.configObjects.append(cCfgCombo(13, "PixelMode"))
+        self.configObjects.append(cCfgCombo(rows(), "PixelMode"))
 
         # store a key-value dict for name-based lookups
         self.configMap = {}
         for obj in self.configObjects:
             self.configMap[obj.name] = obj
 
-        # Add the buttons
-        self.btnCapture  = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
-        self.btnCapture.grid(row=16, column=0)
-        self.btnEEPROM   = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
-        self.btnEEPROM.grid(row=17, column=0)
-        self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
-        self.btnAreaScan.grid(row=16, column=1)
+        # [Update] [EEPROM]
+        self.btnUpdate = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
+        self.btnUpdate.grid(row=rows()+1, column=0)
+        self.btnEEPROM = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
+        self.btnEEPROM.grid(row=rows()+1, column=1)
 
-        # start button (has changeable start/stop text)
+        # [AreaScan] [Start/Stop]
+        self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
+        self.btnAreaScan.grid(row=rows()+2, column=0)
         self.textStart = tk.StringVar()
         self.textStart.set("???")
         self.btnStart = tk.Button(self.configFrame, textvariable=self.textStart, command=self.toggleStart)
-        self.btnStart.grid(row=17, column=1)
+        self.btnStart.grid(row=rows()+2, column=1)
 
-        # save/clear buttons
-        #self.btnSave = tk.Button(self.configFrame, text="Save", command=self.save)
-        #self.btnClear = tk.Button(self.configFrame, text="Clear", command=self.clear)
+        # [Save] [Clear]
+        self.btnSave = tk.Button(self.configFrame, text="Save", command=self.save)
+        self.btnSave.grid(row=rows()+3, column=0)
+        self.btnClear = tk.Button(self.configFrame, text="Clear", command=self.clear)
+        self.btnClear.grid(row=rows()+3, column=1)
         
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
@@ -831,119 +840,116 @@ class cWinMain:
     def toggleStart(self):
         self.stop() if self.acquireActive else self.start()
 
+    def save(self):
+        if self.lastSpectrum is not None:
+            self.savedSpectra.append(self.lastSpectrum)
+
+    def clear(self):
+        self.savedSpectra = []
+
     def getValue(self, name) -> int:
         if name not in self.configMap:
             print(f"getValue: ERROR: unknown name {name}")
             return 0
         return self.configMap[name].value
 
-    def Acquire(self):
+    def apply2x2Binning(self, spectrum):
+        binned = []
+        for x in range(len(spectrum)-1):
+            binned.append(round((spectrum[x] + spectrum[x+1]) / 2.0))
+        binned.append(spectrum[-1])
+        return binned
+
+    def getSpectrum(self):
         with lock:
             if not self.acquireActive:
+                debug("acquire inactive")
                 return
 
-            # debug("Acquire: raising trigger")
+            # trigger spectrum
             self.trigger.value = True
 
-            # debug("Acquire: blocking on DATA_READY")
-            while not self.ready.value:
-                pass
+            # wait for the requested/triggered spectrum to be ready for readout
+            waitForDataReady(self.ready) 
 
-            # debug("Acquire: releasing trigger")
+            # release trigger
             self.trigger.value = False
 
-            # Read in the spectra
-            SPIBuf  = bytearray(2)
-            spectra = []
+            # Read in the spectrum
+            SPIBuf = bytearray(2)
+            spectrum = []
+            #debug("reading spectrum")
             while self.ready.value:
                 self.SPI.readinto(SPIBuf, 0, 2)
                 pixel = (SPIBuf[0] << 8) | SPIBuf[1] # little-endian demarshalling
-                spectra.append(pixel)
-            # debug(f"Acquire: read {len(spectra)} pixels") 
+                spectrum.append(pixel)
+            #debug(f"read {len(spectrum)} pixels")
 
-        region0 = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
-        region1 = self.getValue("Stop Column 1") - self.getValue("Start Column 1")
-        region1Active = self.getValue("Stop Line 1") != 0
+            return spectrum
 
-        desmileOffset = self.getValue("Desmile Offset")
-        maxvalue0 = 0
-        minvalue0 = 65536
-        maxvalue1 = 0
-        minvalue1 = 65536
-        spectraBinned0 = []
-        spectraBinned1 = []
+    def graphSpectrum(self, spectrum, color="green"):
+        TOP=380
+        LEFT=40
+        width = args.width - LEFT
+        HEIGHT=340
 
-        if self.firstSpectrum:
-            debug(f"len(spectra) {len(spectra)}, desmileOffset {desmileOffset}, region0 {region0}")
-            self.firstSpectrum = False
+        lo = min(spectrum)
+        hi = max(spectrum)
+        rng = hi - lo
 
-        try:
-            if SUPPORT_MULTIPLE_ROI:
-                for x in range(desmileOffset, region0, 2):
-                    if x < len(spectra):
-                        pixel = int((spectra[x-1] + spectra[x]) / 2)
-                        if pixel > maxvalue0:
-                            maxvalue0 = pixel
-                        if pixel < minvalue0:
-                            minvalue0 = pixel
-                        spectraBinned0.append(pixel)
+        pixels = len(spectrum)
+        for x in range(pixels-1):
+            x0 = LEFT + int((x/pixels)*width)
+            y0 = TOP  - int(((spectrum[x]-lo)/rng)*HEIGHT)
+            x1 = LEFT + int(((x+1)/pixels)*width)
+            y1 = TOP  - int(((spectrum[x+1]-lo)/rng)*HEIGHT)
+            self.canvas.create_line(x0, y0, x1, y1, fill=color, width=1)
 
-                if region1Active:
-                    for x in range((region0+1), (region0+region1), 2):
-                        pixel = int((spectra[x-1] + spectra[x]) / 2)
-                        if pixel > maxvalue1:
-                            maxvalue1 = pixel
-                        if pixel < minvalue1:
-                            minvalue1 = pixel
-                        spectraBinned1.append(pixel)
-            else:
-                # We're not yet ready to play with multiple ROI.  For now
-                # just graph every pixel received.
-                for x in range(len(spectra)):
-                    pixel = int((spectra[x-1] + spectra[x]) / 2) # MZ: 2x2 binning
-                    maxvalue0 = max(maxvalue0, pixel)
-                    minvalue0 = min(minvalue0, pixel)
-                    spectraBinned0.append(pixel)
-        except:
-            debug("ignoring graph error")
+    def initGraph(self, lo, hi, rng):
+        mid = int(lo + (rng/2))
+        self.canvas.delete("all") 
+        self.canvas.create_text(20,  20, text=str(hi ), fill="white")
+        self.canvas.create_text(20, 200, text=str(mid), fill="white")
+        self.canvas.create_text(20, 380, text=str(lo ), fill="white")
+        self.canvas.create_line( 0, 405, 1400, 405, fill="light grey", width=10)
+
+        for i in range(len(self.savedSpectra)):
+            spectrum = self.savedSpectra[i]
+            color = self.colors[ i % len(self.colors) ]
+            self.graphSpectrum(spectrum, color)
+
+    def Acquire(self):
+
+        ########################################################################
+        # Get the new spectrum
+        ########################################################################
+
+        spectrum = self.getSpectrum()
+        if spectrum is None:
+            debug("spectrum was None")
             return
 
+        spectrum = self.apply2x2Binning(spectrum)
+        hi = max(spectrum)
+        lo = min(spectrum)
+
+        if self.firstSpectrum:
+            debug(f"len(spectrum) {len(spectrum)}")
+
+        self.firstSpectrum = False
+        self.lastSpectrum = spectrum
+
+        ########################################################################
         # Draw the graph
-        scale0 = maxvalue0 - minvalue0
+        ########################################################################
 
-        WIDTH=1160
-        HEIGHT=340
-        LEFT=40
-        TOP=380
-        TOP2=790
+        rng = hi - lo
 
-        if scale0 != 0:
-            midvalue = int(minvalue0 + (scale0/2))
-            self.canvas.delete("all") # delete previous contents
-            self.canvas.create_text(20,20,text=str(maxvalue0), fill="white")
-            self.canvas.create_text(20,200,text=str(midvalue), fill="white")
-            self.canvas.create_text(20,380,text=str(minvalue0), fill="white")
-            self.canvas.create_line(0, 405, 1400, 405, fill="light grey", width=10)
-            spectraCount = len(spectraBinned0)
-            for x in range(1, spectraCount):
-                x0 = int((x/spectraCount)*WIDTH) + LEFT
-                y0 = TOP - int(((spectraBinned0[(x-1)]-minvalue0)/scale0)*HEIGHT)
-                x1 = int(((x+1)/spectraCount)*WIDTH) + LEFT
-                y1 = TOP - int(((spectraBinned0[x]-minvalue0)/scale0)*HEIGHT)
-                self.canvas.create_line(x0, y0, x1, y1, fill="green", width=1)
-        if region1Active:
-            scale1 = maxvalue1 - minvalue1
-            midvalue = int(minvalue1 + (scale1/2))
-            self.canvas.create_text(20,430,text=str(maxvalue1), fill="white")
-            self.canvas.create_text(20,610,text=str(midvalue), fill="white")
-            self.canvas.create_text(20,790,text=str(minvalue0), fill="white")
-            spectraCount = len(spectraBinned1)
-            for x in range(1, spectraCount):
-                x0 = int((x/spectraCount)*WIDTH) + LEFT
-                y0 = TOP2 - int(((spectraBinned1[(x-1)]-minvalue1)/scale1)*HEIGHT)
-                x1 = int(((x+1)/spectraCount)*WIDTH) + LEFT
-                y1 = TOP2 - int(((spectraBinned1[x]-minvalue1)/scale1)*HEIGHT)
-                self.canvas.create_line(x0, y0, x1, y1, fill="blue", width=1)
+        # debug(f"graphing lo {lo}, hi {hi}, rng {rng}")
+        self.initGraph(lo, hi, rng)
+
+        if rng != 0:
+            self.graphSpectrum(spectrum)
 
         if self.acquireActive:
             self.root.after(args.delay_ms, self.Acquire)
@@ -951,7 +957,7 @@ class cWinMain:
     def FPGAInit(self):
         debug("performing FPGA Init")
         with lock:
-            waitForReady(self.SPI, self.ready, flush=True)
+            flushInputBuffer(self.ready, self.SPI) # get rid of any garbage on the line
 
         # Fetch the revision from the FPGA
         self.configObjects[0].SPIRead()
@@ -966,7 +972,7 @@ class cWinMain:
     def FPGAUpdate(self):
         debug("performing FPGA Update")
         with lock:
-            waitForReady(self.SPI, self.ready, flush=True)
+            flushInputBuffer(self.ready, self.SPI) # get rid of any garbage on the line
 
         # Iterate through each of the config objects and update to the FPGA if necessary
         for cfgObj in self.configObjects:
