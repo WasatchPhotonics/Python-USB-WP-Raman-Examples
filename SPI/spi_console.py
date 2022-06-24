@@ -742,7 +742,7 @@ class cWinMain(tk.Tk):
 
         # configuration frame on the left
         self.configFrame = tk.Frame(self)
-        self.configFrame.grid(row=0, column=0)
+        self.configFrame.grid(row=0, column=0, sticky="n")
         
         cCfgString.frame = self.configFrame
         cCfgEntry.frame  = self.configFrame
@@ -751,16 +751,16 @@ class cWinMain(tk.Tk):
         # main graph frame on the right
         self.drawFrame = tk.Frame(self)
 
-        self.figure = Figure() # figsize=(6, 4), dpi=100
-        # self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=args.width) 
-        self.canvas = FigureCanvasTkAgg(self.figure, self.drawFrame) # , bg="black", height=810, width=args.width) 
+        self.figure = Figure(dpi=100) # figsize=(6, 4), dpi=100
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame) # , bg="black", height=810, width=args.width) 
         #NavigationToolbar2Tk(self.canvas, self)
         self.graph = self.figure.add_subplot()
         self.graph.set_ylabel("intensity (counts)")
         self.graph.set_xlabel("pixel")
-        #self.canvas.pack()
-        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-        self.drawFrame.grid(row=0, column=1)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.drawFrame.grid(row=0, column=1, sticky="news")
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
 
         # populate all the controls within the Configuration frame
         self.initConfigFrame()
