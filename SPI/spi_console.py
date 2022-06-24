@@ -103,7 +103,6 @@ def parseArgs(argv):
     parser.add_argument("--start-line",          type=int,              default=250,        help="startup ROI top")
     parser.add_argument("--stop-line",           type=int,              default=750,        help="startup ROI bottom")
     parser.add_argument("--delay-ms",            type=int,              default=100,        help="delay between acquisitions")
-    parser.add_argument("--width",               type=int,              default=1200,       help="GUI width")
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     return parser.parse_args(argv[1:])
@@ -752,8 +751,8 @@ class cWinMain(tk.Tk):
         # main graph frame on the right
         self.drawFrame = tk.Frame(self)
 
-        self.figure = Figure(dpi=100) # figsize=(6, 4), dpi=100
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame) # , bg="black", height=810, width=args.width) 
+        self.figure = Figure(dpi=100) 
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame) 
         self.graph = self.figure.add_subplot()
         self.graph.set_ylabel("intensity (counts)")
         self.graph.set_xlabel("pixel")
@@ -762,6 +761,7 @@ class cWinMain(tk.Tk):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
+        # add the toolbar below
         self.toolbarFrame = tk.Frame(self)
         self.toolbarFrame.grid(row=1,column=1)
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
