@@ -870,6 +870,20 @@ class cWinMain(tk.Tk):
     def toggleStart(self):
         self.stop() if self.acquireActive else self.start()
 
+    def generateFilename(self):
+        now = datetime.datetime.now()
+        timestamp = now.strftime("%Y%m%d-%H%M%S")
+
+        integ = self.getValue("Integration Time")
+        gain = self.getValue("Detector Gain")
+        note = self.txtNote.get("1.0").strip()
+
+        filename = f"{timestamp}-{integ}ms-{gain}dB"
+        if len(note) > 0:
+            filename += f"-{note}"
+    
+        return filename + ".csv"
+
     def save(self):
         spectrum = self.lastSpectrum
         if spectrum is not None:
@@ -878,13 +892,11 @@ class cWinMain(tk.Tk):
             self.savedSpectra.append(spectrum)
 
             # save to file
-            now = datetime.datetime.now()
-            timestamp = now.strftime("%Y%m%d-%H%M%S")
-            note = self.txtNote.get("1.0",'end-1c')
-            filename = f"{timestamp}-{note}.csv"
+            filename = self.generateFilename()
             with open(filename, "w") as outfile:
                 for i in range(len(spectrum)):
                     outfile.write(f"{i}, {spectrum[i]}\n")
+            print(f"saved {filename}")
 
 
     def clear(self):
@@ -921,12 +933,10 @@ class cWinMain(tk.Tk):
             # Read in the spectrum
             SPIBuf = bytearray(2)
             spectrum = []
-            #debug("reading spectrum")
             while self.ready.value:
                 self.SPI.readinto(SPIBuf, 0, 2)
                 pixel = (SPIBuf[0] << 8) | SPIBuf[1] # little-endian demarshalling
                 spectrum.append(pixel)
-            #debug(f"read {len(spectrum)} pixels")
 
             return spectrum
 
