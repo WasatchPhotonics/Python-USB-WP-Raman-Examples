@@ -887,20 +887,15 @@ class cWinMain(tk.Tk):
     def save(self):
         spectrum = self.lastSpectrum
         if spectrum is not None:
-
-            # save in memory for graph trace
-            self.savedSpectra.append(spectrum)
-
-            # save to file
             filename = self.generateFilename()
             with open(filename, "w") as outfile:
                 for i in range(len(spectrum)):
                     outfile.write(f"{i}, {spectrum[i]}\n")
+            self.savedSpectra[filename] = spectrum
             print(f"saved {filename}")
 
-
     def clear(self):
-        self.savedSpectra = []
+        self.savedSpectra = {}
 
     def getValue(self, name) -> int:
         if name not in self.configMap:
@@ -941,16 +936,17 @@ class cWinMain(tk.Tk):
             return spectrum
 
     ## @todo probably faster if we used set_ydata()
-    def graphSpectrum(self, spectrum, color="green"):
-        self.graph.plot(spectrum, linewidth=0.5)
+    def graphSpectrum(self, spectrum, label="live"):
+        self.graph.plot(spectrum, linewidth=0.5, label=label)
+        self.graph.legend()
         self.canvas.draw()
 
     def initGraph(self):
         self.graph.clear()
-        for i in range(len(self.savedSpectra)):
-            spectrum = self.savedSpectra[i]
-            color = self.colors[ i % len(self.colors) ]
-            self.graphSpectrum(spectrum, color)
+        i = 0
+        for label in sorted(self.savedSpectra):
+            spectrum = self.savedSpectra[label]
+            self.graphSpectrum(spectrum, label=label)
 
     def Acquire(self):
 
