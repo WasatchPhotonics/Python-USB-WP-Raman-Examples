@@ -30,6 +30,7 @@ import crcmod.predefined
 
 import threading
 import argparse
+import datetime
 import platform
 import logging
 import time
@@ -841,6 +842,10 @@ class cWinMain(tk.Tk):
         self.btnSave.grid(row=rows()+3, column=0)
         self.btnClear = tk.Button(self.configFrame, text="Clear", command=self.clear)
         self.btnClear.grid(row=rows()+3, column=1)
+
+        # [note]
+        self.txtNote = tk.Text(self.configFrame, height=1, width=15)
+        self.txtNote.grid(row=rows()+4, column=0, columnspan=2)
         
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
@@ -866,8 +871,21 @@ class cWinMain(tk.Tk):
         self.stop() if self.acquireActive else self.start()
 
     def save(self):
-        if self.lastSpectrum is not None:
-            self.savedSpectra.append(self.lastSpectrum)
+        spectrum = self.lastSpectrum
+        if spectrum is not None:
+
+            # save in memory for graph trace
+            self.savedSpectra.append(spectrum)
+
+            # save to file
+            now = datetime.datetime.now()
+            timestamp = now.strftime("%Y%m%d-%H%M%S")
+            note = self.txtNote.get("1.0",'end-1c')
+            filename = f"{timestamp}-{note}.csv"
+            with open(filename, "w") as outfile:
+                for i in range(len(spectrum)):
+                    outfile.write(f"{i}, {spectrum[i]}\n")
+
 
     def clear(self):
         self.savedSpectra = []
