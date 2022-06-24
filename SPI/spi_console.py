@@ -18,20 +18,34 @@ Observations:
 import tkinter as tk
 import tkinter.ttk as ttk
 
+import matplotlib
+matplotlib.use('TkAgg')
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import (
+    FigureCanvasTkAgg,
+    NavigationToolbar2Tk
+)
+
 import crcmod.predefined
+
 import threading
 import argparse
+import platform
 import logging
 import time
 import sys
 import os
+
+def checkZadig():
+    if platform.system() == "Windows":
+        print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
 
 os.environ["BLINKA_FT232H"] = "1" # must be before 'board'
 try:
     import board
 except RuntimeError as ex:
     print("No FT232H connected.\n")
-    print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
+    checkZadig()
     raise(ex)
 except ValueError as ex:
     print("If you are receiving 'no backend available' errors, try the following:\n")
@@ -40,7 +54,7 @@ except ValueError as ex:
     raise(ex)
 except FtdiError as ex:
     print("No FT232H connected.\n")
-    print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
+    checkZadig()
     raise(ex)
 import digitalio
 import busio
@@ -533,13 +547,12 @@ class cCfgCombo:
 ################################################################################
 
 ## EEPROM Control Window Class (instantiated via button event)
-class cWinEEPROM:
+class cWinEEPROM(tk.Tk):
     
     def __init__(self, SPI, intValidate):
         self.SPI = SPI
-        self.root = tk.Tk()
-        self.root.title("EEPROM Util")
-        self.frame      = tk.Frame(self.root)
+        self.title("EEPROM Util")
+        self.frame      = tk.Frame(self)
         self.valStrings = []
         self.valEntries = []
         for x in range(0, 64):
@@ -568,7 +581,7 @@ class cWinEEPROM:
 
         self.frame.pack()
         self.EEPROMRead()
-        self.root.mainloop()
+        self.mainloop()
 
     ##
     # @para API (ENG-0150-C)
@@ -650,15 +663,14 @@ class cWinEEPROM:
 ################################################################################
 
 ## Class container for the area scan window
-class cWinAreaScan:
+class cWinAreaScan(tk.Tk):
 
     def __init__(self, SPI, ready, trigger, lineCount, columnCount):
         self.SPI     = SPI
         self.ready   = ready
         self.trigger = trigger
-        self.root    = tk.Tk()
-        self.root.title("Area Scan")
-        self.frame   = tk.Frame(self.root)
+        self.title("Area Scan")
+        self.frame   = tk.Frame(self)
         self.canvas  = tk.Canvas(self.frame, bg="black", height=lineCount, width=columnCount)
         #This doesn't work and I don't know why /sadface
         #   self.image   = tk.PhotoImage(height=lineCount, width=columnCount)
@@ -695,7 +707,7 @@ class cWinAreaScan:
             command = [START, 0x00, 0x03, 0x92, 0x00, 0x00, CRC, END]
             self.SPI.write(command, 0, 8)
 
-        self.root.mainloop()
+        self.mainloop()
 
 ################################################################################
 #                                                                              #
@@ -704,9 +716,14 @@ class cWinAreaScan:
 ################################################################################
 
 ## Class container for the main window and all of its elements
-class cWinMain:
+#
+# @todo should all this be within a TestFixture(tk.Tk)?
+# @see https://www.pythontutorial.net/tkinter/tkinter-matplotlib/
+class cWinMain(tk.Tk):
 
     def __init__(self, SPI, ready, trigger, intValidate):
+        super().__init__()
+
         self.SPI        = SPI
         self.ready      = ready
         self.trigger    = trigger
@@ -716,25 +733,24 @@ class cWinMain:
 
         self.colors = ["red", "blue", "cyan", "magenta", "yellow", "orange", "indigo", "violet", "white"]
 
-        self.root = tk.Tk()
-        self.root.title(f"SPI SIG Version {VERSION}")
+        self.title(f"SPI SIG Version {VERSION}")
 
         cCfgString.SPI = self.SPI
         cCfgEntry.SPI  = self.SPI
         cCfgEntry.ready= self.ready
         cCfgCombo.SPI  = self.SPI
 
-        self.cbIntValidate = self.root.register(intValidate)
+        self.cbIntValidate = self.register(intValidate)
         cCfgEntry.validate = self.cbIntValidate        
 
-        self.configFrame = tk.Frame(self.root)
+        self.configFrame = tk.Frame(self)
         self.configFrame.grid(row=0, column=0)
         
         cCfgString.frame = self.configFrame
         cCfgEntry.frame  = self.configFrame
         cCfgCombo.frame  = self.configFrame
        
-        self.drawFrame= tk.Frame(self.root)
+        self.drawFrame = tk.Frame(self)
         self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=args.width) # base on width?
         self.canvas.pack()
         self.drawFrame.grid(row=0, column=1)
@@ -820,7 +836,7 @@ class cWinMain:
        
         self.stop() if args.paused else self.start()
 
-        self.root.mainloop()
+        self.mainloop()
 
         debug("exiting")
 
@@ -829,7 +845,7 @@ class cWinMain:
             debug("starting acquisition loop")
             self.textStart.set("Stop")
             self.acquireActive = True
-            self.root.after(args.delay_ms, self.Acquire)
+            self.after(args.delay_ms, self.Acquire)
 
     def stop(self):
         with lock:
@@ -952,7 +968,7 @@ class cWinMain:
             self.graphSpectrum(spectrum)
 
         if self.acquireActive:
-            self.root.after(args.delay_ms, self.Acquire)
+            self.after(args.delay_ms, self.Acquire)
 
     def FPGAInit(self):
         debug("performing FPGA Init")
@@ -997,7 +1013,7 @@ class cWinMain:
         self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
         with lock:
             self.acquireActive = True
-        self.root.after(args.delay_ms, self.Acquire)
+        self.after(args.delay_ms, self.Acquire)
 
 ################################################################################
 #                                                                              #
