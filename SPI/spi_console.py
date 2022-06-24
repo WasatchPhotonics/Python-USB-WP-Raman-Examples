@@ -716,9 +716,6 @@ class cWinAreaScan(tk.Tk):
 ################################################################################
 
 ## Class container for the main window and all of its elements
-#
-# @todo should all this be within a TestFixture(tk.Tk)?
-# @see https://www.pythontutorial.net/tkinter/tkinter-matplotlib/
 class cWinMain(tk.Tk):
 
     def __init__(self, SPI, ready, trigger, intValidate):
@@ -743,6 +740,7 @@ class cWinMain(tk.Tk):
         self.cbIntValidate = self.register(intValidate)
         cCfgEntry.validate = self.cbIntValidate        
 
+        # configuration frame on the left
         self.configFrame = tk.Frame(self)
         self.configFrame.grid(row=0, column=0)
         
@@ -750,14 +748,36 @@ class cWinMain(tk.Tk):
         cCfgEntry.frame  = self.configFrame
         cCfgCombo.frame  = self.configFrame
        
+        # main graph frame on the right
         self.drawFrame = tk.Frame(self)
-        self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=args.width) # base on width?
-        self.canvas.pack()
+
+        self.figure = Figure() # figsize=(6, 4), dpi=100
+        # self.canvas = tk.Canvas(self.drawFrame, bg="black", height=810, width=args.width) 
+        self.canvas = FigureCanvasTkAgg(self.figure, self.drawFrame) # , bg="black", height=810, width=args.width) 
+        #NavigationToolbar2Tk(self.canvas, self)
+        self.graph = self.figure.add_subplot()
+        self.graph.set_ylabel("intensity (counts)")
+        self.graph.set_xlabel("pixel")
+        #self.canvas.pack()
+        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         self.drawFrame.grid(row=0, column=1)
 
-        ########################################################################
-        # Create all of the config entries        
-        ########################################################################
+        # populate all the controls within the Configuration frame
+        self.initConfigFrame()
+        
+        debug("writing initial values to FPGA")
+        self.FPGAInit()
+
+        self.firstSpectrum = True
+       
+        self.stop() if args.paused else self.start()
+
+        self.mainloop()
+
+        debug("exiting")
+
+    ## The "Configuration" frame contains all the left-hand controls
+    def initConfigFrame(self):
 
         def rows() -> int:
             return len(self.configObjects)
@@ -828,17 +848,6 @@ class cWinMain(tk.Tk):
         self.configFrame.grid_columnconfigure(1, minsize=120)
         for row in range(row_count):
             self.configFrame.grid_rowconfigure(row, minsize=30)
-        
-        debug("writing initial values to FPGA")
-        self.FPGAInit()
-
-        self.firstSpectrum = True
-       
-        self.stop() if args.paused else self.start()
-
-        self.mainloop()
-
-        debug("exiting")
 
     def start(self):
         with lock:
@@ -903,32 +912,13 @@ class cWinMain(tk.Tk):
 
             return spectrum
 
+    ## @todo probably faster if we used set_ydata()
     def graphSpectrum(self, spectrum, color="green"):
-        TOP=380
-        LEFT=40
-        width = args.width - LEFT
-        HEIGHT=340
+        self.graph.plot(spectrum, linewidth=0.5)
+        self.canvas.draw()
 
-        lo = min(spectrum)
-        hi = max(spectrum)
-        rng = hi - lo
-
-        pixels = len(spectrum)
-        for x in range(pixels-1):
-            x0 = LEFT + int((x/pixels)*width)
-            y0 = TOP  - int(((spectrum[x]-lo)/rng)*HEIGHT)
-            x1 = LEFT + int(((x+1)/pixels)*width)
-            y1 = TOP  - int(((spectrum[x+1]-lo)/rng)*HEIGHT)
-            self.canvas.create_line(x0, y0, x1, y1, fill=color, width=1)
-
-    def initGraph(self, lo, hi, rng):
-        mid = int(lo + (rng/2))
-        self.canvas.delete("all") 
-        self.canvas.create_text(20,  20, text=str(hi ), fill="white")
-        self.canvas.create_text(20, 200, text=str(mid), fill="white")
-        self.canvas.create_text(20, 380, text=str(lo ), fill="white")
-        self.canvas.create_line( 0, 405, 1400, 405, fill="light grey", width=10)
-
+    def initGraph(self):
+        self.graph.clear()
         for i in range(len(self.savedSpectra)):
             spectrum = self.savedSpectra[i]
             color = self.colors[ i % len(self.colors) ]
@@ -946,11 +936,8 @@ class cWinMain(tk.Tk):
             return
 
         spectrum = self.apply2x2Binning(spectrum)
-        hi = max(spectrum)
-        lo = min(spectrum)
-
         if self.firstSpectrum:
-            debug(f"len(spectrum) {len(spectrum)}")
+            debug(f"spectra have {len(spectrum)} pixels")
 
         self.firstSpectrum = False
         self.lastSpectrum = spectrum
@@ -959,13 +946,8 @@ class cWinMain(tk.Tk):
         # Draw the graph
         ########################################################################
 
-        rng = hi - lo
-
-        # debug(f"graphing lo {lo}, hi {hi}, rng {rng}")
-        self.initGraph(lo, hi, rng)
-
-        if rng != 0:
-            self.graphSpectrum(spectrum)
+        self.initGraph()
+        self.graphSpectrum(spectrum)
 
         if self.acquireActive:
             self.after(args.delay_ms, self.Acquire)
