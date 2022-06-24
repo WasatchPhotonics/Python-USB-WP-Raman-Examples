@@ -754,7 +754,6 @@ class cWinMain(tk.Tk):
 
         self.figure = Figure(dpi=100) # figsize=(6, 4), dpi=100
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame) # , bg="black", height=810, width=args.width) 
-        #NavigationToolbar2Tk(self.canvas, self)
         self.graph = self.figure.add_subplot()
         self.graph.set_ylabel("intensity (counts)")
         self.graph.set_xlabel("pixel")
@@ -762,6 +761,10 @@ class cWinMain(tk.Tk):
         self.drawFrame.grid(row=0, column=1, sticky="news")
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
+
+        self.toolbarFrame = tk.Frame(self)
+        self.toolbarFrame.grid(row=1,column=1)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbarFrame)
 
         # populate all the controls within the Configuration frame
         self.initConfigFrame()
@@ -870,7 +873,7 @@ class cWinMain(tk.Tk):
     def toggleStart(self):
         self.stop() if self.acquireActive else self.start()
 
-    def generateFilename(self):
+    def generateBasename(self):
         now = datetime.datetime.now()
         timestamp = now.strftime("%Y%m%d-%H%M%S")
 
@@ -878,21 +881,28 @@ class cWinMain(tk.Tk):
         gain = self.getValue("Detector Gain")
         note = self.txtNote.get("1.0").strip()
 
-        filename = f"{timestamp}-{integ}ms-{gain}dB"
+        basename = f"{timestamp}-{integ}ms-{gain}dB"
         if len(note) > 0:
-            filename += f"-{note}"
-    
-        return filename + ".csv"
+            basename += f"-{note}"
+
+        return basename
 
     def save(self):
+        path = "data"
         spectrum = self.lastSpectrum
         if spectrum is not None:
-            filename = self.generateFilename()
-            with open(filename, "w") as outfile:
+            try:
+                os.mkdir(path)
+            except:
+                pass
+
+            basename = self.generateBasename()
+            pathname = f"{path}/{basename}.csv"
+            with open(pathname, "w") as outfile:
                 for i in range(len(spectrum)):
                     outfile.write(f"{i}, {spectrum[i]}\n")
-            self.savedSpectra[filename] = spectrum
-            print(f"saved {filename}")
+            self.savedSpectra[basename] = spectrum
+            print(f"saved {pathname}")
 
     def clear(self):
         self.savedSpectra = {}
