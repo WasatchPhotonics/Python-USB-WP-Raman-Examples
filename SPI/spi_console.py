@@ -548,20 +548,28 @@ class cCfgCombo:
 
 ## EEPROM Control Window Class (instantiated via button event)
 class cWinEEPROM(tk.Tk):
+
+    PAGE_SIZE = 64
+    COLS = 8
+    ROWS = 8
     
     def __init__(self, SPI, intValidate):
+        super().__init__()
+
         self.SPI = SPI
         self.title("EEPROM Util")
+
         self.frame      = tk.Frame(self)
         self.valStrings = []
         self.valEntries = []
-        for x in range(0, 64):
+
+        for x in range(self.PAGE_SIZE):
             self.valStrings.append(tk.StringVar(self.frame))
-        for x in range(0, 64):
+        for x in range(self.PAGE_SIZE):
             self.valEntries.append(tk.Entry(self.frame, textvariable = self.valStrings[x], width = 5))
-        for x in range(0, 8):
-            for y in range(0, 8):
-                self.valEntries[((x*8)+y)].grid(row=x, column=y)
+        for x in range(self.ROWS):
+            for y in range(self.COLS):
+                self.valEntries[((x*self.COLS)+y)].grid(row=x, column=y)
 
         self.pageStr        = tk.StringVar(self.frame, str(0))
         self.pageLbl        = tk.Label(self.frame, text = 'EEPROM Page').grid(row=8, column=1)
@@ -578,9 +586,10 @@ class cWinEEPROM(tk.Tk):
             self.frame.grid_columnconfigure(column, minsize = 75)
         for row in range(row_count):
             self.frame.grid_rowconfigure(row, minsize=30)
-
         self.frame.pack()
+
         self.EEPROMRead()
+
         self.mainloop()
 
     ##
