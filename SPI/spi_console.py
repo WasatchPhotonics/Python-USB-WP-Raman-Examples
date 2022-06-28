@@ -1014,33 +1014,28 @@ class cWinMain(tk.Tk):
             self.graphSpectrum(spectrum, label=label)
 
     def Acquire(self):
-
-        ########################################################################
-        # Get the new spectrum
-        ########################################################################
-
+        # get the new spectrum
         spectrum = self.getSpectrum()
         if spectrum is None:
             debug("spectrum was None")
             return
 
+        # post-process
         spectrum = self.apply2x2Binning(spectrum)
+        self.lastSpectrum = spectrum
         debug(f"read {len(spectrum)} pixels")
 
-        self.lastSpectrum = spectrum
-
-        ########################################################################
-        # Draw the graph
-        ########################################################################
-
+        # graph
         if args.graph:
             self.initGraph()
             self.graphSpectrum(spectrum)
 
+        # schedule next tick
         if self.acquireActive:
             self.after(args.delay_ms, self.Acquire)
 
-        return spectrum # for test()
+        # for test()
+        return spectrum 
 
     def FPGAInit(self):
         debug("performing FPGA Init")
@@ -1063,12 +1058,49 @@ class cWinMain(tk.Tk):
         for cfgObj in self.configObjects:
             cfgObj.Update(force=force)
 
-    def resetROI(self):
+    ## 
+    # MZ: YOU ARE HERE.
+    # 
+    # Trying to figure out what needs to be done to make spectral acquisition 
+    # successful AFTER reading the EEPROM.  It appears that multiple attributes 
+    # need to be re-written to the FPGA (even though they were previously set to
+    # these same values prior to the EEPROM read) in order to successfully read 
+    # ACCURATE spectra.  
+    #
+    # I emphasize ACCURATE because without some of these, you still can "read and
+    # graph spectra," but it turns out to be invalid (for instance, Xe lines 
+    # disappear in testing suggesting a lower integration time or a mangled 
+    # vertical ROI, or spectra is received but it's always the same (fixed) 
+    # spectrum), etc.
+    #
+    # It turned out that the undocumented opcodes were important here -- I've not
+    # yet tried to isolate which ones :-/
+    def resetFPGA(self):
         with lock:
             flushInputBuffer(self.ready, self.SPI) 
 
-        for name in ["Stop Column 0", "Integration Time", "Detector Gain", "Black Level"]:
+        for name in [ "Integration Time",
+                      "Black Level",
+                      "Detector Gain",
+                      "Start Line 0",
+                      "Stop Line 0",
+                      "Start Column 0",
+                      "Stop Column 0",
+                      "PixelMode" ]:
             self.configMap[name].Update(force=True)
+
+        # undocumented opcodes
+        for address, name in [ (0x54, "Start Line 1"),
+                               (0x55, "Stop Line 1"), 
+                               (0x56, "Start Column 1"),
+                               (0x57, "Stop Column 1"),
+                               (0x58, "Desmile") ]:
+            send_command(SPI       = self.SPI, 
+                         ready     = self.ready, 
+                         address   = address, 
+                         value     = 0,
+                         write_len = 3,
+                         name      = name)
         time.sleep(args.delay_ms / 1000.0)
 
     def openEEPROM(self):
@@ -1149,7 +1181,7 @@ class cWinMain(tk.Tk):
         # write response. 
         #
         # More importantly, I'm not actually seeing Xe lines in Test...
-        self.FPGAUpdate(force=True) # self.resetROI()
+        self.resetFPGA()
 
         # Data Collection
         self.spectra = []
