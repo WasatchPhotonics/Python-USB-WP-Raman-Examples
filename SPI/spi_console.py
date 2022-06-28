@@ -33,6 +33,7 @@ import argparse
 import datetime
 import platform
 import logging
+import struct
 import time
 import sys
 import os
@@ -103,6 +104,8 @@ def parseArgs(argv):
     parser.add_argument("--start-line",          type=int,              default=250,        help="startup ROI top")
     parser.add_argument("--stop-line",           type=int,              default=750,        help="startup ROI bottom")
     parser.add_argument("--delay-ms",            type=int,              default=100,        help="delay between acquisitions")
+    parser.add_argument("--count",               type=int,              default=0,          help="if positive, collect this many spectra")
+    parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     return parser.parse_args(argv[1:])
@@ -792,8 +795,9 @@ class cWinMain(tk.Tk):
     ## The "Configuration" frame contains all the left-hand controls
     def initConfigFrame(self):
 
+        buttonRow = 0
         def rows() -> int:
-            return len(self.configObjects)
+            return len(self.configObjects) + buttonRow
         
         # MZ: In ENG-0150-C, the following codes are listed in the "Command Table":
         #
@@ -835,30 +839,41 @@ class cWinMain(tk.Tk):
         for obj in self.configObjects:
             self.configMap[obj.name] = obj
 
+        buttonRow += 1
+
         # [Update] [EEPROM]
         self.btnUpdate = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
-        self.btnUpdate.grid(row=rows()+1, column=0)
+        self.btnUpdate.grid(row=rows(), column=0)
         self.btnEEPROM = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
-        self.btnEEPROM.grid(row=rows()+1, column=1)
+        self.btnEEPROM.grid(row=rows(), column=1)
+        buttonRow += 1
 
         # [AreaScan] [Start/Stop]
         self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
-        self.btnAreaScan.grid(row=rows()+2, column=0)
+        self.btnAreaScan.grid(row=rows(), column=0)
         self.textStart = tk.StringVar()
         self.textStart.set("???")
         self.btnStart = tk.Button(self.configFrame, textvariable=self.textStart, command=self.toggleStart)
-        self.btnStart.grid(row=rows()+2, column=1)
+        self.btnStart.grid(row=rows(), column=1)
+        buttonRow += 1
 
         # [Save] [Clear]
         self.btnSave = tk.Button(self.configFrame, text="Save", command=self.save)
-        self.btnSave.grid(row=rows()+3, column=0)
+        self.btnSave.grid(row=rows(), column=0)
         self.btnClear = tk.Button(self.configFrame, text="Clear", command=self.clear)
-        self.btnClear.grid(row=rows()+3, column=1)
+        self.btnClear.grid(row=rows(), column=1)
+        buttonRow += 1
 
-        # [note]
+        # [Test] [note] (Test is hidden unless --paused)
         self.txtNote = tk.Text(self.configFrame, height=1, width=15)
-        self.txtNote.grid(row=rows()+4, column=0, columnspan=2)
-        
+        if args.paused:
+            self.btnTest = tk.Button(self.configFrame, text="Test", command=self.test)
+            self.btnTest.grid(row=rows(), column=0)
+            self.txtNote.grid(row=rows(), column=1)
+        else:
+            self.txtNote.grid(row=rows(), column=0, columnspan=2)
+        buttonRow += 1
+
         # Resize the grid
         col_count, row_count = self.configFrame.grid_size()
         self.configFrame.grid_columnconfigure(0, minsize=120)
@@ -1039,6 +1054,206 @@ class cWinMain(tk.Tk):
         with lock:
             self.acquireActive = True
         self.after(args.delay_ms, self.Acquire)
+
+    ############################################################################
+    #                                                                          #
+    #                             Unit Testing                                 #
+    #                                                                          #
+    ############################################################################
+
+    ##
+    # Sequence:
+    # - setup
+    #   - receive excitation wavelength (done: args.excitation_nm)
+    #   - set baud (done: args.baud_mhz)
+    #   - display FPGA revision (done: cCfgString)
+    # - EEPROM
+    #   - read EEPROM coefficients
+    #   - generate wavecal against full detector
+    #   - convert wavecal to wavenumbers
+    # - set acquisition parameters
+    #   - set integration time
+    #   - set gain dB
+    #   - set vertical ROI
+    # - collection
+    #   - collect args.count measurements at configured args.delay_ms
+    #   - graph and save against wavenumber
+    # - support integration time ramp up/down
+    #   - ramp integration time from args.integ_ramp_start to
+    #     args.integ_ramp_stop by args.integ_ramp_incr, graphing and saving each
+    #
+    # goals:
+    # - trigger latency <100µs
+    # - report scan rate (against integration and baud)
+    #
+    def test(self):
+        if not args.paused:
+            print("test() can only be started from a paused state")
+            return
+        print("Starting test...")
+
+        ########################################################################
+        # Setup
+        ########################################################################
+
+        # already done by GUI
+
+        ########################################################################
+        # EEPROM
+        ########################################################################
+
+        self.eeprom = EEPROM(self.SPI)
+        self.generate_wavecal()
+
+        ########################################################################
+        # Acquisition Parameters
+        ########################################################################
+
+        ########################################################################
+        # Data Collection
+        ########################################################################
+
+        ########################################################################
+        # Ramp
+        ########################################################################
+
+    def generate_wavecal(self):
+        pixels = self.eeprom.active_pixels_horizontal # should be 1920 for IMX385
+        self.wavelengths = []
+        for i in range(pixels): 
+            wavelength = self.eeprom.wavelength_coeffs[0]               \
+                       + self.eeprom.wavelength_coeffs[1] * i           \
+                       + self.eeprom.wavelength_coeffs[2] * i * i       \
+                       + self.eeprom.wavelength_coeffs[3] * i * i * i   \
+                       + self.eeprom.wavelength_coeffs[4] * i * i * i * i
+            self.wavelengths.append(wavelength)
+        print(f"wavelengths = ({self.wavelengths[0]:0.2f}, {self.wavelengths[-1]:0.2f})")
+
+        self.wavenumbers = None
+        if args.excitation_nm > 0:
+            self.wavenumbers = []
+            base = 1e7 / args.excitation_nm
+            for i in range(pixels):
+                wavenumber = 0
+                if self.wavelengths[i] != 0:
+                    wavenumber = base - 1e7 / self.wavelengths[i]
+                self.wavenumbers.append(wavenumber)
+            print(f"wavenumbers = ({self.wavenumbers[0]:0.2f}, {self.wavenumbers[-1]:0.2f})")
+
+################################################################################
+#                                                                              #
+#                                  EEPROM                                      #
+#                                                                              #
+################################################################################
+
+## @todo: update cWinEEPROM to use this class
+class EEPROM:
+    
+    def __init__(self, SPI):
+        self.SPI = SPI
+
+        self.buffers = []
+
+        self.read()
+        self.parse()
+
+    def read(self):
+        for page in range(5):
+            buf = self.read_page(page)
+            self.buffers.append(buf)
+
+    def read_page(self, page) -> list:
+        with lock:
+            # send 0xb0 command to tell FPGA to load EEPROM page into FPGA buffer
+            unbuffered_cmd = fixCRC([START, 0, 2, 0xB0, 0x40 + page, CRC, END])
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)  
+            buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+            self.SPI.write_readinto(buffered_cmd, buffered_response)
+            print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
+
+            # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
+            time.sleep(0.01) # empirically determined 10ms delay
+
+            # send 0x31 command to read the buffered page from the FPGA
+            unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END]) 
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: including kludged -1
+            buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+            self.SPI.write_readinto(buffered_cmd, buffered_response)
+
+        buf = decode_read_response(unbuffered_cmd, buffered_response, "read_eeprom_page", missing_echo_len=1)
+        debug(f"decoded {len(buf)} values from EEPROM")
+        return buf
+
+    def parse(self):
+        self.format = self.unpack((0, 63,  1), "B", "format")
+        debug(f"parsing EEPROM format {self.format}")
+
+        self.wavelength_coeffs = []
+        self.wavelength_coeffs.append(self.unpack((1,  0,  4), "f", "wavecal_coeff_0"))
+        self.wavelength_coeffs.append(self.unpack((1,  4,  4), "f"))
+        self.wavelength_coeffs.append(self.unpack((1,  8,  4), "f"))
+        self.wavelength_coeffs.append(self.unpack((1, 12,  4), "f"))
+        self.wavelength_coeffs.append(self.unpack((2, 21,  4), "f", "wavecal_coeff_4") if self.format > 7 else 0)
+        debug(f"loaded wavecal: {self.wavelength_coeffs}")
+
+        self.active_pixels_horizontal        = self.unpack((2, 16,  2), "H", "pixels")
+        self.active_pixels_vertical          = self.unpack((2, 19,  2), "H" if self.format >= 4 else "h")
+        self.actual_horizontal               = self.unpack((2, 25,  2), "H" if self.format >= 4 else "h", "actual_horiz")
+
+        self.roi_horizontal_start            = self.unpack((2, 27,  2), "H" if self.format >= 4 else "h")
+        self.roi_horizontal_end              = self.unpack((2, 29,  2), "H" if self.format >= 4 else "h")
+        self.roi_vertical_region_1_start     = self.unpack((2, 31,  2), "H" if self.format >= 4 else "h")
+        self.roi_vertical_region_1_end       = self.unpack((2, 33,  2), "H" if self.format >= 4 else "h")
+
+        debug(f"ACTUAL pixels horizontal: {self.actual_horizontal}") 
+        debug(f"ACTIVE pixels horizontal: {self.active_pixels_horizontal}")
+        debug(f"  active pixels vertical: {self.active_pixels_vertical}")
+        debug(f"          horizontal ROI: ({self.roi_horizontal_start}, {self.roi_horizontal_end})")
+        debug(f"            vertical ROI: ({self.roi_vertical_region_1_start}, {self.roi_vertical_region_1_end})")
+
+    ## 
+    # Unpack a single field at a given buffer offset of the given datatype.
+    #
+    # @param address    a tuple of the form (buf, offset, len)
+    # @param data_type  see https://docs.python.org/2/library/struct.html#format-characters
+    # @param label      if provided, is included in debug log output
+    def unpack(self, address, data_type, label=None):
+        page       = address[0]
+        start_byte = address[1]
+        length     = address[2]
+        end_byte   = start_byte + length
+
+        if page > len(self.buffers):
+            print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
+                page, start_byte, length, data_type, label))
+            return
+
+        buf = self.buffers[page]
+        if buf is None or end_byte > len(buf):
+            print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (label %s)" % (
+                page, start_byte, length, data_type, buf, label))
+            return
+
+        if data_type == "s":
+            # This stops at the first NULL, so is not appropriate for binary data (user_data).
+            # OTOH, it doesn't currently enforce "printable" characters either (nor support Unicode).
+            unpack_result = ""
+            for c in buf[start_byte:end_byte]:
+                if c == 0:
+                    break
+                unpack_result += chr(c)
+        else:
+            unpack_result = 0
+            try:
+                unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
+            except:
+                print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+
+        if label is None:
+            debug("Unpacked [%s]: %s" % (data_type, unpack_result))
+        else:
+            debug("Unpacked [%s]: %s (%s)" % (data_type, unpack_result, label))
+        return unpack_result
 
 ################################################################################
 #                                                                              #
