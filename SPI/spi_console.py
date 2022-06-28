@@ -538,13 +538,13 @@ class cCfgCombo:
         self.stringVar.set(str(self.value))
             
     def SPIWrite(self):
-        # send_command(SPI=self.SPI, ready=self.ready, address=self.address, value=self.value, write_len=self.write_len, name=self.name)
+        send_command(SPI=self.SPI, ready=self.ready, address=self.address, value=self.value, write_len=self.write_len, name=self.name)
 
-        unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, self.value, CRC, END])
-        buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-        with lock:
-            SPI.write_readinto(buffered_cmd, buffered_response) 
+        # unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, self.value, CRC, END])
+        # buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
+        # buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
+        # with lock:
+        #     SPI.write_readinto(buffered_cmd, buffered_response) 
 
     def Update(self, force=False):
         newValue = 0
