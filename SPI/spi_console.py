@@ -260,7 +260,8 @@ def decode_write_response_UNUSED(unbuffered_cmd, buffered_response, name=None, m
 def send_command(SPI, ready, address, value, write_len, name=""):
     txData = []
     txData      .append( value        & 0xff) # LSB
-    txData      .append((value >>  8) & 0xff)
+    if write_len > 2:
+        txData  .append((value >>  8) & 0xff)
     if write_len > 3:
         txData  .append((value >> 16) & 0xff) # MSB
 
@@ -294,7 +295,7 @@ def fIntValidate(input):
 def flushInputBuffer(ready, spi):
     count = 0
     junk = bytearray(READY_POLL_LEN)
-    debug("flushing input buffer...")
+    # debug("flushing input buffer...")
     while ready.value:
         spi.readinto(junk, 0, READY_POLL_LEN)
         count += 1
@@ -302,7 +303,7 @@ def flushInputBuffer(ready, spi):
         debug(f"flushed {count} bytes from input buffer")
 
 def waitForDataReady(ready):
-    debug("waiting for data ready...")
+    # debug("waiting for data ready...")
     while not ready.value:
         pass
 
@@ -432,6 +433,7 @@ class cCfgEntry:
         self.entry      = tk.Entry(cCfgEntry.frame, textvariable=self.stringVar, validate="key", validatecommand=(cCfgEntry.validate, '%S'), width = 5)
         self.entry.grid(row=row, column=1)
 
+    ## added because gain value sent over-the-wire differs from what's shown on the GUI
     def getTransmitValue(self):
         if self.name == "Detector Gain":
             return gain_to_ff(self.value)
@@ -462,8 +464,12 @@ class cCfgEntry:
     #                                          \__________________________buffered_cmd_________________________/        \_________________________buffered_response____________________/
     # @endverbatim
     def SPIWrite(self):
-        value = self.getTransmitValue()
-        send_command(SPI=self.SPI, ready=self.ready, address=self.address, value=value, write_len=self.write_len, name=self.name)
+        send_command(SPI       = self.SPI, 
+                     ready     = self.ready, 
+                     address   = self.address, 
+                     value     = self.getTransmitValue(),
+                     write_len = self.write_len, 
+                     name      = self.name)
 
     # Fetch the data from the entry box and update it to the FPGA
     def Update(self, force=False):
@@ -500,7 +506,7 @@ class cCfgCombo:
     #
     # @param write_len: defaults to 2 (we're writing both ADDR and the 1-byte value)
     # @param read_len: defaults to 2 (we're reading both ADDR and the 1-byte value)
-    def __init__(self, row, name, write_len=2, read_len=3): # MZ: YOU ARE HERE
+    def __init__(self, row, name, write_len=2, read_len=2):
         self.name       = name
         self.value      = 0x03         # default to 00000011b (both AD and OD set to 12-bit)
         self.address    = 0x2B
@@ -538,13 +544,12 @@ class cCfgCombo:
         self.stringVar.set(str(self.value))
             
     def SPIWrite(self):
-        send_command(SPI=self.SPI, ready=self.ready, address=self.address, value=self.value, write_len=self.write_len, name=self.name)
-
-        # unbuffered_cmd = fixCRC([START, 0, self.write_len, self.address | WRITE, self.value, CRC, END])
-        # buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + self.write_len - 1)  # MZ: kludge (added -1, same as required for cCfgEntry.SPIWrite)
-        # buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-        # with lock:
-        #     SPI.write_readinto(buffered_cmd, buffered_response) 
+        send_command(SPI       = self.SPI, 
+                     ready     = self.ready, 
+                     address   = self.address, 
+                     value     = self.value, 
+                     write_len = self.write_len, 
+                     name      = self.name)
 
     def Update(self, force=False):
         newValue = 0
@@ -962,25 +967,25 @@ class cWinMain(tk.Tk):
         with lock:
 
             # trigger spectrum
-            debug("raising trigger")
+            # debug("raising trigger")
             self.trigger.value = True
 
             # wait for the requested/triggered spectrum to be ready for readout
             waitForDataReady(self.ready) 
 
             # release trigger
-            debug("lowering trigger")
+            # debug("lowering trigger")
             self.trigger.value = False
 
             # Read in the spectrum
-            debug("reading spectrum")
+            # debug("reading spectrum")
             SPIBuf = bytearray(2)
             spectrum = []
             while self.ready.value:
                 self.SPI.readinto(SPIBuf, 0, 2)
                 pixel = (SPIBuf[0] << 8) | SPIBuf[1] # little-endian demarshalling
                 spectrum.append(pixel)
-            debug("done reading spectrum")
+            # debug("done reading spectrum")
 
         # stomp leading pixels
         for i in range(args.stomp_first):
@@ -1172,10 +1177,20 @@ class cWinMain(tk.Tk):
         # Ramp
         for ms in range(args.test_ramp_start, args.test_ramp_stop + 1, args.test_ramp_incr):
             print(f"collecting ramp measurement at {ms}ms")
-            send_command(SPI=self.SPI, ready=self.ready, address=0x11, value=ms, write_len=4, name="Integration Time")
+
+            # update integration time
+            send_command(SPI       = self.SPI, 
+                         ready     = self.ready, 
+                         address   = 0x11, 
+                         value     = ms, 
+                         write_len = 4, 
+                         name      = "Integration Time")
+
+            # get new spectrum
             spectrum = self.Acquire()
             self.spectra.append(spectrum)
             self.headers.append(f"ramp-{ms}ms")
+
             self.btnTest.update_idletasks()
             time.sleep(args.delay_ms / 1000.0)
 
