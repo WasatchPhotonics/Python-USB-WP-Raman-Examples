@@ -113,7 +113,7 @@ def parseArgs(argv):
     parser.add_argument("--test-ramp-incr",      type=int,              default=1,          help="increment ramp at this integration time")
     parser.add_argument("--stomp-first",         type=int,              default=0,          help="stomp this many pixels at front of spectrum")
     parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
-    parser.add_argument("--graph",               type=bool,             default=True,       help="use --nograph to disable")
+    parser.add_argument("--graph",               type=bool,             default=True,       help="graph each spectrum (--no-graph to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     return parser.parse_args(argv[1:])
@@ -1040,7 +1040,7 @@ class cWinMain(tk.Tk):
         if self.acquireActive:
             self.after(args.delay_ms, self.Acquire)
 
-        return spectrum # for Test
+        return spectrum # for test()
 
     def FPGAInit(self):
         debug("performing FPGA Init")
