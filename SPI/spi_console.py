@@ -3,12 +3,8 @@ Troubleshooting:
     - If it seems to "freeze" at startup, make sure you're setting your READY / 
       TRIGGER pins correctly.
 
-Observations:
-    - When I'm away from testing for awhile (10min+?) I often have to power-cycle
-      the spectrometer when I resume.  This could be an problem with the FT232H 
-      dongle or my laptop of course. 
-
 @todo move all the classes (and all globals) to a TestFixture class
+@todo re-test Area Scan
 """
 
 ################################################################################
@@ -69,8 +65,8 @@ import busio
 #                                                                              #
 ################################################################################
 
-VERSION = "1.1.0"
-READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # MZ: does NOT include ADDR
+VERSION = "1.2.0"
+READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
 READY_POLL_LEN = 2          # 1 seems to work
 TWENTY_MHZ = 20000000
@@ -802,6 +798,13 @@ class cWinMain(tk.Tk):
 
         # populate all the controls within the Configuration frame
         self.initConfigFrame()
+
+        # doing this BEFORE initial FPGA initialization, because if you do it 
+        # AFTER, you'll need to re-run FPGAInit() to reset set all the 
+        # acquisition parameters
+        debug("loading EEPROM")
+        self.eeprom = EEPROM(self.SPI)
+        self.generate_wavecal()
         
         debug("writing initial values to FPGA")
         self.FPGAInit()
@@ -1049,47 +1052,7 @@ class cWinMain(tk.Tk):
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
 
-    def FPGAUpdate(self, force=False):
-        debug("performing FPGA Update")
-        with lock:
-            flushInputBuffer(self.ready, self.SPI) # get rid of any garbage on the line
-
-        # Iterate through each of the config objects and update to the FPGA if necessary
-        for cfgObj in self.configObjects:
-            cfgObj.Update(force=force)
-
-    ## 
-    # MZ: YOU ARE HERE.
-    # 
-    # Trying to figure out what needs to be done to make spectral acquisition 
-    # successful AFTER reading the EEPROM.  It appears that multiple attributes 
-    # need to be re-written to the FPGA (even though they were previously set to
-    # these same values prior to the EEPROM read) in order to successfully read 
-    # ACCURATE spectra.  
-    #
-    # I emphasize ACCURATE because without some of these, you still can "read and
-    # graph spectra," but it turns out to be invalid (for instance, Xe lines 
-    # disappear in testing suggesting a lower integration time or a mangled 
-    # vertical ROI, or spectra is received but it's always the same (fixed) 
-    # spectrum), etc.
-    #
-    # It turned out that the undocumented opcodes were important here -- I've not
-    # yet tried to isolate which ones :-/
-    def resetFPGA(self):
-        with lock:
-            flushInputBuffer(self.ready, self.SPI) 
-
-        for name in [ "Integration Time",
-                      "Black Level",
-                      "Detector Gain",
-                      "Start Line 0",
-                      "Stop Line 0",
-                      "Start Column 0",
-                      "Stop Column 0",
-                      "PixelMode" ]:
-            self.configMap[name].Update(force=True)
-
-        # undocumented opcodes
+        # zero-out undocumented opcodes (apparently one or more of these is required)
         for address, name in [ (0x54, "Start Line 1"),
                                (0x55, "Stop Line 1"), 
                                (0x56, "Start Column 1"),
@@ -1101,7 +1064,15 @@ class cWinMain(tk.Tk):
                          value     = 0,
                          write_len = 3,
                          name      = name)
-        time.sleep(args.delay_ms / 1000.0)
+
+    def FPGAUpdate(self, force=False):
+        debug("performing FPGA Update")
+        with lock:
+            flushInputBuffer(self.ready, self.SPI) # get rid of any garbage on the line
+
+        # Iterate through each of the config objects and update to the FPGA if necessary
+        for cfgObj in self.configObjects:
+            cfgObj.Update(force=force)
 
     def openEEPROM(self):
         debug("opening EEPROM")
@@ -1129,88 +1100,47 @@ class cWinMain(tk.Tk):
     ############################################################################
 
     ##
-    # Sequence:
-    # - setup
-    #   - done: receive excitation wavelength 
-    #   - done: set baud 
-    #   - done: display FPGA revision 
-    # - set acquisition parameters
-    #   - done: set integration time
-    #   - done: set gain dB
-    #   - done: set vertical ROI
-    # - EEPROM
-    #   - done: read EEPROM coefficients (done)
-    #   - done: generate wavecal against full detector
-    #   - done: convert wavecal to wavenumbers
-    # - collection
-    #   - done: collect args.count measurements at configured args.delay_ms
-    #   - graph (punted; issues updating GUI within callback?)
-    #   - done: save against wavenumber
-    # - support integration time ramp up/down
-    #   - ramp integration time from args.integ_ramp_start to
-    #     args.integ_ramp_stop by args.integ_ramp_incr, graphing and saving each
-    # - save report
-    #
-    # goals:
-    # - demonstrate trigger latency <100µs (requires scope)
-    # - report scan rate (against integration and baud)
-    #
-    # negative features:
-    # - deliberately not including scan averaging, peakfinding, SNR, FWHM, etc, 
-    #   which are very much in the domain of WPSC
-    #
-    # Note that this function is essentially one "button-click callback", and 
-    # that may limit what we can do on and off the GUI.  In C# I'd make this
-    # a BackgroundWorker or similar, and dispatch graph updates to the GUI
-    # thread.  Need to learn how to do this better under Tkinter.
+    # @note This is a blocking callback run from a button event...not generally
+    #       the most robust design.  If we want to grow this, we should spin-off
+    #       a thread and flow-up graph updates via a dispatch to the GUI thread
+    #       (or whatever the Tkinter equivalent would be).
     def test(self):
         if not args.paused:
             print("test() can only be started from a paused state")
             return
-        print("Starting test...")
 
-        # EEPROM
-        self.eeprom = EEPROM(self.SPI)
-        self.generate_wavecal()
-
-        # Reset FPGA to fix ROI.  
-        #
-        # Basically, I observed that I read 1920 pixels if I first hit "Start", 
-        # or 1853 pixels if I first hit "Test" (which reads the EEPROM first).  
-        # The delta is 67, which suggests a 64-byte EEPROM block plus 3-byte 
-        # write response. 
-        #
-        # More importantly, I'm not actually seeing Xe lines in Test...
-        self.resetFPGA()
-
+        ########################################################################
         # Data Collection
+        ########################################################################
+
+        self.test_start = datetime.datetime.now()
+
         self.spectra = []
         self.headers = []
-        self.test_start = datetime.datetime.now()
         for i in range(args.test_count):
-            if i > 0:
-                self.btnTest.update_idletasks()
-                time.sleep(args.delay_ms / 1000.0)
+            print(f"collecting {i+1}/{args.test_count}")
             spectrum = self.Acquire()
             self.spectra.append(spectrum)
             self.headers.append(f"meas-{i+1:02d}")
+            self.btnTest.update_idletasks()
+            time.sleep(args.delay_ms / 1000.0)
 
-            # graphing overlays slow execution (and hence alter the timing results)
-            # self.save()
-
-            print(f"collected {i+1}/{args.test_count}")
         self.test_stop = datetime.datetime.now()
 
+        ########################################################################
         # Metrics
-        self.elapsed_ms = (self.test_stop - self.test_start).total_seconds() * 1000.0
-        self.scan_period_ms = self.elapsed_ms / args.test_count
-        self.scan_rate = 1000.0 / self.scan_period_ms
+        ########################################################################
 
+        self.elapsed_ms     = (self.test_stop - self.test_start).total_seconds() * 1000.0
+        self.scan_period_ms = self.elapsed_ms / args.test_count
+        self.scan_rate      = 1000.0 / self.scan_period_ms
+
+        ########################################################################
         # Ramp
+        ########################################################################
+
         for ms in range(args.test_ramp_start, args.test_ramp_stop + 1, args.test_ramp_incr):
             print(f"collecting ramp measurement at {ms}ms")
-
-            # update integration time
             send_command(SPI       = self.SPI, 
                          ready     = self.ready, 
                          address   = 0x11, 
@@ -1218,28 +1148,28 @@ class cWinMain(tk.Tk):
                          write_len = 4, 
                          name      = "Integration Time")
 
-            # get new spectrum
             spectrum = self.Acquire()
             self.spectra.append(spectrum)
             self.headers.append(f"ramp-{ms}ms")
-
             self.btnTest.update_idletasks()
             time.sleep(args.delay_ms / 1000.0)
 
+        ########################################################################
         # Save
-        self.save_report()
+        ########################################################################
 
-        # Could optionally exit GUI after running a test
-        # self.quit()
+        self.save_report()
 
     def save_report(self):
         self.makeDataDir()
-        ts = timestamp()
-        filename = f"test-{ts}-{self.eeprom.serial_number}.csv"
+        filename = f"test-{timestamp()}-{self.eeprom.serial_number}.csv"
         pathname = os.path.join(DATA_DIR, filename)
 
         with open(pathname, "w") as outfile:
             # metadata
+            outfile.write(f"spi_console, {VERSION}\n")
+            for key, value in self.configMap.items():
+                outfile.write(f"cfg.{key}, {value.value}\n")
             for key, value in args.__dict__.items():
                 outfile.write(f"args.{key}, {value}\n")
             for key, value in self.eeprom.__dict__.items():
@@ -1259,13 +1189,13 @@ class cWinMain(tk.Tk):
 
             # data
             for pixel in range(pixels):
-                outfile.write(f"{pixel}, {self.wavelengths[pixel]:0.2f}")
+                outfile.write(f"{pixel}, {self.wavelengths[pixel]:.2f}")
                 if self.wavenumbers is not None:
-                    outfile.write(f", {self.wavenumbers[pixel]:0.2f}")
+                    outfile.write(f", {self.wavenumbers[pixel]:.2f}")
                 for spectrum in self.spectra:
                     outfile.write(f", {spectrum[pixel]}")
                 outfile.write("\n")
-        print(f"saved {filename}")
+        print(f"saved {pathname}")
 
     def generate_wavecal(self):
         pixels = self.eeprom.active_pixels_horizontal # should be 1920 for IMX385
@@ -1277,7 +1207,7 @@ class cWinMain(tk.Tk):
                        + self.eeprom.wavelength_coeffs[3] * i * i * i   \
                        + self.eeprom.wavelength_coeffs[4] * i * i * i * i
             self.wavelengths.append(wavelength)
-        print(f"wavelengths = ({self.wavelengths[0]:0.2f}, {self.wavelengths[-1]:0.2f})")
+        debug(f"wavelengths = ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f})")
 
         if args.excitation_nm > 0:
             self.wavenumbers = []
@@ -1287,7 +1217,7 @@ class cWinMain(tk.Tk):
                 if self.wavelengths[i] != 0:
                     wavenumber = base - 1e7 / self.wavelengths[i]
                 self.wavenumbers.append(wavenumber)
-            print(f"wavenumbers = ({self.wavenumbers[0]:0.2f}, {self.wavenumbers[-1]:0.2f})")
+            debug(f"wavenumbers = ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f})")
 
 ################################################################################
 #                                                                              #
@@ -1368,7 +1298,7 @@ class EEPROM:
     #
     # @param address    a tuple of the form (buf, offset, len)
     # @param data_type  see https://docs.python.org/2/library/struct.html#format-characters
-    # @param label      if provided, is included in debug log output
+    # @param label      for debug output
     def unpack(self, address, data_type, label=None):
         page       = address[0]
         start_byte = address[1]
@@ -1376,19 +1306,15 @@ class EEPROM:
         end_byte   = start_byte + length
 
         if page > len(self.buffers):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
-                page, start_byte, length, data_type, label))
+            print(f"invalid EEPROM page {page}")
             return
 
         buf = self.buffers[page]
         if buf is None or end_byte > len(buf):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (label %s)" % (
-                page, start_byte, length, data_type, buf, label))
+            print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: buf {buf} ({label})")
             return
 
         if data_type == "s":
-            # This stops at the first NULL, so is not appropriate for binary data (user_data).
-            # OTOH, it doesn't currently enforce "printable" characters either (nor support Unicode).
             unpack_result = ""
             for c in buf[start_byte:end_byte]:
                 if c == 0:
@@ -1399,7 +1325,7 @@ class EEPROM:
             try:
                 unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
             except:
-                print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+                print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type} ({label})")
 
         if label is None:
             debug("Unpacked [%s]: %s" % (data_type, unpack_result))
