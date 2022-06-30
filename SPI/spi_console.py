@@ -3,6 +3,8 @@ Troubleshooting:
     - If it seems to "freeze" at startup, make sure you're setting your READY / 
       TRIGGER pins correctly.
 
+@todo add an --ext-trigger option which prevents the script from sending trigger
+      signals (requires an external function generator like the Koolertron)
 @todo move all the classes (and all globals) to a TestFixture class
 @todo re-test Area Scan
 """
@@ -92,6 +94,7 @@ def parseArgs(argv):
         description="GUI to test XS embedded spectrometers via SPI and FT232H adapter",
         epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter) 
+
     parser.add_argument("--baud-mhz",            type=int,              default=10,         help="baud rate in MHz")
     parser.add_argument("--ready-pin",           type=str,              default="D5",       help="FT232H pin for DATA_READY")
     parser.add_argument("--trigger-pin",         type=str,              default="D6",       help="FT232H pin for TRIGGER")
@@ -108,11 +111,20 @@ def parseArgs(argv):
     parser.add_argument("--test-ramp-stop",      type=int,              default=10,         help="stop ramp at this integration time")
     parser.add_argument("--test-ramp-incr",      type=int,              default=1,          help="increment ramp at this integration time")
     parser.add_argument("--stomp-first",         type=int,              default=0,          help="stomp this many pixels at front of spectrum")
+    parser.add_argument("--test-throwaways",     type=int,              default=3,          help="throwaways after changing integration time")
     parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
     parser.add_argument("--graph",               type=bool,             default=True,       help="graph each spectrum (--no-graph to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
-    return parser.parse_args(argv[1:])
+    parser.add_argument("--test",                action="store_true",   help="run one test then exit")
+    parser.add_argument("--ext-trigger",         action="store_true",   help="don't send triggers via FT232H (requires external function generator)")
+
+    args = parser.parse_args(argv[1:])
+
+    if args.test:
+        args.paused = True
+
+    return args
 
 def debug(msg):
     if args.debug:
@@ -811,6 +823,9 @@ class cWinMain(tk.Tk):
 
         self.stop() if args.paused else self.start()
 
+        if args.test:
+            self.after(1000, self.test)
+
         self.mainloop()
 
         debug("exiting")
@@ -969,16 +984,14 @@ class cWinMain(tk.Tk):
     def getSpectrum(self):
         with lock:
 
-            # trigger spectrum
-            # debug("raising trigger")
-            self.trigger.value = True
-
-            # wait for the requested/triggered spectrum to be ready for readout
-            waitForDataReady(self.ready) 
-
-            # release trigger
-            # debug("lowering trigger")
-            self.trigger.value = False
+            if args.ext_trigger:
+                debug("waiting on external trigger...")
+                waitForDataReady(self.ready) 
+            else:
+                # send trigger via the FT232H
+                self.trigger.value = True
+                waitForDataReady(self.ready)    
+                self.trigger.value = False
 
             # Read in the spectrum
             # debug("reading spectrum")
@@ -1141,24 +1154,25 @@ class cWinMain(tk.Tk):
 
         for ms in range(args.test_ramp_start, args.test_ramp_stop + 1, args.test_ramp_incr):
             print(f"collecting ramp measurement at {ms}ms")
-            send_command(SPI       = self.SPI, 
-                         ready     = self.ready, 
-                         address   = 0x11, 
-                         value     = ms, 
-                         write_len = 4, 
-                         name      = "Integration Time")
+            self.configMap["Integration Time"].Override(ms)
 
-            spectrum = self.Acquire()
+            for i in range(args.test_throwaways + 1):
+                spectrum = self.Acquire()
+                self.btnTest.update_idletasks()
+
             self.spectra.append(spectrum)
             self.headers.append(f"ramp-{ms}ms")
+            self.save() # mainly for the graph trace
+
             self.btnTest.update_idletasks()
             time.sleep(args.delay_ms / 1000.0)
 
         ########################################################################
-        # Save
+        # Done
         ########################################################################
 
         self.save_report()
+        self.quit()
 
     def save_report(self):
         self.makeDataDir()
@@ -1345,11 +1359,11 @@ args = parseArgs(sys.argv)
 # Initialize the SPI bus on the FT232H
 SPI = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
 
-# Initialize D5 as the ready signal
+# Initialize READY (input)
 ready = digitalio.DigitalInOut(getattr(board, args.ready_pin.upper()))
-ready.direction = digitalio.Direction.OUTPUT
+ready.direction = digitalio.Direction.INPUT
 
-# Initialize D6 as the trigger
+# Initialize TRIGGER (output)
 trigger = digitalio.DigitalInOut(getattr(board, args.trigger_pin.upper()))
 trigger.direction = digitalio.Direction.OUTPUT
 trigger.value = False
