@@ -112,6 +112,7 @@ def parseArgs(argv):
     parser.add_argument("--test-ramp-incr",      type=int,              default=1,          help="increment ramp at this integration time")
     parser.add_argument("--stomp-first",         type=int,              default=0,          help="stomp this many pixels at front of spectrum")
     parser.add_argument("--test-throwaways",     type=int,              default=3,          help="throwaways after changing integration time")
+    parser.add_argument("--block-size",          type=int,              default=4,          help="block size for --fast SPI reads")
     parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
     parser.add_argument("--graph",               type=bool,             default=True,       help="graph each spectrum (--no-graph to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--save",                type=bool,             default=True,       help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
@@ -307,7 +308,7 @@ def flushInputBuffer(ready, spi):
     junk = bytearray(READY_POLL_LEN)
     # debug("flushing input buffer...")
     while ready.value:
-        spi.readinto(junk, 0, READY_POLL_LEN)
+        spi.readinto(junk)
         count += 1
     if count > 0:
         debug(f"flushed {count} bytes from input buffer")
@@ -728,11 +729,11 @@ class cWinAreaScan(tk.Tk):
             for y in range(1, lineCount):
                 x = 0
                 waitForDataReady(self.ready)
-                self.SPI.readinto(SPIBuf, 0, len(SPIBuf))
+                self.SPI.readinto(SPIBuf)
                 pixel = (SPIBuf[0] << 8) + SPIBuf[1]
                 print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
                 for x in range(1, columnCount):
-                    self.SPI.readinto(SPIBuf, 0, 2)
+                    self.SPI.readinto(SPIBuf)
                     pixel = (((SPIBuf[0] << 8) + SPIBuf[1]) >> 4)
                     pixelHex = hex(pixel)
                     pixelHex = pixelHex[2:].zfill(2)
@@ -987,36 +988,42 @@ class cWinMain(tk.Tk):
         return binned
 
     def getSpectrum(self):
-        debug("getSpectrum: waiting on lock")
         with lock:
-            debug("getSpectrum: got lock")
-
             if args.ext_trigger:
                 debug("waiting on external trigger...")
                 waitForDataReady(self.ready) 
             else:
                 # send trigger via the FT232H
-                debug("getSpectrum: raising trigger")
                 self.trigger.value = True
-                debug("getSpectrum: waiting for DATA_READY")
                 waitForDataReady(self.ready)    
-                debug("getSpectrum: lowering trigger")
                 self.trigger.value = False
 
             # Read in the spectrum (MZ: big-endian, seriously?)
             spectrum = []
             if args.fast:
-                buf = bytearray(self.pixels * 2)
-                debug(f"reading spectrum of {self.pixels} ({len(buf)} bytes) (fast)")
-                self.SPI.readinto(buf, 0, len(buf))
-                debug("done reading spectrum (fast)")
+                total_bytes_to_read = self.pixels * 2
+                bytes_remaining_to_read = total_bytes_to_read
 
-                # just in case
+                debug(f"getSpectrum.fast: reading spectrum of {self.pixels} pixels")
+                raw = []
                 while self.ready.value:
-                    pass
+                    if bytes_remaining_to_read > 0:
+                        bytes_this_read = min(args.block_size, bytes_remaining_to_read)
 
-                for i in range(self.pixels):
-                    spectrum.append((buf[i*2] << 8) | buf[i*2 + 1])
+                        debug(f"getSpectrum.fast: reading block of {bytes_this_read} bytes")
+                        buf = bytearray(bytes_this_read)
+                        self.SPI.readinto(buf)
+
+                        data = list(buf)
+                        debug(f"getSpectrum.fast: read block of {len(data)} bytes")
+                        raw.extend(data)
+
+                        bytes_remaining_to_read -= len(data)
+
+                debug(f"getSpectrum.fast: done reading spectrum ({len(raw)} bytes read)")
+
+                for i in range(0, len(raw)-1, 2):
+                    spectrum.append((raw[i] << 8) | raw[i+1])
             else:
                 # Issue: this seems to take nearly 1sec to complete at 10MHz.
                 # 
@@ -1026,13 +1033,13 @@ class cWinMain(tk.Tk):
                 # Assuming instance is latency / overhead in SPI.readinto(), 
                 # hence moving to --fast above.
 
-                buf = bytearray(2)
-                debug("reading spectrum (slow)")
+                debug("getSpectrum: reading spectrum (loop)")
                 while self.ready.value:
-                    self.SPI.readinto(buf, 0, 2)
+                    buf = bytearray(2)
+                    self.SPI.readinto(buf)
                     spectrum.append((buf[0] << 8) | buf[1])
 
-            debug(f"done reading spectrum ({len(spectrum) * 2} bytes read)")
+            debug(f"getSpectrum: {len(spectrum) * 2} bytes read")
 
         # stomp leading pixels
         for i in range(args.stomp_first):
