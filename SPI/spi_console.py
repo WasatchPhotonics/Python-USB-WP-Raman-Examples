@@ -1012,7 +1012,7 @@ class cWinMain(tk.Tk):
                 raw.append(buf)
             debug("done reading spectrum")
 
-            debug("reading spectrum")
+            debug("parsing spectrum")
             for buf in raw:
                 pixel = (buf[0] << 8) | buf[1] # little-endian demarshalling
                 spectrum.append(pixel)
