@@ -114,6 +114,7 @@ def parseArgs(argv):
     parser.add_argument("--test-throwaways",     type=int,              default=3,          help="throwaways after changing integration time")
     parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
     parser.add_argument("--graph",               type=bool,             default=True,       help="graph each spectrum (--no-graph to disable)", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--save",                type=bool,             default=True,       help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     parser.add_argument("--test",                action="store_true",   help="run one test then exit")
@@ -128,7 +129,7 @@ def parseArgs(argv):
 
 def debug(msg):
     if args.debug:
-        print(f"DEBUG: {msg}")
+        print(f"{timestamp()} DEBUG: {msg}")
 
 ## format a list or bytearray as "[ 0x00, 0x0a, 0xff ]"
 def toHex(values):
@@ -328,7 +329,7 @@ def gain_to_ff(gain):
     return raw
 
 def timestamp():
-    return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return datetime.datetime.now().strftime("%Y%m%d-%H%M%S.%f")
 
 ################################################################################
 #                                                                              #
@@ -954,6 +955,9 @@ class cWinMain(tk.Tk):
             pass
 
     def save(self):
+        if not args.save:
+            return
+
         spectrum = self.lastSpectrum
         if spectrum is not None:
             self.makeDataDir()
@@ -982,26 +986,36 @@ class cWinMain(tk.Tk):
         return binned
 
     def getSpectrum(self):
+        debug("getSpectrum: waiting on lock")
         with lock:
+            debug("getSpectrum: got lock")
 
             if args.ext_trigger:
                 debug("waiting on external trigger...")
                 waitForDataReady(self.ready) 
             else:
                 # send trigger via the FT232H
+                debug("getSpectrum: raising trigger")
                 self.trigger.value = True
+                debug("getSpectrum: waiting for DATA_READY")
                 waitForDataReady(self.ready)    
+                debug("getSpectrum: lowering trigger")
                 self.trigger.value = False
 
             # Read in the spectrum
-            # debug("reading spectrum")
-            SPIBuf = bytearray(2)
+            buf = bytearray(2)
+            raw = []
             spectrum = []
+            debug("reading spectrum")
             while self.ready.value:
-                self.SPI.readinto(SPIBuf, 0, 2)
-                pixel = (SPIBuf[0] << 8) | SPIBuf[1] # little-endian demarshalling
+                self.SPI.readinto(buf, 0, 2)
+                raw.append(buf)
+            debug("done reading spectrum")
+
+            debug("reading spectrum")
+            for buf in raw:
+                pixel = (buf[0] << 8) | buf[1] # little-endian demarshalling
                 spectrum.append(pixel)
-            # debug("done reading spectrum")
 
         # stomp leading pixels
         for i in range(args.stomp_first):
@@ -1031,7 +1045,9 @@ class cWinMain(tk.Tk):
 
     def Acquire(self):
         # get the new spectrum
+        debug("calling getSpectrum")
         spectrum = self.getSpectrum()
+        debug("back from getSpectrum")
         if spectrum is None:
             debug("spectrum was None")
             return
@@ -1132,10 +1148,13 @@ class cWinMain(tk.Tk):
         self.headers = []
         for i in range(args.test_count):
             print(f"collecting {i+1}/{args.test_count}")
+            debug("calling acquire")
             spectrum = self.Acquire()
+            debug("back from acquire")
             self.spectra.append(spectrum)
             self.headers.append(f"meas-{i+1:02d}")
-            self.btnTest.update_idletasks()
+            if args.graph:
+                self.btnTest.update_idletasks()
             time.sleep(args.delay_ms / 1000.0)
 
         self.test_stop = datetime.datetime.now()
@@ -1158,13 +1177,15 @@ class cWinMain(tk.Tk):
 
             for i in range(args.test_throwaways + 1):
                 spectrum = self.Acquire()
-                self.btnTest.update_idletasks()
+                if args.graph:
+                    self.btnTest.update_idletasks()
 
             self.spectra.append(spectrum)
             self.headers.append(f"ramp-{ms}ms")
             self.save() # mainly for the graph trace
 
-            self.btnTest.update_idletasks()
+            if args.graph:
+                self.btnTest.update_idletasks()
             time.sleep(args.delay_ms / 1000.0)
 
         ########################################################################
