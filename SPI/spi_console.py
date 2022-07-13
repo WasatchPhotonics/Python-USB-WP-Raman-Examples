@@ -115,6 +115,7 @@ def parseArgs(argv):
     parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
     parser.add_argument("--graph",               type=bool,             default=True,       help="graph each spectrum (--no-graph to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--save",                type=bool,             default=True,       help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--fast",                action="store_true",   help="optimize everything for speed")
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     parser.add_argument("--test",                action="store_true",   help="run one test then exit")
@@ -1002,20 +1003,36 @@ class cWinMain(tk.Tk):
                 debug("getSpectrum: lowering trigger")
                 self.trigger.value = False
 
-            # Read in the spectrum
-            buf = bytearray(2)
-            raw = []
+            # Read in the spectrum (MZ: big-endian, seriously?)
             spectrum = []
-            debug("reading spectrum")
-            while self.ready.value:
-                self.SPI.readinto(buf, 0, 2)
-                raw.append(buf)
-            debug("done reading spectrum")
+            if args.fast:
+                buf = bytearray(self.pixels * 2)
+                debug(f"reading spectrum of {self.pixels} ({len(buf)} bytes) (fast)")
+                self.SPI.readinto(buf, 0, len(buf))
+                debug("done reading spectrum (fast)")
 
-            debug("parsing spectrum")
-            for buf in raw:
-                pixel = (buf[0] << 8) | buf[1] # little-endian demarshalling
-                spectrum.append(pixel)
+                # just in case
+                while self.ready.value:
+                    pass
+
+                for i in range(self.pixels):
+                    spectrum.append((buf[i*2] << 8) | buf[i*2 + 1])
+            else:
+                # Issue: this seems to take nearly 1sec to complete at 10MHz.
+                # 
+                # That's weird because 1920 uint16 = 7680 bits, which at 10MHz 
+                # should take 768µs (0.768ms).
+                #
+                # Assuming instance is latency / overhead in SPI.readinto(), 
+                # hence moving to --fast above.
+
+                buf = bytearray(2)
+                debug("reading spectrum (slow)")
+                while self.ready.value:
+                    self.SPI.readinto(buf, 0, 2)
+                    spectrum.append((buf[0] << 8) | buf[1])
+
+            debug(f"done reading spectrum ({len(spectrum) * 2} bytes read)")
 
         # stomp leading pixels
         for i in range(args.stomp_first):
@@ -1055,6 +1072,8 @@ class cWinMain(tk.Tk):
         # post-process
         spectrum = self.apply2x2Binning(spectrum)
         self.lastSpectrum = spectrum
+        if not args.fast:
+            self.pixels = len(spectrum) 
         debug(f"read {len(spectrum)} pixels")
 
         # graph
@@ -1167,6 +1186,12 @@ class cWinMain(tk.Tk):
         self.scan_period_ms = self.elapsed_ms / args.test_count
         self.scan_rate      = 1000.0 / self.scan_period_ms
 
+        print("=" * 50)
+        print(f"Elapsed:     {self.elapsed_ms:.2f}ms for {args.test_count} measurements")
+        print(f"Scan Period: {self.scan_period_ms:.2f}ms per measurement")
+        print(f"Scan Rate:   {self.scan_rate:.2f} measurements/sec")
+        print("=" * 50)
+
         ########################################################################
         # Ramp
         ########################################################################
@@ -1214,7 +1239,6 @@ class cWinMain(tk.Tk):
             outfile.write("\n")
 
             # header row
-            pixels = len(self.lastSpectrum)
             outfile.write("pixel, wavelength")
             if self.wavenumbers is not None:
                 outfile.write(", wavenumber")
@@ -1223,7 +1247,7 @@ class cWinMain(tk.Tk):
             outfile.write("\n")
 
             # data
-            for pixel in range(pixels):
+            for pixel in range(self.pixels):
                 outfile.write(f"{pixel}, {self.wavelengths[pixel]:.2f}")
                 if self.wavenumbers is not None:
                     outfile.write(f", {self.wavenumbers[pixel]:.2f}")
@@ -1233,9 +1257,11 @@ class cWinMain(tk.Tk):
         print(f"saved {pathname}")
 
     def generate_wavecal(self):
-        pixels = self.eeprom.active_pixels_horizontal # should be 1920 for IMX385
+        # cache for --fast (should be 1920 for IMX385)
+        self.pixels = self.eeprom.active_pixels_horizontal 
+
         self.wavelengths = []
-        for i in range(pixels): 
+        for i in range(self.pixels): 
             wavelength = self.eeprom.wavelength_coeffs[0]               \
                        + self.eeprom.wavelength_coeffs[1] * i           \
                        + self.eeprom.wavelength_coeffs[2] * i * i       \
@@ -1247,7 +1273,7 @@ class cWinMain(tk.Tk):
         if args.excitation_nm > 0:
             self.wavenumbers = []
             base = 1e7 / args.excitation_nm
-            for i in range(pixels):
+            for i in range(self.pixels):
                 wavenumber = 0
                 if self.wavelengths[i] != 0:
                     wavenumber = base - 1e7 / self.wavelengths[i]
