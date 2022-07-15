@@ -78,6 +78,7 @@ WRITE = 0x80
 CRC   = 0xff                # for readability
 SUPPORT_MULTIPLE_ROI=False  # not there yet
 DATA_DIR = "data"           # under the current working directory
+MIN_DELAY_MS = 100          # varies by hardware / OS -- this is to ensure responsive GUI, even with --debug
 
 ################################################################################
 #                                                                              #
@@ -95,28 +96,26 @@ def parseArgs(argv):
         epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter) 
 
-    parser.add_argument("--baud-mhz",            type=int,              default=10,         help="baud rate in MHz")
-    parser.add_argument("--ready-pin",           type=str,              default="D5",       help="FT232H pin for DATA_READY")
-    parser.add_argument("--trigger-pin",         type=str,              default="D6",       help="FT232H pin for TRIGGER")
-    parser.add_argument("--integration-time-ms", type=int,              default=3,          help="startup integration time in ms")
-    parser.add_argument("--gain-db",             type=int,              default=24,         help="startup gain in INTEGRAL dB (24 sent as FunkyFloat 0x1800)")
-    parser.add_argument("--black-level",         type=int,              default=0,          help="startup black level")
-    parser.add_argument("--start-col",           type=int,              default=12,         help="startup ROI left")
-    parser.add_argument("--stop-col",            type=int,              default=1932,       help="startup ROI right")
-    parser.add_argument("--start-line",          type=int,              default=250,        help="startup ROI top")
-    parser.add_argument("--stop-line",           type=int,              default=750,        help="startup ROI bottom")
-    parser.add_argument("--delay-ms",            type=int,              default=100,        help="delay between acquisitions")
-    parser.add_argument("--test-count",          type=int,              default=20,         help="collect this many spectra when testing")
-    parser.add_argument("--test-ramp-start",     type=int,              default=3,          help="start ramp at this integration time")
-    parser.add_argument("--test-ramp-stop",      type=int,              default=10,         help="stop ramp at this integration time")
-    parser.add_argument("--test-ramp-incr",      type=int,              default=1,          help="increment ramp at this integration time")
-    parser.add_argument("--stomp-first",         type=int,              default=0,          help="stomp this many pixels at front of spectrum")
-    parser.add_argument("--test-throwaways",     type=int,              default=3,          help="throwaways after changing integration time")
-    parser.add_argument("--block-size",          type=int,              default=4,          help="block size for --fast SPI reads")
-    parser.add_argument("--excitation-nm",       type=float,            default=0,          help="laser excitation wavelength (used to generate wavenumber axis)")
-    parser.add_argument("--graph",               type=bool,             default=True,       help="graph each spectrum (--no-graph to disable)", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--save",                type=bool,             default=True,       help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--fast",                action="store_true",   help="optimize everything for speed")
+    parser.add_argument("--baud-mhz",            type=int,              default=10,          help="baud rate in MHz")
+    parser.add_argument("--ready-pin",           type=str,              default="D5",        help="FT232H pin for DATA_READY")
+    parser.add_argument("--trigger-pin",         type=str,              default="D6",        help="FT232H pin for TRIGGER")
+    parser.add_argument("--integration-time-ms", type=int,              default=3,           help="startup integration time in ms")
+    parser.add_argument("--gain-db",             type=int,              default=24,          help="startup gain in INTEGRAL dB (24 sent as FunkyFloat 0x1800)")
+    parser.add_argument("--black-level",         type=int,              default=0,           help="startup black level")
+    parser.add_argument("--start-col",           type=int,              default=12,          help="startup ROI left")
+    parser.add_argument("--stop-col",            type=int,              default=1932,        help="startup ROI right")
+    parser.add_argument("--start-line",          type=int,              default=250,         help="startup ROI top")
+    parser.add_argument("--stop-line",           type=int,              default=750,         help="startup ROI bottom")
+    parser.add_argument("--delay-ms",            type=int,              default=MIN_DELAY_MS,help="delay between acquisitions (automatically zero for --test)")
+    parser.add_argument("--test-count",          type=int,              default=100,         help="collect this many spectra when testing")
+    parser.add_argument("--test-ramp-start",     type=int,              default=3,           help="start ramp at this integration time")
+    parser.add_argument("--test-ramp-stop",      type=int,              default=10,          help="stop ramp at this integration time")
+    parser.add_argument("--test-ramp-incr",      type=int,              default=1,           help="increment ramp at this integration time")
+    parser.add_argument("--stomp-first",         type=int,              default=0,           help="stomp this many pixels at front of spectrum")
+    parser.add_argument("--throwaways",          type=int,              default=3,           help="automatic throwaway measurements after changing acquisition parameters")
+    parser.add_argument("--block-size",          type=int,              default=256,         help="block size for --fast SPI reads")
+    parser.add_argument("--excitation-nm",       type=float,            default=0,           help="laser excitation wavelength (used to generate wavenumber axis)")
+    parser.add_argument("--save",                type=bool,             default=True,        help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
     parser.add_argument("--test",                action="store_true",   help="run one test then exit")
@@ -124,8 +123,13 @@ def parseArgs(argv):
 
     args = parser.parse_args(argv[1:])
 
+    # positive --delay-ms is required for interactive GUI, but zeroed for --test
     if args.test:
         args.paused = True
+        args.delay_ms = 0 
+    elif args.delay_ms < MIN_DELAY_MS:
+        print(f"WARNING: interactive GUI recommends --delay-ms of at least {MIN_DELAY_MS}ms")
+        args.delay_ms = MIN_DELAY_MS
 
     return args
 
@@ -317,6 +321,7 @@ def waitForDataReady(ready):
     # debug("waiting for data ready...")
     while not ready.value:
         pass
+    # debug("...got data ready")
 
 ##
 # Convert a (potentially) floating-point value into the big-endian 16-bit "Funky
@@ -332,6 +337,12 @@ def gain_to_ff(gain):
 
 def timestamp():
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S.%f")
+
+def sleep_ms(ms):
+    ms = int(round(ms))
+    sec = ms / 1000.0
+    debug(f"sleeping {ms} ms")
+    time.sleep(sec)
 
 ################################################################################
 #                                                                              #
@@ -395,8 +406,8 @@ class cCfgString:
     def SPIWrite(self):
         pass
 
-    def Update(self, force=False):
-        pass
+    def Update(self, force=False) -> bool:
+        return False
         
 ################################################################################
 #                                                                              #
@@ -482,11 +493,13 @@ class cCfgEntry:
                      write_len = self.write_len, 
                      name      = self.name)
 
-    # Fetch the data from the entry box and update it to the FPGA
-    def Update(self, force=False):
+    ## Fetch the data from the entry box and update it to the FPGA
+    def Update(self, force=False) -> bool:
         if self.value != int(self.stringVar.get()) or force:
             self.value = int(self.stringVar.get())
             self.SPIWrite()
+            return True
+        return False
 
     # Override the value in the GUI widget then update to device
     def Override(self, value):
@@ -562,7 +575,7 @@ class cCfgCombo:
                      write_len = self.write_len, 
                      name      = self.name)
 
-    def Update(self, force=False):
+    def Update(self, force=False) -> bool:
         newValue = 0
         if self.stringVar[0].get() == '12':
             newValue += 2
@@ -571,6 +584,8 @@ class cCfgCombo:
         if self.value != newValue or force:
             self.value = newValue
             self.SPIWrite()
+            return True
+        return False
 
 ################################################################################
 #                                                                              #
@@ -664,7 +679,7 @@ class cWinEEPROM(tk.Tk):
             print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
 
             # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
-            time.sleep(0.01) # empirically determined 10ms delay
+            sleep_ms(10) # empirically determined 10ms delay
 
             # MZ: original (and API) have length 1 here...why?  Should this not be at least 65 (addr + data)? 
             unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END]) 
@@ -766,6 +781,8 @@ class cWinMain(tk.Tk):
         self.ready      = ready
         self.trigger    = trigger
 
+        self.next_cb = None
+        self.acquireActive = False
         self.lastSpectrum = None
         self.clear()
 
@@ -927,7 +944,7 @@ class cWinMain(tk.Tk):
             debug("starting acquisition loop")
             self.textStart.set("Stop")
             self.acquireActive = True
-            self.after(args.delay_ms, self.Acquire)
+            self.schedule_acquire(args.delay_ms)
 
     def stop(self):
         with lock:
@@ -956,20 +973,25 @@ class cWinMain(tk.Tk):
         except:
             pass
 
-    def save(self):
+    ##
+    # @param to_disk: specify False if you only want the spectrum saved "on the 
+    #                 graph" (as a historical trace)
+    def save(self, to_disk=True):
         if not args.save:
             return
 
         spectrum = self.lastSpectrum
         if spectrum is not None:
-            self.makeDataDir()
             basename = self.generateBasename()
-            pathname = os.path.join(DATA_DIR, f"{basename}.csv")
-            with open(pathname, "w") as outfile:
-                for i in range(len(spectrum)):
-                    outfile.write(f"{i}, {spectrum[i]}\n")
             self.savedSpectra[basename] = spectrum
-            print(f"saved {pathname}")
+
+            if to_disk:
+                self.makeDataDir()
+                pathname = os.path.join(DATA_DIR, f"{basename}.csv")
+                with open(pathname, "w") as outfile:
+                    for i in range(len(spectrum)):
+                        outfile.write(f"{i}, {spectrum[i]}\n")
+                print(f"saved {pathname}")
 
     def clear(self):
         self.savedSpectra = {}
@@ -989,6 +1011,11 @@ class cWinMain(tk.Tk):
 
     def getSpectrum(self):
         with lock:
+
+            ####################################################################
+            # Trigger Acquisition
+            ####################################################################
+
             if args.ext_trigger:
                 debug("waiting on external trigger...")
                 waitForDataReady(self.ready) 
@@ -998,53 +1025,43 @@ class cWinMain(tk.Tk):
                 waitForDataReady(self.ready)    
                 self.trigger.value = False
 
-            # Read in the spectrum (MZ: big-endian, seriously?)
+            ####################################################################
+            # Read the spectrum (MZ: big-endian, seriously?)
+            ####################################################################
+
             spectrum = []
-            if args.fast:
-                total_bytes_to_read = self.pixels * 2
-                bytes_remaining_to_read = total_bytes_to_read
+            bytes_remaining = self.pixels * 2
 
-                debug(f"getSpectrum.fast: reading spectrum of {self.pixels} pixels")
-                raw = []
-                while self.ready.value:
-                    if bytes_remaining_to_read > 0:
-                        bytes_this_read = min(args.block_size, bytes_remaining_to_read)
+            debug(f"getSpectrum: reading spectrum of {self.pixels} pixels")
+            raw = []
+            while self.ready.value:
+                if bytes_remaining > 0:
+                    bytes_this_read = min(args.block_size, bytes_remaining)
 
-                        debug(f"getSpectrum.fast: reading block of {bytes_this_read} bytes")
-                        buf = bytearray(bytes_this_read)
-                        self.SPI.readinto(buf)
+                    debug(f"getSpectrum: reading block of {bytes_this_read} bytes")
+                    buf = bytearray(bytes_this_read)
 
-                        data = list(buf)
-                        debug(f"getSpectrum.fast: read block of {len(data)} bytes")
-                        raw.extend(data)
+                    # there is latency associated with this call, so call it as 
+                    # few times as possible (with the largest possible block size)
+                    self.SPI.readinto(buf) 
 
-                        bytes_remaining_to_read -= len(data)
+                    debug(f"getSpectrum: read block of {len(buf)} bytes")
+                    raw.extend(list(buf))
 
-                debug(f"getSpectrum.fast: done reading spectrum ({len(raw)} bytes read)")
+                    bytes_remaining -= len(buf)
 
-                for i in range(0, len(raw)-1, 2):
-                    spectrum.append((raw[i] << 8) | raw[i+1])
-            else:
-                # Issue: this seems to take nearly 1sec to complete at 10MHz.
-                # 
-                # That's weird because 1920 uint16 = 7680 bits, which at 10MHz 
-                # should take 768µs (0.768ms).
-                #
-                # Assuming instance is latency / overhead in SPI.readinto(), 
-                # hence moving to --fast above.
+        ########################################################################
+        # post-process spectrum
+        ########################################################################
 
-                debug("getSpectrum: reading spectrum (loop)")
-                while self.ready.value:
-                    buf = bytearray(2)
-                    self.SPI.readinto(buf)
-                    spectrum.append((buf[0] << 8) | buf[1])
-
-            debug(f"getSpectrum: {len(spectrum) * 2} bytes read")
+        # demarshall big-endian
+        for i in range(0, len(raw)-1, 2):
+            spectrum.append((raw[i] << 8) | raw[i+1]) 
+        debug(f"getSpectrum: {len(spectrum)} pixels read")
 
         # stomp leading pixels
         for i in range(args.stomp_first):
             spectrum[i] = spectrum[args.stomp_first]
-
         return spectrum
 
     ## @todo probably faster if we used set_ydata()
@@ -1067,7 +1084,7 @@ class cWinMain(tk.Tk):
             spectrum = self.savedSpectra[label]
             self.graphSpectrum(spectrum, label=label)
 
-    def Acquire(self):
+    def Acquire(self, graph=True):
         # get the new spectrum
         debug("calling getSpectrum")
         spectrum = self.getSpectrum()
@@ -1079,21 +1096,26 @@ class cWinMain(tk.Tk):
         # post-process
         spectrum = self.apply2x2Binning(spectrum)
         self.lastSpectrum = spectrum
-        if not args.fast:
-            self.pixels = len(spectrum) 
+        self.pixels = len(spectrum) 
         debug(f"read {len(spectrum)} pixels")
 
         # graph
-        if args.graph:
+        if graph:
             self.initGraph()
             self.graphSpectrum(spectrum)
 
         # schedule next tick
         if self.acquireActive:
-            self.after(args.delay_ms, self.Acquire)
+            self.schedule_acquire(args.delay_ms + self.getValue("Integration Time"))
 
         # for test()
         return spectrum 
+
+    def schedule_acquire(self, ms):
+        debug(f"scheduling next tick in {ms}ms")
+        if self.next_cb is not None:
+            self.after_cancel(self.next_cb)
+        self.next_cb = self.after(ms, self.Acquire)
 
     def FPGAInit(self):
         debug("performing FPGA Init")
@@ -1120,14 +1142,34 @@ class cWinMain(tk.Tk):
                          write_len = 3,
                          name      = name)
 
+        self.take_throwaways()
+
+    def take_throwaways(self):
+        if args.throwaways > 0:
+            debug("taking throwaways")
+            for i in range(args.throwaways):
+                self.Acquire()
+                self.btnStart.update_idletasks()
+            debug("done taking throwaways")
+
     def FPGAUpdate(self, force=False):
         debug("performing FPGA Update")
         with lock:
             flushInputBuffer(self.ready, self.SPI) # get rid of any garbage on the line
 
         # Iterate through each of the config objects and update to the FPGA if necessary
+        changed = False
         for cfgObj in self.configObjects:
-            cfgObj.Update(force=force)
+            if cfgObj.Update(force=force):
+                changed = True
+
+        # track this so we know how many pixels to read on the next Acquire
+        self.pixels = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
+
+        # take throwaways if any acquisition parameters changed
+        if changed:
+            print(f"taking throwaways (pixels now {self.pixels})")
+            self.take_throwaways()
 
     def openEEPROM(self):
         debug("opening EEPROM")
@@ -1140,13 +1182,13 @@ class cWinMain(tk.Tk):
         with lock:
             self.acquireActive = False
         # Give time for the last acquisition to complete 
-        time.sleep(0.1 + args.integration_time_ms / 1000.0)
+        sleep_ms(100 + args.integration_time_ms)
         lineCount   = self.getValue("Stop Line 0") - self.getValue("Start Line 0")
         columnCount = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
         self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
         with lock:
             self.acquireActive = True
-        self.after(args.delay_ms, self.Acquire)
+        self.schedule_acquire(args.delay_ms)
 
     ############################################################################
     #                                                                          #
@@ -1169,19 +1211,29 @@ class cWinMain(tk.Tk):
         ########################################################################
 
         self.test_start = datetime.datetime.now()
+        self.min_elapsed_ms = 99999
+        self.max_elapsed_ms = -1
 
         self.spectra = []
         self.headers = []
         for i in range(args.test_count):
-            print(f"collecting {i+1}/{args.test_count}")
+            debug(f"starting test measurement {i+1:3d}/{args.test_count}")
+            this_start = datetime.datetime.now()
+
             debug("calling acquire")
-            spectrum = self.Acquire()
+            spectrum = self.Acquire(graph=False)
             debug("back from acquire")
+
+            this_elapsed_ms = (datetime.datetime.now() - this_start).total_seconds() * 1000.0
+            self.min_elapsed_ms = min(this_elapsed_ms, self.min_elapsed_ms)
+            self.max_elapsed_ms = max(this_elapsed_ms, self.max_elapsed_ms)
+
+            print(f"collected {i+1:3d}/{args.test_count} ({this_elapsed_ms:.2f}ms)")
+
             self.spectra.append(spectrum)
             self.headers.append(f"meas-{i+1:02d}")
-            if args.graph:
-                self.btnTest.update_idletasks()
-            time.sleep(args.delay_ms / 1000.0)
+
+            sleep_ms(args.delay_ms)
 
         self.test_stop = datetime.datetime.now()
 
@@ -1194,9 +1246,9 @@ class cWinMain(tk.Tk):
         self.scan_rate      = 1000.0 / self.scan_period_ms
 
         print("=" * 50)
-        print(f"Elapsed:     {self.elapsed_ms:.2f}ms for {args.test_count} measurements")
-        print(f"Scan Period: {self.scan_period_ms:.2f}ms per measurement")
-        print(f"Scan Rate:   {self.scan_rate:.2f} measurements/sec")
+        print(f"Elapsed:     {self.elapsed_ms:.2f}ms for {args.test_count} measurements (total)")
+        print(f"Scan Period: {self.scan_period_ms:.2f}ms per measurement (mean) (min {self.min_elapsed_ms:.2f}, max {self.max_elapsed_ms:.2f})")
+        print(f"Scan Rate:   {self.scan_rate:.2f} measurements/sec (mean)")
         print("=" * 50)
 
         ########################################################################
@@ -1206,19 +1258,17 @@ class cWinMain(tk.Tk):
         for ms in range(args.test_ramp_start, args.test_ramp_stop + 1, args.test_ramp_incr):
             print(f"collecting ramp measurement at {ms}ms")
             self.configMap["Integration Time"].Override(ms)
+            self.take_throwaways()
 
-            for i in range(args.test_throwaways + 1):
-                spectrum = self.Acquire()
-                if args.graph:
-                    self.btnTest.update_idletasks()
+            spectrum = self.Acquire()
+            self.btnTest.update_idletasks()
 
             self.spectra.append(spectrum)
             self.headers.append(f"ramp-{ms}ms")
-            self.save() # mainly for the graph trace
 
-            if args.graph:
-                self.btnTest.update_idletasks()
-            time.sleep(args.delay_ms / 1000.0)
+            self.save(to_disk=False)
+            self.btnTest.update_idletasks()
+            sleep_ms(args.delay_ms)
 
         ########################################################################
         # Done
@@ -1241,7 +1291,7 @@ class cWinMain(tk.Tk):
                 outfile.write(f"args.{key}, {value}\n")
             for key, value in self.eeprom.__dict__.items():
                 outfile.write(f"eeprom.{key}, {value}\n")
-            for key in ['test_start', 'test_stop', 'elapsed_ms', 'scan_period_ms', 'scan_rate']:
+            for key in ['test_start', 'test_stop', 'elapsed_ms', 'min_elapsed_ms', 'max_elapsed_ms', 'scan_period_ms', 'scan_rate']:
                 outfile.write(f"{key}, {getattr(self, key)}\n")
             outfile.write("\n")
 
@@ -1319,7 +1369,7 @@ class EEPROM:
             print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
 
             # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
-            time.sleep(0.01) # empirically determined 10ms delay
+            sleep_ms(10) # empirically determined 10ms delay
 
             # send 0x31 command to read the buffered page from the FPGA
             unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END]) 
