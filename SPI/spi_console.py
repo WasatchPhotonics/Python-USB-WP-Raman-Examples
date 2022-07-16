@@ -1,12 +1,58 @@
 """
-Troubleshooting:
-    - If it seems to "freeze" at startup, make sure you're setting your READY / 
-      TRIGGER pins correctly.
+This is a command-line script provided to test Wasach Photonics Series-V (SiG)
+spectrometers using a SPI interface.
 
-@todo add an --ext-trigger option which prevents the script from sending trigger
-      signals (requires an external function generator like the Koolertron)
-@todo move all the classes (and all globals) to a TestFixture class
-@todo re-test Area Scan
+It provides a real-time GUI allowing the user to control integration time, 
+gain (dB), vertical ROI and other acquisition parameters, while graphing and
+collected spectra. 
+
+Features include:
+
+- reads and parses key fields from the EEPROM, including wavecal in wavelength 
+  and wavenumber
+- save measuremnts as .csv
+- add on-screen traces for visual comparison
+- "test mode" for automated unit QC
+- resizable graph with pan/zoom
+
+See --help for command-line options.
+
+SPI API
+    The Wasatch Photonics SPI API is documented in Engineering Document ENG-0150,
+    available from the company on request (but largely inferrable from this 
+    script).
+
+Hardware Dependencies
+    Because personal computers do not have a user-accessible SPI connector, the
+    script assumes usage of an Adafruit FT232H USB-to-SPI adapter:
+
+    https://www.adafruit.com/product/2264
+
+Test Mode
+    The script has a special mode for quickly performing a timing test and bulk
+    data collection from a single connected spectrometer.  When running in this 
+    mode, the script will:
+
+    - disable the GUI (real-time graphing enacts a speed penalty)
+    - automatically collect --test-count measurements at the configured 
+      integration time, gain and vertical ROI
+    - compute individual and aggregate timing metrics on each measurement
+    - save a test report under data/ containing all measurements and metrics
+
+Troubleshooting
+    - You may need to plug the FT232H USB cable in before connecting 12V to the 
+      spectrometer.
+    - If the script seems to "freeze" at startup, make sure you're setting your 
+      READY/TRIGGER pins correctly, both on the FT232H and cmd-line args
+
+Deprecated Features
+    Area Scan, Horizontal ROI, Multiple ROI, Desmile, Black Level and EEPROM 
+    Write features have been removed for simplicity, as they are not being 
+    actively tested at this time.  They can be restored by borrowing and updating
+    the relevant code from earlier commits (see tag spi_console_removing_unused).
+
+TODO
+    - move all the classes (and all globals) to a TestFixture class
 """
 
 ################################################################################
@@ -21,10 +67,7 @@ import tkinter.ttk as ttk
 import matplotlib
 matplotlib.use('TkAgg')
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import (
-    FigureCanvasTkAgg,
-    NavigationToolbar2Tk
-)
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 import crcmod.predefined
 
@@ -42,24 +85,25 @@ def checkZadig():
     if platform.system() == "Windows":
         print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
 
-os.environ["BLINKA_FT232H"] = "1" # must be before 'board'
+runnable = True
 try:
+    os.environ["BLINKA_FT232H"] = "1"
     import board
+    import digitalio
+    import busio
 except RuntimeError as ex:
     print("No FT232H connected.\n")
     checkZadig()
-    raise(ex)
+    runnable = False
 except ValueError as ex:
-    print("If you are receiving 'no backend available' errors, try the following:\n")
+    print("If you are receiving 'no backend available' errors, try the following:")
     print("MacOS:  $ export DYLD_LIBRARY_PATH=/usr/local/lib")
-    print("Linux:  $ export LD_LIBRARY_PATH=/usr/local/lib\n")
-    raise(ex)
+    print("Linux:  $ export LD_LIBRARY_PATH=/usr/local/lib")
+    runnable = False
 except FtdiError as ex:
     print("No FT232H connected.\n")
     checkZadig()
-    raise(ex)
-import digitalio
-import busio
+    runnable = False
 
 ################################################################################
 #                                                                              #
@@ -67,16 +111,14 @@ import busio
 #                                                                              #
 ################################################################################
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
 READY_POLL_LEN = 2          # 1 seems to work
-TWENTY_MHZ = 20000000
 START = 0x3c                # <
 END   = 0x3e                # >
-WRITE = 0x80               
+WRITE = 0x80                # bit changing opcodes from 'getter' to 'setter'
 CRC   = 0xff                # for readability
-SUPPORT_MULTIPLE_ROI=False  # not there yet
 DATA_DIR = "data"           # under the current working directory
 MIN_DELAY_MS = 100          # varies by hardware / OS -- this is to ensure responsive GUI, even with --debug
 
@@ -88,45 +130,46 @@ MIN_DELAY_MS = 100          # varies by hardware / OS -- this is to ensure respo
 
 crc8 = crcmod.predefined.mkPredefinedCrcFun('crc-8-maxim')
 lock = threading.Lock()
-args = None 
+args = None
 
 def parseArgs(argv):
+
+    class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
+        pass
+
     parser = argparse.ArgumentParser(
         description="GUI to test XS embedded spectrometers via SPI and FT232H adapter",
-        epilog="Note: you may need to plug the FT232H USB cable in before connecting 12V to the spectrometer",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter) 
+        epilog=globals()['__doc__'],
+        formatter_class=CustomFormatter)
 
-    parser.add_argument("--baud-mhz",            type=int,              default=10,          help="baud rate in MHz")
-    parser.add_argument("--ready-pin",           type=str,              default="D5",        help="FT232H pin for DATA_READY")
-    parser.add_argument("--trigger-pin",         type=str,              default="D6",        help="FT232H pin for TRIGGER")
-    parser.add_argument("--integration-time-ms", type=int,              default=3,           help="startup integration time in ms")
-    parser.add_argument("--gain-db",             type=int,              default=24,          help="startup gain in INTEGRAL dB (24 sent as FunkyFloat 0x1800)")
-    parser.add_argument("--black-level",         type=int,              default=0,           help="startup black level")
-    parser.add_argument("--start-col",           type=int,              default=12,          help="startup ROI left")
-    parser.add_argument("--stop-col",            type=int,              default=1932,        help="startup ROI right")
-    parser.add_argument("--start-line",          type=int,              default=250,         help="startup ROI top")
-    parser.add_argument("--stop-line",           type=int,              default=750,         help="startup ROI bottom")
-    parser.add_argument("--delay-ms",            type=int,              default=MIN_DELAY_MS,help="delay between acquisitions (automatically zero for --test)")
-    parser.add_argument("--test-count",          type=int,              default=100,         help="collect this many spectra when testing")
-    parser.add_argument("--test-ramp-start",     type=int,              default=3,           help="start ramp at this integration time")
-    parser.add_argument("--test-ramp-stop",      type=int,              default=10,          help="stop ramp at this integration time")
-    parser.add_argument("--test-ramp-incr",      type=int,              default=1,           help="increment ramp at this integration time")
-    parser.add_argument("--stomp-first",         type=int,              default=0,           help="stomp this many pixels at front of spectrum")
-    parser.add_argument("--throwaways",          type=int,              default=3,           help="automatic throwaway measurements after changing acquisition parameters")
-    parser.add_argument("--block-size",          type=int,              default=256,         help="block size for --fast SPI reads")
-    parser.add_argument("--excitation-nm",       type=float,            default=0,           help="laser excitation wavelength (used to generate wavenumber axis)")
-    parser.add_argument("--save",                type=bool,             default=True,        help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--paused",              action="store_true",   help="launch with acquisition paused")
-    parser.add_argument("--debug",               action="store_true",   help="output verbose debug messages")
-    parser.add_argument("--test",                action="store_true",   help="run one test then exit")
-    parser.add_argument("--ext-trigger",         action="store_true",   help="don't send triggers via FT232H (requires external function generator)")
+    parser.add_argument("--ready-pin",           type=str,   default="D5",         help="FT232H pin for DATA_READY")
+    parser.add_argument("--trigger-pin",         type=str,   default="D6",         help="FT232H pin for TRIGGER")
+    parser.add_argument("--baud-mhz",            type=int,   default=10,           help="baud rate in MHz")
+    parser.add_argument("--integration-time-ms", type=int,   default=3,            help="startup integration time in ms")
+    parser.add_argument("--gain-db",             type=int,   default=24,           help="startup gain in INTEGRAL dB (24 sent as FunkyFloat 0x1800)")
+    parser.add_argument("--start-line",          type=int,   default=250,          help="startup ROI top")
+    parser.add_argument("--stop-line",           type=int,   default=750,          help="startup ROI bottom")
+    parser.add_argument("--delay-ms",            type=int,   default=MIN_DELAY_MS, help="delay between acquisitions (zero for --test)")
+    parser.add_argument("--test-count",          type=int,   default=100,          help="collect this many spectra in --test")
+    parser.add_argument("--test-ramp-start",     type=int,   default=3,            help="start ramp at this integration time")
+    parser.add_argument("--test-ramp-stop",      type=int,   default=10,           help="stop ramp at this integration time")
+    parser.add_argument("--test-ramp-incr",      type=int,   default=1,            help="increment ramp at this integration time")
+    parser.add_argument("--throwaways",          type=int,   default=3,            help="automatic throwaway measurements")
+    parser.add_argument("--block-size",          type=int,   default=256,          help="block size for --fast SPI reads")
+    parser.add_argument("--excitation-nm",       type=float, default=0,            help="laser excitation wavelength (used to generate wavenumber axis)")
+    parser.add_argument("--save",                type=bool,  default=True,         help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--test-linearity",      action="store_true",              help="after data collection, test linearity by ramping integration time")
+    parser.add_argument("--paused",              action="store_true",              help="launch with acquisition paused")
+    parser.add_argument("--debug",               action="store_true",              help="output verbose debug messages")
+    parser.add_argument("--test",                action="store_true",              help="run one test then exit")
+    parser.add_argument("--ext-trigger",         action="store_true",              help="don't send triggers via FT232H (requires external function generator)")
 
     args = parser.parse_args(argv[1:])
 
     # positive --delay-ms is required for interactive GUI, but zeroed for --test
     if args.test:
         args.paused = True
-        args.delay_ms = 0 
+        args.delay_ms = 0
     elif args.delay_ms < MIN_DELAY_MS:
         print(f"WARNING: interactive GUI recommends --delay-ms of at least {MIN_DELAY_MS}ms")
         args.delay_ms = MIN_DELAY_MS
@@ -151,7 +194,7 @@ def checkCRC(crc_received, data):
 def computeCRC(data):
     return crc8(bytearray(data))
 
-## 
+##
 # given a formatted SPI command of the form [START, L0, L1, ADDR, ...DATA..., CRC, END],
 # return command with CRC replaced with the computed checksum of [L0..DATA] as bytearray
 def fixCRC(cmd):
@@ -184,9 +227,9 @@ def validateWriteResponse(response) -> str:
         return f"invalid response END marker: {response}"
     return errorCodeToString(response[1])
 
-## 
+##
 # Given an existing list or bytearray, copy the contents into a new bytearray of
-# the specified size. This is used to generate the "command" argument of a 
+# the specified size. This is used to generate the "command" argument of a
 # SPI.write_readinto(cmd, response) call, as both buffers are expected to be of
 # the same size.
 #
@@ -198,18 +241,18 @@ def buffer_bytearray(orig, size):
 
 ##
 # Given an unbuffered "read" command (just the bytes we wanted to write, without
-# trailing zeros for the read response), and the complete (buffered) response 
+# trailing zeros for the read response), and the complete (buffered) response
 # read back (including leading junk from the command/write phase), parse out the
 # actual response data and validate checksum.
 #
 # @para Example (reading FPGA version number)
 # @verbatim
-#              offset:    0     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16    17   
-#         explanation:    <    (_length_)  ADDR   >     <    (_length_)  ADDR  '0'   '2'   '.'   '1'   '.'   '2'   '3'   CRC    >   
+#              offset:    0     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16    17
+#         explanation:    <    (_length_)  ADDR   >     <    (_length_)  ADDR  '0'   '2'   '.'   '1'   '.'   '2'   '3'   CRC    >
 #  unbuffered_command: [ 0x3c, 0x00, 0x01, 0x10, 0x3e ]
-#    buffered_command: [ 0x3c, 0x00, 0x01, 0x10, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ] 
-#   buffered_response: [  ?? ,  ?? ,  ?? ,  ?? ,  ?? , 0x3c, 0x00, 0x08, 0x10, 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33, 0x83, 0x3e ] 
-# unbuffered_response:                               [ 0x3c, 0x00, 0x08, 0x10, 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33, 0x83, 0x3e ] 
+#    buffered_command: [ 0x3c, 0x00, 0x01, 0x10, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 ]
+#   buffered_response: [  ?? ,  ?? ,  ?? ,  ?? ,  ?? , 0x3c, 0x00, 0x08, 0x10, 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33, 0x83, 0x3e ]
+# unbuffered_response:                               [ 0x3c, 0x00, 0x08, 0x10, 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33, 0x83, 0x3e ]
 #            crc_data:                                     [ 0x00, 0x08, 0x10, 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33 ]
 #       response_data:                                                       [ 0x30, 0x32, 0x2e, 0x31, 0x2e, 0x32, 0x33 ]
 # @endverbatim
@@ -245,7 +288,7 @@ def decode_read_response_str(unbuffered_cmd, buffered_response, name=None, missi
 ## @returns little-endian response payload as uint16
 def decode_read_response_int(unbuffered_cmd, buffered_response, name=None, missing_echo_len=0) -> int:
     response_data = decode_read_response(unbuffered_cmd, buffered_response, name, missing_echo_len)
-    result = (response_data[1] << 8) | response_data[0] 
+    result = (response_data[1] << 8) | response_data[0]
     if args.debug:
         print(f"  result:              {result}")
     return result
@@ -280,15 +323,15 @@ def send_command(SPI, ready, address, value, write_len, name=""):
     if write_len > 3:
         txData  .append((value >> 16) & 0xff) # MSB
 
-    unbuffered_cmd = [START, 0x00, write_len, address | WRITE] 
+    unbuffered_cmd = [START, 0x00, write_len, address | WRITE]
     unbuffered_cmd.extend(txData)
     unbuffered_cmd.extend([ computeCRC(unbuffered_cmd[1:]), END])
 
     # MZ: the -1 at the end was added as a kludge, because otherwise we find
-    #     a redundant '>' in the last byte.  This seems a bug, due to the 
+    #     a redundant '>' in the last byte.  This seems a bug, due to the
     #     fact that only 7 of the 8 unbuffered_cmd bytes are echoed back into
     #     the read buffer.
-    buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1 - 1) 
+    buffered_response = bytearray(len(unbuffered_cmd) + WRITE_RESPONSE_OVERHEAD + 1 - 1)
     buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
 
     with lock:
@@ -301,7 +344,7 @@ def send_command(SPI, ready, address, value, write_len, name=""):
 # Simple verification function for Integer inputs
 def fIntValidate(input):
     if input.isdigit():
-        return True                        
+        return True
     elif input == "":
         return True
     else:
@@ -357,8 +400,8 @@ class cCfgString:
     SPI   = None
 
     ##
-    # @param read_len: How many bytes of payload we expect to read back on 
-    #                  SPIRead() calls, INCLUDING address, but NOT including 
+    # @param read_len: How many bytes of payload we expect to read back on
+    #                  SPIRead() calls, INCLUDING address, but NOT including
     #                  those bytes already accounted for in READ_RESPONSE_OVERHEAD.
     #                  Defaults to 8 because that's what we use for the FPGA
     #                  version number (1 ADDR plus 7 ASCII).
@@ -376,10 +419,10 @@ class cCfgString:
         self.entry.grid(row=row, column=1)
 
     ##
-    # Read a string from the FPGA. In this script, this is only used for the 
+    # Read a string from the FPGA. In this script, this is only used for the
     # revision register.
     def SPIRead(self):
-    
+
         # MZ: I seem able to read the 7-char FPGA version whether this length is
         #     set to 1 (original) or 8 (read_len)...why?
 
@@ -387,11 +430,11 @@ class cCfgString:
         # unbuffered_cmd = [START, 0x00, self.read_len, self.address, END] # MZ: why does this command not get a CRC?  Should it?
         # buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len)  # MZ: removed spurious "+1" in original
 
-        unbuffered_cmd = fixCRC([START, 0x00, self.read_len, self.address, CRC, END]) 
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len - 1)  
+        unbuffered_cmd = fixCRC([START, 0x00, self.read_len, self.address, CRC, END])
+        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len - 1)
 
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-    
+
         # Write one buffer while reading the other
         with lock:
             cCfgString.SPI.write_readinto(buffered_cmd, buffered_response)
@@ -408,7 +451,7 @@ class cCfgString:
 
     def Update(self, force=False) -> bool:
         return False
-        
+
 ################################################################################
 #                                                                              #
 #                                 cCfgEntry                                    #
@@ -431,14 +474,14 @@ class cCfgEntry:
     # @param address:   7-bit getter "Code" from ENG-0150.  Note that as the
     #                   7-bit address is used for both read and write functions,
     #                   it does not have the "write" bit (0x80) set.
-    # @param read_len:  How many bytes of payload we expect to read back on 
-    #                   SPIRead() calls, INCLUDING address, but NOT including 
+    # @param read_len:  How many bytes of payload we expect to read back on
+    #                   SPIRead() calls, INCLUDING address, but NOT including
     #                   those bytes already accounted for in READ_RESPONSE_OVERHEAD.
     #                   Defaults to 3 because most entries are uint16 (ADDR, LSB, MSB).
-    # @param write_len: How many bytes of payload we expect to write, including 
-    #                   the ADDR byte, but not any of the bytes included in 
+    # @param write_len: How many bytes of payload we expect to write, including
+    #                   the ADDR byte, but not any of the bytes included in
     #                   WRITE_RESPONSE_OVERHEAD. This value is what will be
-    #                   passed as the "length" value at the start of the write 
+    #                   passed as the "length" value at the start of the write
     #                   frame header. Defaults to 3 because most FPGA integers
     #                   are uint16 (ADDR, LSB, MSB).
     def __init__(self, name, row, value, address, read_len=3, write_len=3):
@@ -464,33 +507,33 @@ class cCfgEntry:
     ## Read an integer from the FPGA.
     def SPIRead(self):
         print("-----> THIS IS NEVER USED <-----")
-        unbuffered_cmd = [START, 0, self.read_len, self.address, END] # MZ: changed 1 to self.read_len 
+        unbuffered_cmd = [START, 0, self.read_len, self.address, END] # MZ: changed 1 to self.read_len
         buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) # MZ: removed +1 in orig
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-    
+
         # Write one buffer while reading the other
         with lock:
             self.SPI.write_readinto(buffered_cmd, buffered_response)
         self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
-    
+
         self.stringVar.set(str(self.value))
 
     ##
     # Write an integer to the FPGA.
     #
     # @verbatim
-    # >><< CfgEntry[Integration Time].write: [ 0x3c, 0x00, 0x03, 0x91, 0x64, 0x00, 0x6a, 0x3e, 0x00, 0x00, 0x00 ] -> [ 0x3e, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x3c, 0x00, 0x3e, 0x3e ] 
+    # >><< CfgEntry[Integration Time].write: [ 0x3c, 0x00, 0x03, 0x91, 0x64, 0x00, 0x6a, 0x3e, 0x00, 0x00, 0x00 ] -> [ 0x3e, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x3c, 0x00, 0x3e, 0x3e ]
     #                                           <    (_length_)  ADDR  (LSB Value)  CRC   >                             <     ?     ?     ?     ?     ?     ?     <  SUCCESS  >     >
     #                                  offset:  0     1     2     3     4     5     6     7                             0     1     2     3     4     5     6     7     8     9    10
     #                                           \_____________unbuffered_cmd______________/             MZ: I feel that \___this should be 8 bytes not 7____/
     #                                          \__________________________buffered_cmd_________________________/        \_________________________buffered_response____________________/
     # @endverbatim
     def SPIWrite(self):
-        send_command(SPI       = self.SPI, 
-                     ready     = self.ready, 
-                     address   = self.address, 
+        send_command(SPI       = self.SPI,
+                     ready     = self.ready,
+                     address   = self.address,
                      value     = self.getTransmitValue(),
-                     write_len = self.write_len, 
+                     write_len = self.write_len,
                      name      = self.name)
 
     ## Fetch the data from the entry box and update it to the FPGA
@@ -515,7 +558,7 @@ class cCfgEntry:
 ##
 # Encapsulate both GUI comboBoxes used to specify the marshalled PixelMode.
 #
-# There is only ONE CfgCombo object instance; it is rendered as TWO comboBoxes 
+# There is only ONE CfgCombo object instance; it is rendered as TWO comboBoxes
 # on-screen, allowing convenient setting of either of its two component values.
 # The coupled values are read and written atomically.
 class cCfgCombo:
@@ -560,19 +603,19 @@ class cCfgCombo:
         unbuffered_cmd = [START, 0, self.read_len, self.address, END]
         buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) # MZ: orig had bytearray(14) (3 bytes larger)
         buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-    
+
         with lock:
             SPI.write_readinto(buffered_cmd, buffered_response)
-    
+
         self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
         self.stringVar.set(str(self.value))
-            
+
     def SPIWrite(self):
-        send_command(SPI       = self.SPI, 
-                     ready     = self.ready, 
-                     address   = self.address, 
-                     value     = self.value, 
-                     write_len = self.write_len, 
+        send_command(SPI       = self.SPI,
+                     ready     = self.ready,
+                     address   = self.address,
+                     value     = self.value,
+                     write_len = self.write_len,
                      name      = self.name)
 
     def Update(self, force=False) -> bool:
@@ -586,184 +629,6 @@ class cCfgCombo:
             self.SPIWrite()
             return True
         return False
-
-################################################################################
-#                                                                              #
-#                                 cWinEEPROM                                   #
-#                                                                              #
-################################################################################
-
-## EEPROM Control Window Class (instantiated via button event)
-class cWinEEPROM(tk.Tk):
-
-    PAGE_SIZE = 64
-    COLS = 8
-    ROWS = 8
-    
-    def __init__(self, SPI, intValidate):
-        super().__init__()
-
-        self.SPI = SPI
-        self.title("EEPROM Util")
-
-        self.frame      = tk.Frame(self)
-        self.valStrings = []
-        self.valEntries = []
-
-        for x in range(self.PAGE_SIZE):
-            self.valStrings.append(tk.StringVar(self.frame))
-        for x in range(self.PAGE_SIZE):
-            self.valEntries.append(tk.Entry(self.frame, textvariable = self.valStrings[x], width = 5))
-        for x in range(self.ROWS):
-            for y in range(self.COLS):
-                self.valEntries[((x*self.COLS)+y)].grid(row=x, column=y)
-
-        self.pageStr        = tk.StringVar(self.frame, str(0))
-        self.pageLbl        = tk.Label(self.frame, text = 'EEPROM Page').grid(row=8, column=1)
-        self.pageEnt        = tk.Entry(self.frame, textvariable = self.pageStr, validate="key", validatecommand=(intValidate, '%S'), width = 5)
-        self.pageEnt.grid(row=8, column=2)
-
-        self.readButton     = tk.Button(self.frame, text='Read Page', command=self.EEPROMRead)
-        self.readButton.grid(row=8, column=4)
-        self.writeButton    = tk.Button(self.frame, text='Write Page', command=self.EEPROMWrite)
-        self.writeButton.grid(row=8, column=6)
-
-        col_count, row_count = self.frame.grid_size()
-        for column in range(col_count):
-            self.frame.grid_columnconfigure(column, minsize = 75)
-        for row in range(row_count):
-            self.frame.grid_rowconfigure(row, minsize=30)
-        self.frame.pack()
-
-        self.EEPROMRead()
-
-        self.mainloop()
-
-    ##
-    # @para API (ENG-0150-C)
-    #
-    # 5.3 Read EEPROM
-    #
-    # Send the command to get the FPGA to read the EEPROM:
-    #   [0x3C, 0x00, 0x02, 0xB0, 0x4Y, CRC, 0x3E]    Where Y is the page number of the EEPROM you wish to read.
-    #  
-    # Wait until SPEC_BUSY is deasserted.
-    #  
-    # Read back the buffer:
-    #   [0x3C, 0x00, 0x01, 0x31, 0x24, 0x3E] (Followed by enough bytes (64) of padding to read all the buffer out).
-    #    START \_length_/  ADDR  CRC  END   MZ: why does an EEPROM 'read' command get a CRC, when cCfgString.SPIRead() does not?
-    #
-    # @warning MZ: 0x4Y only supports 10 EEPROM pages: eventual schema should support 512 pages (okay for now)
-    def EEPROMRead(self):
-        page = int(self.pageStr.get())
-
-        with lock:
-            # MZ: is 0xb0 treated as a 'write' or a 'read'?  It has the 0x80 bit high...
-            #     therefore, treating as a WRITE, therefore, reading response
-
-            # length is 0x0002 because it's the length of (addr, page_offset), not 
-            # the length of the page we're intending to read (which would be 0x0020)
-            # (this is a WRITE command to setup the subsequent READ operation)
-            unbuffered_cmd = fixCRC([START, 0, 2, 0xB0, (0x40 + page), CRC, END])
-            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)  
-            buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-
-            self.SPI.write_readinto(buffered_cmd, buffered_response)
-
-            # MZ: I tried reading a "write response" after the 0xb0 (EEPROM_READ_REQUEST) 
-            #     with its one-byte payload (EEPROM page index), but all I get is a zero 
-            #     followed by a run of START bytes.
-            #
-            # result = int(buffered_response[-2]) 
-            # print(f">><< EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)} (0x{result:02x} {errorCodeToString(result)})")
-            print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
-
-            # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
-            sleep_ms(10) # empirically determined 10ms delay
-
-            # MZ: original (and API) have length 1 here...why?  Should this not be at least 65 (addr + data)? 
-            unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END]) 
-            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: including kludged -1
-            buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-            self.SPI.write_readinto(buffered_cmd, buffered_response)
-
-        values = decode_read_response(unbuffered_cmd, buffered_response, "EEPROMRead", missing_echo_len=1)
-        debug(f"decoded {len(values)} values from EEPROM")
-
-        # update to form
-        for x in range(max(64, len(values))):
-            self.valStrings[x].set(f"{values[x]:02x}")
-
-    def EEPROMWrite(self):
-        page        = int(self.pageStr.get())
-        command     = bytearray(7)
-        EEPROMWrCmd = bytearray(70)
-        EEPROMWrCmd[0:3] = [START, 0x00, 0x41, 0xB1]
-        for x in range(0, 64):
-            EEPROMWrCmd[x+4] = int(self.valStrings[x].get(), 16)
-
-        EEPROMWrCmd[68] = 0xFF
-        EEPROMWrCmd[69] = END
-        command = [START, 0x00, 0x02, 0xB0, page | WRITE, CRC, END]
-
-        with lock:
-            self.SPI.write(EEPROMWrCmd, 0, 70)
-            debug(f">> EEPROM.write {EEPROMWrCmd}")
-            self.SPI.write(command, 0, 7)
-            debug(f">> EEPROM.write {toHex(command)}")
-
-################################################################################
-#                                                                              #
-#                                cWinAreaScan                                  #
-#                                                                              #
-################################################################################
-
-## Class container for the area scan window
-class cWinAreaScan(tk.Tk):
-
-    def __init__(self, SPI, ready, trigger, lineCount, columnCount):
-        self.SPI     = SPI
-        self.ready   = ready
-        self.trigger = trigger
-        self.title("Area Scan")
-        self.frame   = tk.Frame(self)
-        self.canvas  = tk.Canvas(self.frame, bg="black", height=lineCount, width=columnCount)
-        #This doesn't work and I don't know why /sadface
-        #   self.image   = tk.PhotoImage(height=lineCount, width=columnCount)
-        #   self.canvas.create_image((columnCount/2, lineCount/2), image=self.image, state="normal")
-        self.frame.pack()
-        self.canvas.pack()
-        with lock:
-            # Enable Area Scan
-            command = [START, 0x00, 0x03, 0x92, 0x00, 0x10, CRC, END]
-            self.SPI.write(command, 0, 8)
-            # Send a trigger
-            self.trigger.value = True
-            # Wait until the data is ready
-            SPIBuf  = bytearray(2)
-            for y in range(1, lineCount):
-                x = 0
-                waitForDataReady(self.ready)
-                self.SPI.readinto(SPIBuf)
-                pixel = (SPIBuf[0] << 8) + SPIBuf[1]
-                print("Reading line number: ", SPIBuf[0], SPIBuf[1], pixel);
-                for x in range(1, columnCount):
-                    self.SPI.readinto(SPIBuf)
-                    pixel = (((SPIBuf[0] << 8) + SPIBuf[1]) >> 4)
-                    pixelHex = hex(pixel)
-                    pixelHex = pixelHex[2:].zfill(2)
-                    color = "#" + pixelHex + pixelHex + pixelHex
-                    #self.image.put(color, (x,y))
-                    self.canvas.create_line(x-1, y, x, y, fill=color, width=1)
-                
-            # Clear the trigger
-            self.trigger.value = False
-
-            # Disable Area Scan
-            command = [START, 0x00, 0x03, 0x92, 0x00, 0x00, CRC, END]
-            self.SPI.write(command, 0, 8)
-
-        self.mainloop()
 
 ################################################################################
 #                                                                              #
@@ -800,21 +665,21 @@ class cWinMain(tk.Tk):
         cCfgCombo.ready = self.ready
 
         self.cbIntValidate = self.register(intValidate)
-        cCfgEntry.validate = self.cbIntValidate        
+        cCfgEntry.validate = self.cbIntValidate
 
         # configuration frame on the left
         self.configFrame = tk.Frame(self)
         self.configFrame.grid(row=0, column=0, sticky="n")
-        
+
         cCfgString.frame = self.configFrame
         cCfgEntry.frame  = self.configFrame
         cCfgCombo.frame  = self.configFrame
-       
+
         # main graph frame on the right
         self.drawFrame = tk.Frame(self)
 
-        self.figure = Figure(dpi=100) 
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame) 
+        self.figure = Figure(dpi=100)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame)
         self.graph = self.figure.add_subplot()
         self.graph.set_ylabel("intensity (counts)")
         self.graph.set_xlabel("pixel")
@@ -831,13 +696,13 @@ class cWinMain(tk.Tk):
         # populate all the controls within the Configuration frame
         self.initConfigFrame()
 
-        # doing this BEFORE initial FPGA initialization, because if you do it 
-        # AFTER, you'll need to re-run FPGAInit() to reset set all the 
+        # doing this BEFORE initial FPGA initialization, because if you do it
+        # AFTER, you'll need to re-run FPGAInit() to reset set all the
         # acquisition parameters
         debug("loading EEPROM")
         self.eeprom = EEPROM(self.SPI)
         self.generate_wavecal()
-        
+
         debug("writing initial values to FPGA")
         self.FPGAInit()
 
@@ -856,11 +721,11 @@ class cWinMain(tk.Tk):
         buttonRow = 0
         def rows() -> int:
             return len(self.configObjects) + buttonRow
-        
+
         # MZ: In ENG-0150-C, the following codes are listed in the "Command Table":
         #
         # Description               Getter  Setter  Get Len Set Len Notes
-        # ------------------------- ------- ------- ------- ------- -------- 
+        # ------------------------- ------- ------- ------- ------- --------
         # FPGA Version              0x10    ----    1       --      "xx.y.zz"                           # MZ: should getter payload bytes be 8 (incl
         # Integration Time          0x11    0x91    1       4       24-bit millisec                     # MZ: should getter payload bytes be 4?
         # Config Register           0x12    0x92    1       3       16-bit register                     # MZ: should getter payload bytes be 3?
@@ -875,19 +740,16 @@ class cWinMain(tk.Tk):
         #
         # Additional: 0xb0 is used for BOTH "write FPGA EEPROM buffer to EEPROM"
         #                               AND "read EEPROM data to FPGA buffer"; not sure how that works out
-        
+
         # Empty list for the config objects # Name              row     value                       address
         self.configObjects = []             # ----------------- ------- --------------------------- -------
         # Create an object for the FPGA Revision (special case, we want this box read only)
         self.configObjects.append(cCfgString("FPGA Revision"   , rows(), "00.0.00"                 , 0x10, read_len=8))
         self.configObjects[rows()-1].entry.config(state='disabled', disabledbackground='light grey', disabledforeground='black')
-        self.configObjects.append(cCfgEntry("Integration Time" , rows(), args.integration_time_ms  , 0x11, write_len=4, read_len=4)) # MZ: integration time is 24-bit
-        self.configObjects.append(cCfgEntry("Black Level"      , rows(), args.black_level          , 0x13))
+        self.configObjects.append(cCfgEntry("Integration Time" , rows(), args.integration_time_ms  , 0x11, write_len=4, read_len=4)) # note value is 24-bit
         self.configObjects.append(cCfgEntry("Detector Gain"    , rows(), args.gain_db              , 0x14))
-        self.configObjects.append(cCfgEntry("Start Line 0"     , rows(), args.start_line           , 0x50)) # Region 0
+        self.configObjects.append(cCfgEntry("Start Line 0"     , rows(), args.start_line           , 0x50))
         self.configObjects.append(cCfgEntry("Stop Line 0"      , rows(), args.stop_line            , 0x51))
-        self.configObjects.append(cCfgEntry("Start Column 0"   , rows(), args.start_col            , 0x52))
-        self.configObjects.append(cCfgEntry("Stop Column 0"    , rows(), args.stop_col             , 0x53))
 
         # Add the AD/OD combo boxes
         self.configObjects.append(cCfgCombo(rows(), "PixelMode"))
@@ -899,16 +761,9 @@ class cWinMain(tk.Tk):
 
         buttonRow += 1
 
-        # [Update] [EEPROM]
+        # [Update] [Start/Stop]
         self.btnUpdate = tk.Button(self.configFrame, text='Update', command=self.FPGAUpdate)
         self.btnUpdate.grid(row=rows(), column=0)
-        self.btnEEPROM = tk.Button(self.configFrame, text='EEPROM', command=self.openEEPROM)
-        self.btnEEPROM.grid(row=rows(), column=1)
-        buttonRow += 1
-
-        # [AreaScan] [Start/Stop]
-        self.btnAreaScan = tk.Button(self.configFrame, text='Area Scan', command=self.openAreaScan)
-        self.btnAreaScan.grid(row=rows(), column=0)
         self.textStart = tk.StringVar()
         self.textStart.set("???")
         self.btnStart = tk.Button(self.configFrame, textvariable=self.textStart, command=self.toggleStart)
@@ -974,7 +829,7 @@ class cWinMain(tk.Tk):
             pass
 
     ##
-    # @param to_disk: specify False if you only want the spectrum saved "on the 
+    # @param to_disk: specify False if you only want the spectrum saved "on the
     #                 graph" (as a historical trace)
     def save(self, to_disk=True):
         if not args.save:
@@ -1018,11 +873,11 @@ class cWinMain(tk.Tk):
 
             if args.ext_trigger:
                 debug("waiting on external trigger...")
-                waitForDataReady(self.ready) 
+                waitForDataReady(self.ready)
             else:
                 # send trigger via the FT232H
                 self.trigger.value = True
-                waitForDataReady(self.ready)    
+                waitForDataReady(self.ready)
                 self.trigger.value = False
 
             ####################################################################
@@ -1041,9 +896,9 @@ class cWinMain(tk.Tk):
                     debug(f"getSpectrum: reading block of {bytes_this_read} bytes")
                     buf = bytearray(bytes_this_read)
 
-                    # there is latency associated with this call, so call it as 
+                    # there is latency associated with this call, so call it as
                     # few times as possible (with the largest possible block size)
-                    self.SPI.readinto(buf) 
+                    self.SPI.readinto(buf)
 
                     debug(f"getSpectrum: read block of {len(buf)} bytes")
                     raw.extend(list(buf))
@@ -1056,17 +911,14 @@ class cWinMain(tk.Tk):
 
         # demarshall big-endian
         for i in range(0, len(raw)-1, 2):
-            spectrum.append((raw[i] << 8) | raw[i+1]) 
+            spectrum.append((raw[i] << 8) | raw[i+1])
         debug(f"getSpectrum: {len(spectrum)} pixels read")
 
-        # stomp leading pixels
-        for i in range(args.stomp_first):
-            spectrum[i] = spectrum[args.stomp_first]
         return spectrum
 
     ## @todo probably faster if we used set_ydata()
     def graphSpectrum(self, y, label="live"):
-        if self.wavenumbers is not None: 
+        if self.wavenumbers is not None:
             x = self.wavenumbers
         elif self.wavelengths is not None:
             x = self.wavelengths
@@ -1096,7 +948,7 @@ class cWinMain(tk.Tk):
         # post-process
         spectrum = self.apply2x2Binning(spectrum)
         self.lastSpectrum = spectrum
-        self.pixels = len(spectrum) 
+        self.pixels = len(spectrum)
         debug(f"read {len(spectrum)} pixels")
 
         # graph
@@ -1109,7 +961,7 @@ class cWinMain(tk.Tk):
             self.schedule_acquire(args.delay_ms + self.getValue("Integration Time"))
 
         # for test()
-        return spectrum 
+        return spectrum
 
     def schedule_acquire(self, ms):
         debug(f"scheduling next tick in {ms}ms")
@@ -1129,16 +981,20 @@ class cWinMain(tk.Tk):
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
 
-        # zero-out undocumented opcodes (apparently one or more of these is required)
-        for address, name in [ (0x54, "Start Line 1"),
-                               (0x55, "Stop Line 1"), 
-                               (0x56, "Start Column 1"),
-                               (0x57, "Stop Column 1"),
-                               (0x58, "Desmile") ]:
-            send_command(SPI       = self.SPI, 
-                         ready     = self.ready, 
-                         address   = address, 
-                         value     = 0,
+        # hardcode acquisition parameters not currently exposed by the GUI
+        for address, value, name in [ 
+                (0x13,    0, "Black Level"),
+                (0x52,   12, "Start Column 0"),     
+                (0x53, 1932, "Stop Column 0"),
+                (0x54,    0, "Start Line 1"),
+                (0x55,    0, "Stop Line 1"),
+                (0x56,    0, "Start Column 1"),
+                (0x57,    0, "Stop Column 1"),
+                (0x58,    0, "Desmile") ]:
+            send_command(SPI       = self.SPI,
+                         ready     = self.ready,
+                         address   = address,
+                         value     = value,
                          write_len = 3,
                          name      = name)
 
@@ -1163,32 +1019,10 @@ class cWinMain(tk.Tk):
             if cfgObj.Update(force=force):
                 changed = True
 
-        # track this so we know how many pixels to read on the next Acquire
-        self.pixels = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
-
         # take throwaways if any acquisition parameters changed
         if changed:
             print(f"taking throwaways (pixels now {self.pixels})")
             self.take_throwaways()
-
-    def openEEPROM(self):
-        debug("opening EEPROM")
-        with lock:
-            self.acquireActive = False
-        self.winEEPROM = cWinEEPROM(self.SPI, self.cbIntValidate)
-
-    def openAreaScan(self):
-        debug("opening Area Scan")
-        with lock:
-            self.acquireActive = False
-        # Give time for the last acquisition to complete 
-        sleep_ms(100 + args.integration_time_ms)
-        lineCount   = self.getValue("Stop Line 0") - self.getValue("Start Line 0")
-        columnCount = self.getValue("Stop Column 0") - self.getValue("Start Column 0")
-        self.winAreaScan   = cWinAreaScan(self.SPI, self.ready, self.trigger, lineCount, columnCount)
-        with lock:
-            self.acquireActive = True
-        self.schedule_acquire(args.delay_ms)
 
     ############################################################################
     #                                                                          #
@@ -1215,23 +1049,24 @@ class cWinMain(tk.Tk):
         self.max_elapsed_ms = -1
 
         self.spectra = []
-        self.headers = []
+        self.headers = { "label": [], "elapsed": [] }
         for i in range(args.test_count):
             debug(f"starting test measurement {i+1:3d}/{args.test_count}")
-            this_start = datetime.datetime.now()
+            time_start = datetime.datetime.now()
 
             debug("calling acquire")
             spectrum = self.Acquire(graph=False)
             debug("back from acquire")
 
-            this_elapsed_ms = (datetime.datetime.now() - this_start).total_seconds() * 1000.0
-            self.min_elapsed_ms = min(this_elapsed_ms, self.min_elapsed_ms)
-            self.max_elapsed_ms = max(this_elapsed_ms, self.max_elapsed_ms)
+            elapsed_ms = (datetime.datetime.now() - time_start).total_seconds() * 1000.0
+            self.min_elapsed_ms = min(elapsed_ms, self.min_elapsed_ms)
+            self.max_elapsed_ms = max(elapsed_ms, self.max_elapsed_ms)
 
-            print(f"collected {i+1:3d}/{args.test_count} ({this_elapsed_ms:.2f}ms)")
+            print(f"collected {i+1:3d}/{args.test_count} ({elapsed_ms:.2f}ms)")
 
             self.spectra.append(spectrum)
-            self.headers.append(f"meas-{i+1:02d}")
+            self.headers["label"].append(f"meas-{i+1:02d}")
+            self.headers["elapsed"].append(elapsed_ms)
 
             sleep_ms(args.delay_ms)
 
@@ -1252,23 +1087,27 @@ class cWinMain(tk.Tk):
         print("=" * 50)
 
         ########################################################################
-        # Ramp
+        # Linearity Ramp (optional)
         ########################################################################
 
-        for ms in range(args.test_ramp_start, args.test_ramp_stop + 1, args.test_ramp_incr):
-            print(f"collecting ramp measurement at {ms}ms")
-            self.configMap["Integration Time"].Override(ms)
-            self.take_throwaways()
+        if args.test_linearity:
+            for ms in range(args.test_ramp_start, args.test_ramp_stop + 1, args.test_ramp_incr):
+                print(f"collecting ramp measurement at {ms}ms")
+                self.configMap["Integration Time"].Override(ms)
+                self.take_throwaways()
 
-            spectrum = self.Acquire()
-            self.btnTest.update_idletasks()
+                time_start = datetime.datetime.now()
+                spectrum = self.Acquire()
+                elapsed_ms = (datetime.datetime.now() - time_start).total_seconds() * 1000.0
+                self.btnTest.update_idletasks()
 
-            self.spectra.append(spectrum)
-            self.headers.append(f"ramp-{ms}ms")
+                self.spectra.append(spectrum)
+                self.headers["label"].append(f"ramp-{ms}ms")
+                self.headers["elapsed"].append(elapsed_ms)
 
-            self.save(to_disk=False)
-            self.btnTest.update_idletasks()
-            sleep_ms(args.delay_ms)
+                self.save(to_disk=False)
+                self.btnTest.update_idletasks()
+                sleep_ms(args.delay_ms)
 
         ########################################################################
         # Done
@@ -1295,12 +1134,19 @@ class cWinMain(tk.Tk):
                 outfile.write(f"{key}, {getattr(self, key)}\n")
             outfile.write("\n")
 
-            # header row
+            # extra header rows
+            for key in self.headers:
+                if key != "label":
+                    outfile.write(",")
+                    for value in self.headers[key]:
+                        outfile.write(f", {value}")
+
+            # label header row
             outfile.write("pixel, wavelength")
             if self.wavenumbers is not None:
                 outfile.write(", wavenumber")
-            for header in self.headers:
-                outfile.write(f", {header}")
+            for label in self.headers["label"]:
+                outfile.write(f", {label}")
             outfile.write("\n")
 
             # data
@@ -1314,11 +1160,10 @@ class cWinMain(tk.Tk):
         print(f"saved {pathname}")
 
     def generate_wavecal(self):
-        # cache for --fast (should be 1920 for IMX385)
-        self.pixels = self.eeprom.active_pixels_horizontal 
+        self.pixels = self.eeprom.active_pixels_horizontal
 
         self.wavelengths = []
-        for i in range(self.pixels): 
+        for i in range(self.pixels):
             wavelength = self.eeprom.wavelength_coeffs[0]               \
                        + self.eeprom.wavelength_coeffs[1] * i           \
                        + self.eeprom.wavelength_coeffs[2] * i * i       \
@@ -1343,9 +1188,8 @@ class cWinMain(tk.Tk):
 #                                                                              #
 ################################################################################
 
-## @todo: update cWinEEPROM to use this class
 class EEPROM:
-    
+
     def __init__(self, SPI):
         self.SPI = SPI
 
@@ -1363,7 +1207,7 @@ class EEPROM:
         with lock:
             # send 0xb0 command to tell FPGA to load EEPROM page into FPGA buffer
             unbuffered_cmd = fixCRC([START, 0, 2, 0xB0, 0x40 + page, CRC, END])
-            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)  
+            buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)
             buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
             self.SPI.write_readinto(buffered_cmd, buffered_response)
             print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
@@ -1372,7 +1216,7 @@ class EEPROM:
             sleep_ms(10) # empirically determined 10ms delay
 
             # send 0x31 command to read the buffered page from the FPGA
-            unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END]) 
+            unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END])
             buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: including kludged -1
             buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
             self.SPI.write_readinto(buffered_cmd, buffered_response)
@@ -1405,13 +1249,13 @@ class EEPROM:
         self.roi_vertical_region_1_start     = self.unpack((2, 31,  2), "H" if self.format >= 4 else "h")
         self.roi_vertical_region_1_end       = self.unpack((2, 33,  2), "H" if self.format >= 4 else "h")
 
-        debug(f"ACTUAL pixels horizontal: {self.actual_horizontal}") 
+        debug(f"ACTUAL pixels horizontal: {self.actual_horizontal}")
         debug(f"ACTIVE pixels horizontal: {self.active_pixels_horizontal}")
         debug(f"  active pixels vertical: {self.active_pixels_vertical}")
         debug(f"          horizontal ROI: ({self.roi_horizontal_start}, {self.roi_horizontal_end})")
         debug(f"            vertical ROI: ({self.roi_vertical_region_1_start}, {self.roi_vertical_region_1_end})")
 
-    ## 
+    ##
     # Unpack a single field at a given buffer offset of the given datatype.
     #
     # @param address    a tuple of the form (buf, offset, len)
@@ -1459,6 +1303,8 @@ class EEPROM:
 
 # parse command-line args (user may need different trigger/ready pins)
 args = parseArgs(sys.argv)
+if not runnable:
+    sys.exit(1)
 
 # Initialize the SPI bus on the FT232H
 SPI = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
