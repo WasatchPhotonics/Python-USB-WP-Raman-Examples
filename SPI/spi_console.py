@@ -156,7 +156,7 @@ def parseArgs(argv):
     parser.add_argument("--test-ramp-incr",      type=int,   default=1,            help="increment ramp at this integration time")
     parser.add_argument("--throwaways",          type=int,   default=3,            help="automatic throwaway measurements")
     parser.add_argument("--block-size",          type=int,   default=256,          help="block size for --fast SPI reads")
-    parser.add_argument("--excitation-nm",       type=float, default=0,            help="laser excitation wavelength (used to generate wavenumber axis)")
+    parser.add_argument("--excitation-nm",       type=float, default=-1,           help="laser excitation wavelength (creates wavenumber axis if positive)")
     parser.add_argument("--save",                type=bool,  default=True,         help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--test-linearity",      action="store_true",              help="after data collection, test linearity by ramping integration time")
     parser.add_argument("--paused",              action="store_true",              help="launch with acquisition paused")
@@ -681,8 +681,6 @@ class cWinMain(tk.Tk):
         self.figure = Figure(dpi=100)
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.drawFrame)
         self.graph = self.figure.add_subplot()
-        self.graph.set_ylabel("intensity (counts)")
-        self.graph.set_xlabel("pixel")
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.drawFrame.grid(row=0, column=1, sticky="news")
         self.grid_rowconfigure(0, weight=1)
@@ -701,6 +699,9 @@ class cWinMain(tk.Tk):
         # acquisition parameters
         debug("loading EEPROM")
         self.eeprom = EEPROM(self.SPI)
+        if args.excitation_nm < 0:
+            args.excitation_nm = self.eeprom.excitation_nm_float
+
         self.generate_wavecal()
 
         debug("writing initial values to FPGA")
@@ -926,7 +927,9 @@ class cWinMain(tk.Tk):
             x = range(len(y))
 
         self.graph.plot(x, y, linewidth=0.5, label=label)
+        self.update_axes()
         self.graph.legend()
+
         self.canvas.draw()
 
     def initGraph(self):
@@ -1182,6 +1185,10 @@ class cWinMain(tk.Tk):
                 self.wavenumbers.append(wavenumber)
             debug(f"wavenumbers = ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f})")
 
+    def update_axes(self):
+        xlabel = "wavelength (nm)" if self.wavenumbers is None else "wavenumber (cm⁻¹)"
+        self.figure.get_axes()[0].set_xlabel(xlabel)
+
 ################################################################################
 #                                                                              #
 #                                  EEPROM                                      #
@@ -1249,9 +1256,12 @@ class EEPROM:
         self.roi_vertical_region_1_start     = self.unpack((2, 31,  2), "H" if self.format >= 4 else "h")
         self.roi_vertical_region_1_end       = self.unpack((2, 33,  2), "H" if self.format >= 4 else "h")
 
+        self.excitation_nm_float             = self.unpack((3, 36,  4), "f", "excitation(float)")
+
         debug(f"ACTUAL pixels horizontal: {self.actual_horizontal}")
         debug(f"ACTIVE pixels horizontal: {self.active_pixels_horizontal}")
         debug(f"  active pixels vertical: {self.active_pixels_vertical}")
+        debug(f"         excitation (nm): {self.excitation_nm_float}")
         debug(f"          horizontal ROI: ({self.roi_horizontal_start}, {self.roi_horizontal_end})")
         debug(f"            vertical ROI: ({self.roi_vertical_region_1_start}, {self.roi_vertical_region_1_end})")
 
