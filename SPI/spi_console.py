@@ -1,5 +1,5 @@
 """
-This is a command-line script provided to test Wasach Photonics Series-V (SiG)
+This is a command-line script provided to test Wasach Photonics Series-XS (SiG)
 spectrometers using a SPI interface.
 
 It provides a real-time GUI allowing the user to control integration time, 
@@ -81,6 +81,8 @@ import time
 import sys
 import os
 
+from statistics import median
+
 def checkZadig():
     if platform.system() == "Windows":
         print("Ensure you've followed the Zadig process in https://github.com/WasatchPhotonics/ENLIGHTEN/blob/main/README_SPI.md")
@@ -153,7 +155,7 @@ def parseArgs(argv):
         pass
 
     parser = argparse.ArgumentParser(
-        description="GUI to test XS embedded spectrometers via SPI and FT232H adapter",
+        description="GUI to test Wasatch Photonics Series-XS (SiG) embedded spectrometers via SPI and FT232H adapter",
         epilog=globals()['__doc__'],
         formatter_class=CustomFormatter)
 
@@ -972,7 +974,13 @@ class cWinMain(tk.Tk):
         self.max_elapsed_ms = -1
 
         self.spectra = []
-        self.headers = { "label": [], "elapsed_ms": [] }
+        self.headers = { 
+            "label": [], 
+            "elapsed_ms": [],
+            "lo": [],
+            "hi": [],
+            "median": []
+        }
         for i in range(args.test_count):
             debug(f"starting test measurement {i+1:3d}/{args.test_count}")
             time_start = datetime.datetime.now()
@@ -987,9 +995,16 @@ class cWinMain(tk.Tk):
 
             print(f"collected {i+1:3d}/{args.test_count} ({elapsed_ms:.2f}ms)")
 
+            med = median(spectrum)
+            hi = max(spectrum)
+            lo = min(spectrum)
+
             self.spectra.append(spectrum)
             self.headers["label"].append(f"meas-{i+1:02d}")
             self.headers["elapsed_ms"].append(elapsed_ms)
+            self.headers["median"].append(med)
+            self.headers["lo"].append(lo)
+            self.headers["hi"].append(hi)
 
             sleep_ms(args.delay_ms)
 
@@ -999,14 +1014,14 @@ class cWinMain(tk.Tk):
         # Metrics
         ########################################################################
 
-        self.elapsed_ms     = (self.test_stop - self.test_start).total_seconds() * 1000.0
-        self.scan_period_ms = self.elapsed_ms / args.test_count
-        self.scan_rate      = 1000.0 / self.scan_period_ms
+        self.elapsed_ms = (self.test_stop - self.test_start).total_seconds() * 1000.0
+        self.avg_measurement_period_ms = self.elapsed_ms / args.test_count
+        self.scan_rate = 1000.0 / self.avg_measurement_period_ms
 
         print("=" * 50)
-        print(f"Elapsed:     {self.elapsed_ms:.2f}ms for {args.test_count} measurements (total)")
-        print(f"Scan Period: {self.scan_period_ms:.2f}ms per measurement (mean) (min {self.min_elapsed_ms:.2f}, max {self.max_elapsed_ms:.2f})")
-        print(f"Scan Rate:   {self.scan_rate:.2f} measurements/sec (mean)")
+        print(f"Total Elapsed:   {self.elapsed_ms:.2f} ms for {args.test_count} measurements")
+        print(f"Avg Meas Period: {self.avg_measurement_period_ms:.2f} ms per measurement (min {self.min_elapsed_ms:.2f}, max {self.max_elapsed_ms:.2f})")
+        print(f"Avg Scan Rate:   {self.scan_rate:.2f} measurements/sec")
         print("=" * 50)
 
         ########################################################################
@@ -1055,7 +1070,7 @@ class cWinMain(tk.Tk):
                 outfile.write(f"args.{key}, {value}\n")
             for key, value in self.eeprom.__dict__.items():
                 outfile.write(f"eeprom.{key}, {value}\n")
-            for key in ['test_start', 'test_stop', 'elapsed_ms', 'min_elapsed_ms', 'max_elapsed_ms', 'scan_period_ms', 'scan_rate']:
+            for key in ['test_start', 'test_stop', 'elapsed_ms', 'min_elapsed_ms', 'max_elapsed_ms', 'avg_measurement_period_ms', 'scan_rate']:
                 outfile.write(f"metrics.{key}, {getattr(self, key)}\n")
             outfile.write("\n")
 
@@ -1066,7 +1081,7 @@ class cWinMain(tk.Tk):
                     if self.wavenumbers is not None:
                         outfile.write(",")
                     for value in self.headers[key]:
-                        outfile.write(f", {value}")
+                        outfile.write(f", {value:.2f}")
                     outfile.write("\n")
 
             # label header row
