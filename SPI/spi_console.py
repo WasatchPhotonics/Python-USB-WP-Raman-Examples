@@ -46,8 +46,8 @@ Troubleshooting
       READY/TRIGGER pins correctly, both on the FT232H and cmd-line args
 
 Deprecated Features
-    Area Scan, Horizontal ROI, Multiple ROI, Desmile, Black Level and EEPROM 
-    Write features have been removed for simplicity, as they are not being 
+    Area Scan, Horizontal ROI, Multiple ROI, Desmile, Black Level, Pixel Mode and
+    EEPROM Write features have been removed for simplicity, as they are not being 
     actively tested at this time.  They can be restored by borrowing and updating
     the relevant code from earlier commits (see tag spi_console_removing_unused).
 
@@ -121,6 +121,21 @@ WRITE = 0x80                # bit changing opcodes from 'getter' to 'setter'
 CRC   = 0xff                # for readability
 DATA_DIR = "data"           # under the current working directory
 MIN_DELAY_MS = 100          # varies by hardware / OS -- this is to ensure responsive GUI, even with --debug
+
+# these acquisition are not currently exposed by the GUI 
+HARDCODED_PARAMETERS = [
+   # addr value len name
+   # ---- ----- --- -----------
+    (0x2B,    3, 2, "Pixel Mode"),
+    (0x13,    0, 3, "Black Level"),
+    (0x52,   12, 3, "Start Column 0"),     
+    (0x53, 1932, 3, "Stop Column 0"),
+    (0x54,    0, 3, "Start Line 1"),
+    (0x55,    0, 3, "Stop Line 1"),
+    (0x56,    0, 3, "Start Column 1"),
+    (0x57,    0, 3, "Stop Column 1"),
+    (0x58,    0, 3, "Desmile") 
+]
 
 ################################################################################
 #                                                                              #
@@ -551,87 +566,6 @@ class cCfgEntry:
 
 ################################################################################
 #                                                                              #
-#                                 cCfgCombo                                    #
-#                                                                              #
-################################################################################
-
-##
-# Encapsulate both GUI comboBoxes used to specify the marshalled PixelMode.
-#
-# There is only ONE CfgCombo object instance; it is rendered as TWO comboBoxes
-# on-screen, allowing convenient setting of either of its two component values.
-# The coupled values are read and written atomically.
-class cCfgCombo:
-
-    # Static class variables used for comms
-    frame       = None
-    SPI         = None
-
-    ##
-    # Init class defines the objects name, default value, and FPGA Address
-    # Creates a label for the item.
-    #
-    # @param write_len: defaults to 2 (we're writing both ADDR and the 1-byte value)
-    # @param read_len: defaults to 2 (we're reading both ADDR and the 1-byte value)
-    def __init__(self, row, name, write_len=2, read_len=2):
-        self.name       = name
-        self.value      = 0x03         # default to 00000011b (both AD and OD set to 12-bit)
-        self.address    = 0x2B
-        self.row        = row
-        self.write_len  = write_len
-        self.read_len   = read_len
-
-        self.labels     = []
-        self.labels.append(tk.Label(cCfgCombo.frame, text = "AD Resolution"))
-        self.labels[0].grid(row=row, column=0)
-        self.labels.append(tk.Label(cCfgCombo.frame, text = "Output Resolution"))
-        self.labels[1].grid(row=(row+1), column=0)
-        self.stringVar  = []
-        self.stringVar.append(tk.StringVar(cCfgCombo.frame))
-        self.stringVar.append(tk.StringVar(cCfgCombo.frame))
-        self.comboBox = []
-        self.comboBox.append(ttk.Combobox(cCfgCombo.frame, textvariable = self.stringVar[0], values=('10', '12'), state='readonly', width = 4))
-        self.comboBox[0].grid(row=row, column=1)
-        self.comboBox[0].current(1)
-        self.comboBox.append(ttk.Combobox(cCfgCombo.frame, textvariable = self.stringVar[1], values=('10', '12'), state='readonly', width = 4))
-        self.comboBox[1].grid(row=(row+1), column=1)
-        self.comboBox[1].current(1)
-
-    # Read single byte from the FPGA.
-    def SPIRead(self):
-        print("-----> THIS IS NEVER USED <-----")
-        unbuffered_cmd = [START, 0, self.read_len, self.address, END]
-        buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + self.read_len) # MZ: orig had bytearray(14) (3 bytes larger)
-        buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-
-        with lock:
-            SPI.write_readinto(buffered_cmd, buffered_response)
-
-        self.value = decode_read_response_int(unbuffered_cmd, buffered_response, self.name)
-        self.stringVar.set(str(self.value))
-
-    def SPIWrite(self):
-        send_command(SPI       = self.SPI,
-                     ready     = self.ready,
-                     address   = self.address,
-                     value     = self.value,
-                     write_len = self.write_len,
-                     name      = self.name)
-
-    def Update(self, force=False) -> bool:
-        newValue = 0
-        if self.stringVar[0].get() == '12':
-            newValue += 2
-        if self.stringVar[1].get() == '12':
-            newValue += 1
-        if self.value != newValue or force:
-            self.value = newValue
-            self.SPIWrite()
-            return True
-        return False
-
-################################################################################
-#                                                                              #
 #                                 cWinMain                                     #
 #                                                                              #
 ################################################################################
@@ -661,8 +595,6 @@ class cWinMain(tk.Tk):
         cCfgString.SPI  = self.SPI
         cCfgEntry.SPI   = self.SPI
         cCfgEntry.ready = self.ready
-        cCfgCombo.SPI   = self.SPI
-        cCfgCombo.ready = self.ready
 
         self.cbIntValidate = self.register(intValidate)
         cCfgEntry.validate = self.cbIntValidate
@@ -673,7 +605,6 @@ class cWinMain(tk.Tk):
 
         cCfgString.frame = self.configFrame
         cCfgEntry.frame  = self.configFrame
-        cCfgCombo.frame  = self.configFrame
 
         # main graph frame on the right
         self.drawFrame = tk.Frame(self)
@@ -751,9 +682,6 @@ class cWinMain(tk.Tk):
         self.configObjects.append(cCfgEntry("Detector Gain"    , rows(), args.gain_db              , 0x14))
         self.configObjects.append(cCfgEntry("Start Line 0"     , rows(), args.start_line           , 0x50))
         self.configObjects.append(cCfgEntry("Stop Line 0"      , rows(), args.stop_line            , 0x51))
-
-        # Add the AD/OD combo boxes
-        self.configObjects.append(cCfgCombo(rows(), "PixelMode"))
 
         # store a key-value dict for name-based lookups
         self.configMap = {}
@@ -984,21 +912,13 @@ class cWinMain(tk.Tk):
         for x in range(1, len(self.configObjects)):
             self.configObjects[x].SPIWrite()
 
-        # hardcode acquisition parameters not currently exposed by the GUI
-        for address, value, name in [ 
-                (0x13,    0, "Black Level"),
-                (0x52,   12, "Start Column 0"),     
-                (0x53, 1932, "Stop Column 0"),
-                (0x54,    0, "Start Line 1"),
-                (0x55,    0, "Stop Line 1"),
-                (0x56,    0, "Start Column 1"),
-                (0x57,    0, "Stop Column 1"),
-                (0x58,    0, "Desmile") ]:
+        # initialize fixed acquisition parameters not currently exposed by the GUI
+        for address, value, write_len, name in HARDCODED_PARAMETERS:
             send_command(SPI       = self.SPI,
                          ready     = self.ready,
                          address   = address,
                          value     = value,
-                         write_len = 3,
+                         write_len = write_len,
                          name      = name)
 
         self.take_throwaways()
@@ -1052,7 +972,7 @@ class cWinMain(tk.Tk):
         self.max_elapsed_ms = -1
 
         self.spectra = []
-        self.headers = { "label": [], "elapsed": [] }
+        self.headers = { "label": [], "elapsed_ms": [] }
         for i in range(args.test_count):
             debug(f"starting test measurement {i+1:3d}/{args.test_count}")
             time_start = datetime.datetime.now()
@@ -1069,7 +989,7 @@ class cWinMain(tk.Tk):
 
             self.spectra.append(spectrum)
             self.headers["label"].append(f"meas-{i+1:02d}")
-            self.headers["elapsed"].append(elapsed_ms)
+            self.headers["elapsed_ms"].append(elapsed_ms)
 
             sleep_ms(args.delay_ms)
 
@@ -1106,7 +1026,7 @@ class cWinMain(tk.Tk):
 
                 self.spectra.append(spectrum)
                 self.headers["label"].append(f"ramp-{ms}ms")
-                self.headers["elapsed"].append(elapsed_ms)
+                self.headers["elapsed_ms"].append(elapsed_ms)
 
                 self.save(to_disk=False)
                 self.btnTest.update_idletasks()
@@ -1129,20 +1049,25 @@ class cWinMain(tk.Tk):
             outfile.write(f"spi_console, {VERSION}\n")
             for key, value in self.configMap.items():
                 outfile.write(f"cfg.{key}, {value.value}\n")
+            for address, value, write_len, name in HARDCODED_PARAMETERS:
+                outfile.write(f"fixed.{name}, {value}\n")
             for key, value in args.__dict__.items():
                 outfile.write(f"args.{key}, {value}\n")
             for key, value in self.eeprom.__dict__.items():
                 outfile.write(f"eeprom.{key}, {value}\n")
             for key in ['test_start', 'test_stop', 'elapsed_ms', 'min_elapsed_ms', 'max_elapsed_ms', 'scan_period_ms', 'scan_rate']:
-                outfile.write(f"{key}, {getattr(self, key)}\n")
+                outfile.write(f"metrics.{key}, {getattr(self, key)}\n")
             outfile.write("\n")
 
             # extra header rows
             for key in self.headers:
                 if key != "label":
-                    outfile.write(",")
+                    outfile.write(f", {key}")
+                    if self.wavenumbers is not None:
+                        outfile.write(",")
                     for value in self.headers[key]:
                         outfile.write(f", {value}")
+                    outfile.write("\n")
 
             # label header row
             outfile.write("pixel, wavelength")
