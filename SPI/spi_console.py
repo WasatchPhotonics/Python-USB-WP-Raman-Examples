@@ -1019,6 +1019,7 @@ class cWinMain(tk.Tk):
         self.scan_rate = 1000.0 / self.avg_measurement_period_ms
 
         print("=" * 50)
+        print(f"Settings:        {args.baud_mhz} MHz with block size {args.block_size} bytes")
         print(f"Total Elapsed:   {self.elapsed_ms:.2f} ms for {args.test_count} measurements")
         print(f"Avg Meas Period: {self.avg_measurement_period_ms:.2f} ms per measurement (min {self.min_elapsed_ms:.2f}, max {self.max_elapsed_ms:.2f})")
         print(f"Avg Scan Rate:   {self.scan_rate:.2f} measurements/sec")
