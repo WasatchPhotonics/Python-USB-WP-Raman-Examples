@@ -240,7 +240,7 @@ class Fixture(object):
         spectrum = []
         for endpoint in endpoints:
             self.debug(f"waiting for {block_len_bytes} bytes from endpoint 0x{endpoint:02x} (timeout {timeout_ms}ms)")
-            data = self.device_type.read(self.device, endpoint, block_len_bytes, timeout=timeout_ms)
+            data = self.device.read(endpoint, block_len_bytes, timeout=timeout_ms)
             log.debug("read %d bytes", len(data))
 
             subspectrum = [int(i | (j << 8)) for i, j in zip(data[::2], data[1::2])] # LSB-MSB
