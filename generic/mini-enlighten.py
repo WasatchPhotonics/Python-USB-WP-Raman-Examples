@@ -235,7 +235,7 @@ class Fixture(object):
 
         spectrum = []
         for endpoint in endpoints:
-            self.debug("waiting for %d bytes (timeout %dms)", block_len_bytes, timeout_ms)
+            self.debug("waiting for %d bytes from endpoint 0x%02x (timeout %dms)", block_len_bytes, endpoint, timeout_ms)
             data = self.device_type.read(self.device, endpoint, block_len_bytes, timeout=timeout_ms)
             log.debug("read %d bytes", len(data))
 
@@ -247,6 +247,9 @@ class Fixture(object):
             if self.pixels == 2048 and self.pid != 0x4000: 
                 log.debug("sleeping 5ms between endpoints")
                 sleep(0.005)
+
+        if len(spectrum) != self.pixels:
+            print(f"This is an obviously incomplete spectrum (received {len(spectrum)}, expected {self.pixels})")
 
         self.get_fpga_configuration_register(f"after spectrum {self.spectrum_count}")
 
