@@ -224,7 +224,7 @@ class Fixture(object):
 
         endpoints = [0x82]
         block_len_bytes = self.pixels * 2
-        if pixels == 2048 and self.pid != 0x4000: # ARM doesn't need this
+        if self.pixels == 2048 and self.pid != 0x4000: # ARM doesn't need this
             endpoints = [0x82, 0x86]
             block_len_bytes = 2048 # 1024 pixels apiece from two endpoints
 
@@ -239,7 +239,7 @@ class Fixture(object):
 
         spectrum = []
         for endpoint in endpoints:
-            self.debug("waiting for %d bytes from endpoint 0x%02x (timeout %dms)", block_len_bytes, endpoint, timeout_ms)
+            self.debug(f"waiting for {block_len_bytes} bytes from endpoint 0x{endpoint:02x} (timeout {timeout_ms}ms)")
             data = self.device_type.read(self.device, endpoint, block_len_bytes, timeout=timeout_ms)
             log.debug("read %d bytes", len(data))
 
