@@ -212,14 +212,42 @@ class Fixture(object):
         self.set_cmd(0xd8, wValue=0xa46, label="SET_DETECTOR_TEC_SETPOINT")
         self.get_fpga_configuration_register(f"after SET_DETECTOR_TEC_SETPOINT")
 
+    ## @see wasatch.FeatureIdentificationDevice.get_line
     def get_spectrum(self):
         self.get_fpga_configuration_register(f"before spectrum {self.spectrum_count}")
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(0xad, 1)
-        data = self.device.read(0x82, self.pixels * 2, timeout=timeout_ms)
+
+        endpoints = [0x82]
+        block_len_bytes = self.pixels * 2
+        if pixels == 2048 and self.pid != 0x4000: # ARM doesn't need this
+            endpoints = [0x82, 0x86]
+            block_len_bytes = 2048 # 1024 pixels apiece from two endpoints
+
+        if self.pid == 0x4000:
+            # assume all ARMs are IMX (this isn't actually true)
+            #
+            # we have no idea if microRaman has to "wake up" the sensor, so wait
+            # long enough for 6 throwaway frames if need be
+            timeout_ms = self.args.integration_time_ms * 8 + 500
+        else:
+            timeout_ms = self.args.integration_time_ms * 2 + 1000 
+
         spectrum = []
-        for i in range(0, len(data), 2):
-            spectrum.append(data[i] | (data[i+1] << 8))
+        for endpoint in endpoints:
+            self.debug("waiting for %d bytes (timeout %dms)", block_len_bytes, timeout_ms)
+            data = self.device_type.read(self.device, endpoint, block_len_bytes, timeout=timeout_ms)
+            log.debug("read %d bytes", len(data))
+
+            subspectrum = [int(i | (j << 8)) for i, j in zip(data[::2], data[1::2])] # LSB-MSB
+            spectrum.extend(subspectrum)
+
+            # empirically determined need for 5ms delay when switching endpoints
+            # on 2048px detectors during area scan
+            if self.pixels == 2048 and self.pid != 0x4000: 
+                log.debug("sleeping 5ms between endpoints")
+                sleep(0.005)
+
         self.get_fpga_configuration_register(f"after spectrum {self.spectrum_count}")
 
         self.spectrum_count += 1
