@@ -137,9 +137,13 @@ class Fixture(object):
     # opcodes
     ############################################################################
 
+    ##
+    # @note there is no 0xb3 GET_FPGA_CONFIGURATION_REGISTER in ENG-0001 -- this
+    # was for an internal FW test
     def get_fpga_configuration_register(self, label=""):
-        raw = self.get_cmd(0xb3, lsb_len=2)
-        print(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
+        # raw = self.get_cmd(0xb3, lsb_len=2)
+        # print(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
+        pass
 
     def read_eeprom(self):
         self.buffers = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
