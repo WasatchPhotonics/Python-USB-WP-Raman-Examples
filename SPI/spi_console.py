@@ -462,6 +462,8 @@ class cCfgString:
         # Set the text in the entry box
         self.stringVar.set(self.value)
 
+        debug(f"{self.name} = {self.value}")
+
     # This script currently does not write any string data to the FPGA via SPI.
     def SPIWrite(self):
         pass
