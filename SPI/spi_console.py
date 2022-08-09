@@ -77,6 +77,7 @@ import datetime
 import platform
 import logging
 import struct
+import math
 import time
 import sys
 import os
@@ -888,6 +889,7 @@ class cWinMain(tk.Tk):
 
         # graph
         if graph:
+            debug(f"graphing spectrum: y {spectrum[:5]}, x {self.wavelengths[:5]}")
             self.initGraph()
             self.graphSpectrum(spectrum)
 
@@ -1107,14 +1109,17 @@ class cWinMain(tk.Tk):
 
     def generate_wavecal(self):
         self.pixels = self.eeprom.active_pixels_horizontal
+        coeffs = self.eeprom.wavelength_coeffs
+        if math.isnan(coeffs[4]):
+            coeffs[4] = 0
 
         self.wavelengths = []
         for i in range(self.pixels):
-            wavelength = self.eeprom.wavelength_coeffs[0]               \
-                       + self.eeprom.wavelength_coeffs[1] * i           \
-                       + self.eeprom.wavelength_coeffs[2] * i * i       \
-                       + self.eeprom.wavelength_coeffs[3] * i * i * i   \
-                       + self.eeprom.wavelength_coeffs[4] * i * i * i * i
+            wavelength = coeffs[0]               \
+                       + coeffs[1] * i           \
+                       + coeffs[2] * i * i       \
+                       + coeffs[3] * i * i * i   \
+                       + coeffs[4] * i * i * i * i
             self.wavelengths.append(wavelength)
         debug(f"wavelengths = ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f})")
 
