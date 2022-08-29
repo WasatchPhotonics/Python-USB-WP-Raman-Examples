@@ -6,3 +6,4 @@
 *.bak
 *.zip
 .DS_Store
+.vs/
