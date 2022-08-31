@@ -22,5 +22,4 @@ async def main():
     service_chars = zip(services, chars)
     print("\n".join([str(s) + "\nCharacteristics:\n" + "\n".join([str(ch) for ch in c]) for s,c in service_chars]))
 
-
 asyncio.run(main())
