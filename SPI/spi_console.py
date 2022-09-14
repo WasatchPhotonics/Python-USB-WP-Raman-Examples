@@ -9,7 +9,7 @@ collected spectra.
 Features include:
 
 - reads and parses key fields from the EEPROM, including wavecal in wavelength 
-  and wavenumber
+  and wavenumber (may be disabled for FW in which EEPROM access is unsupported)
 - save measuremnts as .csv
 - add on-screen traces for visual comparison
 - "test mode" for automated unit QC
@@ -174,8 +174,10 @@ def parseArgs(argv):
     parser.add_argument("--test-ramp-incr",      type=int,   default=1,            help="increment ramp at this integration time")
     parser.add_argument("--throwaways",          type=int,   default=3,            help="automatic throwaway measurements")
     parser.add_argument("--block-size",          type=int,   default=256,          help="block size for --fast SPI reads")
+    parser.add_argument("--pixels",              type=int,   default=1920,         help="how many pixels to use if --no-eeprom")
     parser.add_argument("--excitation-nm",       type=float, default=-1,           help="laser excitation wavelength (creates wavenumber axis if positive)")
     parser.add_argument("--save",                type=bool,  default=True,         help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--eeprom",              type=bool,  default=True,         help="load and act on EEPROM configuration (--no-eeprom to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--test-linearity",      action="store_true",              help="after data collection, test linearity by ramping integration time")
     parser.add_argument("--paused",              action="store_true",              help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",              help="output verbose debug messages")
@@ -592,6 +594,8 @@ class cWinMain(tk.Tk):
 
         self.wavelengths = None
         self.wavenumbers = None
+        self.eeprom = None
+        self.pixels = args.pixels       # may be overridden by EEPROM
 
         self.colors = ["red", "blue", "cyan", "magenta", "yellow", "orange", "indigo", "violet", "white"]
 
@@ -633,10 +637,11 @@ class cWinMain(tk.Tk):
         # doing this BEFORE initial FPGA initialization, because if you do it
         # AFTER, you'll need to re-run FPGAInit() to reset set all the
         # acquisition parameters
-        debug("loading EEPROM")
-        self.eeprom = EEPROM(self.SPI)
-        if args.excitation_nm < 0:
-            args.excitation_nm = self.eeprom.excitation_nm_float
+        if args.eeprom:
+            debug("loading EEPROM")
+            self.eeprom = EEPROM(self.SPI)
+            if args.excitation_nm < 0:
+                args.excitation_nm = self.eeprom.excitation_nm_float
 
         self.generate_wavecal()
 
@@ -677,6 +682,8 @@ class cWinMain(tk.Tk):
         #
         # Additional: 0xb0 is used for BOTH "write FPGA EEPROM buffer to EEPROM"
         #                               AND "read EEPROM data to FPGA buffer"; not sure how that works out
+
+        # MZ: for Level Trigger, read uint16 CONFIG_REGISTER (0x12), set bit 7 high (|= 0x80), then write (0x92) 
 
         # Empty list for the config objects # Name              row     value                       address
         self.configObjects = []             # ----------------- ------- --------------------------- -------
@@ -1061,7 +1068,10 @@ class cWinMain(tk.Tk):
 
     def save_report(self):
         self.makeDataDir()
-        filename = f"test-{timestamp()}-{self.eeprom.serial_number}.csv"
+        if self.eeprom is not None:
+            filename = f"test-{timestamp()}-{self.eeprom.serial_number}.csv"
+        else:
+            filename = f"test-{timestamp()}.csv"
         pathname = os.path.join(DATA_DIR, filename)
 
         with open(pathname, "w") as outfile:
@@ -1073,8 +1083,9 @@ class cWinMain(tk.Tk):
                 outfile.write(f"fixed.{name}, {value}\n")
             for key, value in args.__dict__.items():
                 outfile.write(f"args.{key}, {value}\n")
-            for key, value in self.eeprom.__dict__.items():
-                outfile.write(f"eeprom.{key}, {value}\n")
+            if self.eeprom is not None:
+                for key, value in self.eeprom.__dict__.items():
+                    outfile.write(f"eeprom.{key}, {value}\n")
             for key in ['test_start', 'test_stop', 'elapsed_ms', 'min_elapsed_ms', 'max_elapsed_ms', 'avg_measurement_period_ms', 'scan_rate']:
                 outfile.write(f"metrics.{key}, {getattr(self, key)}\n")
             outfile.write("\n")
@@ -1108,10 +1119,13 @@ class cWinMain(tk.Tk):
         print(f"saved {pathname}")
 
     def generate_wavecal(self):
-        self.pixels = self.eeprom.active_pixels_horizontal
-        coeffs = self.eeprom.wavelength_coeffs
-        if math.isnan(coeffs[4]):
-            coeffs[4] = 0
+        if self.eeprom is not None:
+            self.pixels = self.eeprom.active_pixels_horizontal
+            coeffs = self.eeprom.wavelength_coeffs
+            if math.isnan(coeffs[4]):
+                coeffs[4] = 0
+        else:
+            coeffs = [0, 1, 0, 0, 0]
 
         self.wavelengths = []
         for i in range(self.pixels):
