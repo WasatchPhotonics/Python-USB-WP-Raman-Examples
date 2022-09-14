@@ -33,6 +33,8 @@ class Fixture(object):
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
+        parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with zeros, then populates minimal defaults (HIGHLY DANGEROUS)")
+        parser.add_argument("--pixels",         type=int, default=1024, help="active_pixels_horizontal when reprogramming")
         self.args = parser.parse_args()
 
         if not (self.args.dump or \
@@ -54,6 +56,9 @@ class Fixture(object):
             self.do_erase()
             self.write_eeprom()
 
+        if self.args.reprogram:
+            self.do_reprogram()
+
         if self.args.dump:
             return
 
@@ -71,11 +76,11 @@ class Fixture(object):
 
         self.write_eeprom()
 
-    def do_erase(self):
+    def do_erase(self, value=0xff):
         print("Erasing buffers")
         for page in range(len(self.eeprom_pages)):
             for i in range(PAGE_SIZE):
-                self.pack((page, i, 1), "B", 0xff)
+                self.pack((page, i, 1), "B", value)
 
     def load(self, filename):
         if filename.endswith(".json"):
@@ -217,6 +222,33 @@ class Fixture(object):
                 offset = DATA_START + page * 64 
                 self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
             sleep(0.2)
+
+    def do_reprogram(self):
+        print("\n*** HAZARDOUS OPERATION ***\n")
+        print("Reprogram EEPROM to bland defaults? This is a destructive")
+        print("operation which will overwrite all configuration data on")
+        print("the spectrometer, destroying any factory calibrations.\n")
+        cont = input("\nReprogram EEPROM to bland defaults? (y/N)")
+        if cont.lower() != "y":
+            print("Cancelled")
+            return
+
+        # set all buffers to zero
+        self.do_erase(value=0x00)
+
+        # minimum set of defaults to allow ENLIGHTEN operation
+        self.pack((0, 63,  1), "B", 15,         "format")
+        self.pack((0,  0, 16), "s", "WP-FOO",   "model")
+        self.pack((0, 16, 16), "s", "WP-00000", "serial_number")
+        self.pack((0, 48,  4), "f", 1,          "gain") 
+        self.pack((1,  4,  4), "f", 1,          "wavecal_c1")
+        self.pack((2,  0, 16), "s", "unknown",  "detector")
+        self.pack((2, 16,  2), "H", self.args.pixels, "active_pixels_horizontal")
+        self.pack((2, 25,  2), "H", "actual_pixels_horizontal")
+        self.pack((3, 40,  4), "I", 1,          "min_integ")
+        self.pack((3, 44,  4), "I", 60000,      "max_integ")
+
+        self.do_write()
 
     def parse_eeprom(self):
         print("Parsing EEPROM")
