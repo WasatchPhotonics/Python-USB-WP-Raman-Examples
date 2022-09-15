@@ -79,6 +79,7 @@ import logging
 import struct
 import math
 import time
+import json
 import sys
 import os
 
@@ -175,9 +176,11 @@ def parseArgs(argv):
     parser.add_argument("--throwaways",          type=int,   default=3,            help="automatic throwaway measurements")
     parser.add_argument("--block-size",          type=int,   default=256,          help="block size for --fast SPI reads")
     parser.add_argument("--pixels",              type=int,   default=1920,         help="how many pixels to use if --no-eeprom")
+    parser.add_argument("--batch-count",         type=int,   default=10,           help="how many spectra to save when clicking 'batch'")
     parser.add_argument("--excitation-nm",       type=float, default=-1,           help="laser excitation wavelength (creates wavenumber axis if positive)")
     parser.add_argument("--save",                type=bool,  default=True,         help="save each spectrum (--no-save to disable)", action=argparse.BooleanOptionalAction)
     parser.add_argument("--eeprom",              type=bool,  default=True,         help="load and act on EEPROM configuration (--no-eeprom to disable)", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--eeprom-file",         type=str,                         help="path to JSON file containing virtual EEPROM contents")
     parser.add_argument("--test-linearity",      action="store_true",              help="after data collection, test linearity by ramping integration time")
     parser.add_argument("--paused",              action="store_true",              help="launch with acquisition paused")
     parser.add_argument("--debug",               action="store_true",              help="output verbose debug messages")
@@ -637,11 +640,13 @@ class cWinMain(tk.Tk):
         # doing this BEFORE initial FPGA initialization, because if you do it
         # AFTER, you'll need to re-run FPGAInit() to reset set all the
         # acquisition parameters
-        if args.eeprom:
-            debug("loading EEPROM")
-            self.eeprom = EEPROM(self.SPI)
-            if args.excitation_nm < 0:
-                args.excitation_nm = self.eeprom.excitation_nm_float
+        if args.eeprom_file:
+            self.eeprom = EEPROM(pathname=args.eeprom_file)
+        elif args.eeprom:
+            self.eeprom = EEPROM(spi=self.SPI)
+
+        if self.eeprom and args.excitation_nm < 0:
+            args.excitation_nm = self.eeprom.excitation_nm_float
 
         self.generate_wavecal()
 
@@ -718,14 +723,17 @@ class cWinMain(tk.Tk):
         self.btnClear.grid(row=rows(), column=1)
         buttonRow += 1
 
-        # [Test] [note] (Test is hidden unless --paused)
-        self.txtNote = tk.Text(self.configFrame, height=1, width=15)
+        # [Batch] [Test] (Test is hidden unless --paused)
+        self.btnBatch = tk.Button(self.configFrame, text="Batch", command=self.batch)
+        self.btnBatch.grid(row=rows(), column=0)
         if args.paused:
             self.btnTest = tk.Button(self.configFrame, text="Test", command=self.test)
-            self.btnTest.grid(row=rows(), column=0)
-            self.txtNote.grid(row=rows(), column=1)
-        else:
-            self.txtNote.grid(row=rows(), column=0, columnspan=2)
+            self.btnTest.grid(row=rows(), column=1)
+        buttonRow += 1
+
+        # [note] 
+        self.txtNote = tk.Text(self.configFrame, height=1, width=15)
+        self.txtNote.grid(row=rows(), column=0, columnspan=2)
         buttonRow += 1
 
         # Resize the grid
@@ -757,7 +765,11 @@ class cWinMain(tk.Tk):
         gain = self.getValue("Detector Gain")
         note = self.txtNote.get("1.0").strip()
 
-        basename = f"{ts}-{integ}ms-{gain}dB"
+        basename = ts
+        if self.eeprom:
+            basename += "-" + self.eeprom.serial_number
+
+        basename += f"-{integ}ms-{gain}dB"
         if len(note) > 0:
             basename += f"-{note}"
 
@@ -962,6 +974,61 @@ class cWinMain(tk.Tk):
 
     ############################################################################
     #                                                                          #
+    #                           Batch Collection                               #
+    #                                                                          #
+    ############################################################################
+
+    def batch(self):
+        spectra = []
+        labels = []
+        for i in range(args.batch_count):
+            spectrum = self.Acquire()
+            spectra.append(spectrum)
+            labels.append(f"meas-{i+1:02d}")
+            sleep_ms(args.delay_ms)
+
+        self.makeDataDir()
+
+        if self.eeprom is not None:
+            filename = f"batch-{timestamp()}-{self.eeprom.serial_number}.csv"
+        else:
+            filename = f"batch-{timestamp()}.csv"
+        pathname = os.path.join(DATA_DIR, filename)
+
+        with open(pathname, "w") as outfile:
+            # metadata
+            outfile.write(f"spi_console, {VERSION}\n")
+            for key, value in self.configMap.items():
+                outfile.write(f"cfg.{key}, {value.value}\n")
+            for address, value, write_len, name in HARDCODED_PARAMETERS:
+                outfile.write(f"fixed.{name}, {value}\n")
+            for key, value in args.__dict__.items():
+                outfile.write(f"args.{key}, {value}\n")
+            if self.eeprom is not None:
+                for key, value in self.eeprom.__dict__.items():
+                    outfile.write(f"eeprom.{key}, {value}\n")
+            outfile.write("\n")
+
+            # header row
+            outfile.write("pixel, wavelength")
+            if self.wavenumbers is not None:
+                outfile.write(", wavenumber")
+            for label in labels:
+                outfile.write(f", {label}")
+            outfile.write("\n")
+
+            # data
+            for pixel in range(self.pixels):
+                outfile.write(f"{pixel}, {self.wavelengths[pixel]:.2f}")
+                if self.wavenumbers is not None:
+                    outfile.write(f", {self.wavenumbers[pixel]:.2f}")
+                for spectrum in spectra:
+                    outfile.write(f", {spectrum[pixel]}")
+                outfile.write("\n")
+        print(f"saved {pathname}")
+
+    ############################################################################
+    #                                                                          #
     #                             Unit Testing                                 #
     #                                                                          #
     ############################################################################
@@ -1159,15 +1226,19 @@ class cWinMain(tk.Tk):
 
 class EEPROM:
 
-    def __init__(self, SPI):
-        self.SPI = SPI
+    def __init__(self, spi=None, pathname=None):
+        self.spi = spi
+        self.pathname = pathname
 
         self.buffers = []
 
-        self.read()
-        self.parse()
+        if spi:
+            self.read_spi()
+            self.parse_buffers()
+        elif pathname:
+            self.read_json()
 
-    def read(self):
+    def read_spi(self):
         for page in range(5):
             buf = self.read_page(page)
             self.buffers.append(buf)
@@ -1178,7 +1249,7 @@ class EEPROM:
             unbuffered_cmd = fixCRC([START, 0, 2, 0xB0, 0x40 + page, CRC, END])
             buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 1)
             buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-            self.SPI.write_readinto(buffered_cmd, buffered_response)
+            self.spi.write_readinto(buffered_cmd, buffered_response)
             print(f">> EEPROMRead: {toHex(buffered_cmd)} -> {toHex(buffered_response)}")
 
             # MZ: API says "wait for SPEC_BUSY to be deasserted...why aren't we doing that?
@@ -1188,17 +1259,17 @@ class EEPROM:
             unbuffered_cmd = fixCRC([START, 0, 65, 0x31, CRC, END])
             buffered_response = bytearray(len(unbuffered_cmd) + READ_RESPONSE_OVERHEAD + 64) # MZ: including kludged -1
             buffered_cmd = buffer_bytearray(unbuffered_cmd, len(buffered_response))
-            self.SPI.write_readinto(buffered_cmd, buffered_response)
+            self.spi.write_readinto(buffered_cmd, buffered_response)
 
         buf = decode_read_response(unbuffered_cmd, buffered_response, "read_eeprom_page", missing_echo_len=1)
         debug(f"decoded {len(buf)} values from EEPROM")
         return buf
 
-    def parse(self):
+    def parse_buffers(self):
         self.format = self.unpack((0, 63,  1), "B", "format")
         debug(f"parsing EEPROM format {self.format}")
 
-        self.model                           = self.unpack((0,  0, 16), "s", "model")
+       #self.model                           = self.unpack((0,  0, 16), "s", "model")
         self.serial_number                   = self.unpack((0, 16, 16), "s", "serial")
 
         self.wavelength_coeffs = []
@@ -1210,22 +1281,32 @@ class EEPROM:
         debug(f"loaded wavecal: {self.wavelength_coeffs}")
 
         self.active_pixels_horizontal        = self.unpack((2, 16,  2), "H", "pixels")
-        self.active_pixels_vertical          = self.unpack((2, 19,  2), "H" if self.format >= 4 else "h")
-        self.actual_horizontal               = self.unpack((2, 25,  2), "H" if self.format >= 4 else "h", "actual_horiz")
-
-        self.roi_horizontal_start            = self.unpack((2, 27,  2), "H" if self.format >= 4 else "h")
-        self.roi_horizontal_end              = self.unpack((2, 29,  2), "H" if self.format >= 4 else "h")
-        self.roi_vertical_region_1_start     = self.unpack((2, 31,  2), "H" if self.format >= 4 else "h")
-        self.roi_vertical_region_1_end       = self.unpack((2, 33,  2), "H" if self.format >= 4 else "h")
+       #self.active_pixels_vertical          = self.unpack((2, 19,  2), "H" if self.format >= 4 else "h")
+       #self.actual_horizontal               = self.unpack((2, 25,  2), "H" if self.format >= 4 else "h", "actual_horiz")
+       #self.roi_horizontal_start            = self.unpack((2, 27,  2), "H" if self.format >= 4 else "h")
+       #self.roi_horizontal_end              = self.unpack((2, 29,  2), "H" if self.format >= 4 else "h")
+       #self.roi_vertical_region_1_start     = self.unpack((2, 31,  2), "H" if self.format >= 4 else "h")
+       #self.roi_vertical_region_1_end       = self.unpack((2, 33,  2), "H" if self.format >= 4 else "h")
 
         self.excitation_nm_float             = self.unpack((3, 36,  4), "f", "excitation(float)")
 
-        debug(f"ACTUAL pixels horizontal: {self.actual_horizontal}")
         debug(f"ACTIVE pixels horizontal: {self.active_pixels_horizontal}")
-        debug(f"  active pixels vertical: {self.active_pixels_vertical}")
         debug(f"         excitation (nm): {self.excitation_nm_float}")
-        debug(f"          horizontal ROI: ({self.roi_horizontal_start}, {self.roi_horizontal_end})")
-        debug(f"            vertical ROI: ({self.roi_vertical_region_1_start}, {self.roi_vertical_region_1_end})")
+       #debug(f"  active pixels vertical: {self.active_pixels_vertical}")
+       #debug(f"          horizontal ROI: ({self.roi_horizontal_start}, {self.roi_horizontal_end})")
+       #debug(f"            vertical ROI: ({self.roi_vertical_region_1_start}, {self.roi_vertical_region_1_end})")
+
+    def read_json(self):
+        with open(self.pathname) as f:
+            data = json.load(f)
+            debug(f"loaded JSON from {self.pathname}: {data}")
+
+            self.serial_number              = data.get("serial_number")
+            self.active_pixels_horizontal   = int(data.get("active_pixels_horizontal", args.pixels))
+            self.excitation_nm_float        = float(data.get("excitation_nm_float", 0))
+
+            if "wavelength_coeffs" in data:
+                self.wavelength_coeffs = [float(x) for x in data["wavelength_coeffs"]]
 
     ##
     # Unpack a single field at a given buffer offset of the given datatype.
