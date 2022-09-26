@@ -115,7 +115,7 @@ except FtdiError as ex:
 #                                                                              #
 ################################################################################
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
 READY_POLL_LEN = 2          # 1 seems to work
@@ -593,6 +593,7 @@ class cWinMain(tk.Tk):
         self.next_cb = None
         self.acquireActive = False
         self.lastSpectrum = None
+        self.dark = None
         self.clear()
 
         self.wavelengths = None
@@ -723,13 +724,18 @@ class cWinMain(tk.Tk):
         self.btnClear.grid(row=rows(), column=1)
         buttonRow += 1
 
-        # [Batch] [Test] (Test is hidden unless --paused)
+        # [Batch] [Dark]
         self.btnBatch = tk.Button(self.configFrame, text="Batch", command=self.batch)
         self.btnBatch.grid(row=rows(), column=0)
-        if args.paused:
-            self.btnTest = tk.Button(self.configFrame, text="Test", command=self.test)
-            self.btnTest.grid(row=rows(), column=1)
+        self.btnDark = tk.Button(self.configFrame, text="Dark", command=self.take_dark)
+        self.btnDark.grid(row=rows(), column=1)
         buttonRow += 1
+
+        # [Test] (hidden unless --paused)
+        # if args.paused:
+        #     self.btnTest = tk.Button(self.configFrame, text="Test", command=self.test)
+        #     self.btnTest.grid(row=rows(), column=0, columnspan=2)
+        #     buttonRow += 1
 
         # [note] 
         self.txtNote = tk.Text(self.configFrame, height=1, width=15)
@@ -763,7 +769,7 @@ class cWinMain(tk.Tk):
         ts = timestamp()
         integ = self.getValue("Integration Time")
         gain = self.getValue("Detector Gain")
-        note = self.txtNote.get("1.0").strip()
+        note = self.txtNote.get("1.0", "end-1c").strip()
 
         basename = ts
         if self.eeprom:
@@ -800,6 +806,12 @@ class cWinMain(tk.Tk):
                     for i in range(len(spectrum)):
                         outfile.write(f"{i}, {spectrum[i]}\n")
                 print(f"saved {pathname}")
+
+    def take_dark(self):
+        if self.dark is None:
+            self.dark = self.lastSpectrum
+        else:
+            self.dark = None
 
     def clear(self):
         self.savedSpectra = {}
@@ -902,9 +914,13 @@ class cWinMain(tk.Tk):
 
         # post-process
         spectrum = self.apply2x2Binning(spectrum)
+        if self.dark is not None:
+            spectrum = [ spectrum[x] - self.dark[x] for x in range(min(len(self.dark), len(spectrum))) ]
+
+        # record
         self.lastSpectrum = spectrum
         self.pixels = len(spectrum)
-        debug(f"read {len(spectrum)} pixels")
+        debug(f"read {self.pixels} pixels")
 
         # graph
         if graph:
@@ -989,10 +1005,7 @@ class cWinMain(tk.Tk):
 
         self.makeDataDir()
 
-        if self.eeprom is not None:
-            filename = f"batch-{timestamp()}-{self.eeprom.serial_number}.csv"
-        else:
-            filename = f"batch-{timestamp()}.csv"
+        filename = "batch-" + self.generateBasename() + ".csv"
         pathname = os.path.join(DATA_DIR, filename)
 
         with open(pathname, "w") as outfile:
@@ -1116,14 +1129,14 @@ class cWinMain(tk.Tk):
                 time_start = datetime.datetime.now()
                 spectrum = self.Acquire()
                 elapsed_ms = (datetime.datetime.now() - time_start).total_seconds() * 1000.0
-                self.btnTest.update_idletasks()
+                self.btnClear.update_idletasks()
 
                 self.spectra.append(spectrum)
                 self.headers["label"].append(f"ramp-{ms}ms")
                 self.headers["elapsed_ms"].append(elapsed_ms)
 
                 self.save(to_disk=False)
-                self.btnTest.update_idletasks()
+                self.btnClear.update_idletasks()
                 sleep_ms(args.delay_ms)
 
         ########################################################################
