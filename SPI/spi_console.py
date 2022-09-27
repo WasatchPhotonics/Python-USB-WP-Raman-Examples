@@ -115,7 +115,7 @@ except FtdiError as ex:
 #                                                                              #
 ################################################################################
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
 READY_POLL_LEN = 2          # 1 seems to work
@@ -903,7 +903,7 @@ class cWinMain(tk.Tk):
             spectrum = self.savedSpectra[label]
             self.graphSpectrum(spectrum, label=label)
 
-    def Acquire(self, graph=True):
+    def Acquire(self, graph=True, batch=False):
         # get the new spectrum
         debug("calling getSpectrum")
         spectrum = self.getSpectrum()
@@ -923,13 +923,13 @@ class cWinMain(tk.Tk):
         debug(f"read {self.pixels} pixels")
 
         # graph
-        if graph:
+        if graph and not batch:
             debug(f"graphing spectrum: y {spectrum[:5]}, x {self.wavelengths[:5]}")
             self.initGraph()
             self.graphSpectrum(spectrum)
 
         # schedule next tick
-        if self.acquireActive:
+        if self.acquireActive and not batch:
             self.schedule_acquire(args.delay_ms + self.getValue("Integration Time"))
 
         # for test()
@@ -998,10 +998,14 @@ class cWinMain(tk.Tk):
         spectra = []
         labels = []
         for i in range(args.batch_count):
-            spectrum = self.Acquire()
+            label = f"meas-{i+1:02d}"
+            debug(f"batch: collecting {label}")
+            spectrum = self.Acquire(batch=True)
             spectra.append(spectrum)
-            labels.append(f"meas-{i+1:02d}")
-            sleep_ms(args.delay_ms)
+            labels.append(label)
+
+            delay_ms = args.delay_ms + self.getValue("Integration Time")
+            sleep_ms(delay_ms)
 
         self.makeDataDir()
 
