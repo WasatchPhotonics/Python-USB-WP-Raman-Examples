@@ -800,11 +800,12 @@ class cWinMain(tk.Tk):
             self.savedSpectra[basename] = spectrum
 
             if to_disk:
+                x = self.getXAxis()
                 self.makeDataDir()
                 pathname = os.path.join(DATA_DIR, f"{basename}.csv")
                 with open(pathname, "w") as outfile:
                     for i in range(len(spectrum)):
-                        outfile.write(f"{i}, {spectrum[i]}\n")
+                        outfile.write(f"{x[i]:0.2f}, {spectrum[i]}\n")
                 print(f"saved {pathname}")
 
     def take_dark(self):
@@ -881,15 +882,17 @@ class cWinMain(tk.Tk):
 
         return spectrum
 
+    def getXAxis(self):
+        if self.wavenumbers is not None:
+            return self.wavenumbers
+        elif self.wavelengths is not None:
+            return self.wavelengths
+        else:
+            return range(len(self.pixels))
+
     ## @todo probably faster if we used set_ydata()
     def graphSpectrum(self, y, label="live"):
-        if self.wavenumbers is not None:
-            x = self.wavenumbers
-        elif self.wavelengths is not None:
-            x = self.wavelengths
-        else:
-            x = range(len(y))
-
+        x = self.getXAxis()
         self.graph.plot(x, y, linewidth=0.5, label=label)
         self.update_axes()
         self.graph.legend()
