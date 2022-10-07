@@ -46,6 +46,7 @@ class Fixture(object):
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
+        parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
         parser.add_argument("--model",               type=str,            help="desired model")
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
@@ -128,6 +129,11 @@ class Fixture(object):
                 self.set_dfu(dev)
             return
 
+        if self.args.reset_fpga:
+            for dev in self.devices:
+                self.reset_fpga(dev)
+            return
+
         if self.args.integration_time_ms is not None:
             for dev in self.devices:
                 self.set_integration_time_ms(dev, self.args.integration_time_ms)
@@ -166,6 +172,10 @@ class Fixture(object):
     # opcodes
     ############################################################################
 
+    def reset_fpga(self, dev):
+        print("resetting FPGA on %s" % dev.eeprom["serial_number"])
+        self.send_cmd(dev, 0xb5)
+
     # only supported on Gen 1.5
     def get_fpga_configuration_register(self, dev):
         raw = self.get_cmd(dev, 0xb3, lsb_len=2, label="GET_FPGA_CONFIGURATION_REGISTER")
@@ -188,7 +198,7 @@ class Fixture(object):
         return s
 
     def set_dfu(self, dev):
-        self.debug("setting DFU on %s" % dev.eeprom["serial_number"])
+        print("setting DFU on %s" % dev.eeprom["serial_number"])
         self.send_cmd(dev, 0xfe)
 
     def set_laser_enable(self, dev, flag):
