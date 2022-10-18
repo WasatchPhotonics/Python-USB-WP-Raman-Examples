@@ -1235,7 +1235,14 @@ class cWinMain(tk.Tk):
             debug(f"wavenumbers = ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f})")
 
     def update_axes(self):
-        xlabel = "wavelength (nm)" if self.wavenumbers is None else "wavenumber (cm⁻¹)"
+        if not args.eeprom:
+            xlabel = "pixel"
+        elif self.wavenumbers is not None:
+            xlabel = "wavenumber (cm⁻¹)"
+        elif self.wavelengths is not None:
+            xlabel = "wavelength (nm)"
+        else:
+            xlabel = "whut"
         self.figure.get_axes()[0].set_xlabel(xlabel)
 
 ################################################################################
