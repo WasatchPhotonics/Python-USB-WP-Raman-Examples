@@ -45,6 +45,7 @@ class Fixture(object):
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
+        parser.add_argument("--pixels",              type=int,            help="override pixel count")
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
         parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
@@ -74,6 +75,7 @@ class Fixture(object):
                 print(f"FPGA version: {dev.fpga_version}")
 
                 self.read_eeprom(dev)
+                dev.pixels = dev.eeprom["pixels"] if self.args.pixels is None else self.args.pixels
 
         # apply filters
         self.filter_by_serial()
@@ -164,7 +166,7 @@ class Fixture(object):
                 dev.eeprom["model"], 
                 dev.eeprom["serial_number"],
                 dev.eeprom["format"],
-                dev.eeprom["pixels"],
+                dev.pixels,
                 dev.fw_version,
                 dev.fpga_version))
 
@@ -302,9 +304,10 @@ class Fixture(object):
     def get_spectrum(self, dev):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(dev, 0xad, 1)
-        bytes_to_read = dev.eeprom["pixels"] * 2
 
-        self.debug(f"blocking on read of {bytes_to_read} bytes ({timeout_ms}ms timeout)")
+        bytes_to_read = dev.pixels * 2
+
+        print(f"blocking on read of {dev.pixels} ({bytes_to_read} bytes) with {timeout_ms}ms timeout")
         data = dev.read(0x82, bytes_to_read, timeout=timeout_ms)
 
         return self.demarshal_spectrum(data)
@@ -315,7 +318,7 @@ class Fixture(object):
         while True:
             try:
                 print(".", end='')
-                data = dev.read(0x82, dev.eeprom["pixels"] * 2, timeout=1000)
+                data = dev.read(0x82, dev.pixels * 2, timeout=1000)
                 if data is not None:
                     now = datetime.now()
                     ms_since_last = (now - self.last_acquire).total_seconds() * 1000.0
