@@ -319,6 +319,8 @@ class Fixture(object):
 
     def get_spectrum_sw_trigger(self, dev):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+
+        print(f"{datetime.now()} sending trigger...")
         self.send_cmd(dev, 0xad, 1)
 
         bytes_to_read = dev.pixels * 2
@@ -330,18 +332,17 @@ class Fixture(object):
 
     def get_spectrum_hw_trigger(self, dev):
         now = datetime.now()
-        print(f"{now} waiting for trigger..", end='')  # note we don't send an ACQUIRE
+        print(f"{now} not sending trigger..", end='')  # note we don't send an ACQUIRE
         while True:
             try:
                 print(".", end='')
                 data = dev.read(0x82, dev.pixels * 2, timeout=1000)
                 if data is not None:
-                    now = datetime.now()
                     ms_since_last = (now - self.last_acquire).total_seconds() * 1000.0
                     self.last_acquire = now
 
                     print()
-                    print(f"{now} received! ({ms_since_last:.2f}ms since last)")
+                    print(f"{datetime.now()} received! ({ms_since_last:.2f}ms since last)")
 
                     return self.demarshal_spectrum(data)
             except Exception as ex:
