@@ -35,17 +35,18 @@ class Fixture(object):
         self.subformat = None
         self.last_acquire = datetime.now()
 
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
         parser.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
-        parser.add_argument("--trigger-enable",      action="store_true", help="enable triggering")
+        parser.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
         parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
         parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=10)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--pixels",              type=int,            help="override pixel count")
+        parser.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
         parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
@@ -140,10 +141,15 @@ class Fixture(object):
             for dev in self.devices:
                 self.set_integration_time_ms(dev, self.args.integration_time_ms)
 
-        if self.args.trigger_enable:
-            [self.set_continuous_frames     (dev, 1) for dev in self.devices]
-            [self.set_continuous_acquisition(dev, 0) for dev in self.devices]
-            [self.set_trigger_source        (dev, 1) for dev in self.devices]
+        if self.args.continuous_count != 1:
+            for dev in self.devices:
+                # note we're leaving these set at exit
+                self.set_continuous_frames(dev, self.args.continuous_count)
+                self.set_continuous_acquisition(dev, True)
+
+        if self.args.hardware_trigger:
+            for dev in self.devices:
+                self.set_trigger_source(dev, 1)
 
         # [self.get_fpga_configuration_register(dev) for dev in self.devices]
 
@@ -155,7 +161,7 @@ class Fixture(object):
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 0) for dev in self.devices]
 
-        if self.args.trigger_enable:
+        if self.args.hardware_trigger:
             [self.set_trigger_source(dev, 0) for dev in self.devices]
 
     def list(self):
@@ -211,9 +217,9 @@ class Fixture(object):
         self.debug(f"setting triggerSource to {n}")
         self.send_cmd(dev, 0xd2, n)
 
-    def set_continuous_acquisition(self, dev, n):
-        self.debug(f"setting continuous acquisition to {n}")
-        self.send_cmd(dev, 0xc8, n)
+    def set_continuous_acquisition(self, dev, flag):
+        self.debug(f"setting continuous acquisition to {flag}")
+        self.send_cmd(dev, 0xc8, 1 if flag else 0)
 
     def set_continuous_frames(self, dev, n):
         self.debug(f"setting continuous frame count to {n}")
@@ -286,14 +292,18 @@ class Fixture(object):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
             for dev in self.devices:
-                spectrum = self.get_spectrum(dev) if not self.args.trigger_enable else self.get_spectrum_trigger(dev)
-                now = datetime.now()
-                print("%s Spectrum %3d/%3d %s ..." % (now, i, self.args.spectra, spectrum[:10]))
-                if outfile is not None:
-                    outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
+                for i in range(self.args.continuous_count):
+                    # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
+                    send_trigger = (i == 0) and not self.args.hardware_trigger
+                    spectrum = self.get_spectrum(dev, send_trigger)
 
-                if self.args.laser_enable:
-                    self.get_laser_temperature(dev)
+                    now = datetime.now()
+                    print("%s Spectrum %3d/%3d %s ..." % (now, i, self.args.spectra, spectrum[:10]))
+                    if outfile is not None:
+                        outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
+
+                    if self.args.laser_enable:
+                        self.get_laser_temperature(dev)
 
             self.debug(f"sleeping {self.args.delay_ms}ms")
             sleep(self.args.delay_ms / 1000.0 )
@@ -301,7 +311,13 @@ class Fixture(object):
         if outfile is not None:
             outfile.close()
 
-    def get_spectrum(self, dev):
+    def get_spectrum(self, dev, send_trigger=True):
+        if send_trigger:
+            return self.get_spectrum_sw_trigger(dev)
+        else:
+            return self.get_spectrum_hw_trigger(dev)
+
+    def get_spectrum_sw_trigger(self, dev):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         self.send_cmd(dev, 0xad, 1)
 
@@ -312,9 +328,9 @@ class Fixture(object):
 
         return self.demarshal_spectrum(data)
 
-    def get_spectrum_trigger(self, dev):
+    def get_spectrum_hw_trigger(self, dev):
         now = datetime.now()
-        print(f"{now} waiting for trigger..", end='')  # note we don't send an AQUIRE
+        print(f"{now} waiting for trigger..", end='')  # note we don't send an ACQUIRE
         while True:
             try:
                 print(".", end='')
