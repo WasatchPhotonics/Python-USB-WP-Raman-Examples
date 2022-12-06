@@ -4,7 +4,7 @@ import os
 import sys
 import usb.core
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import sleep
 
 VID             = 0x24aa
@@ -56,10 +56,23 @@ class TestFixture:
         input("(ctrl-C to cancel)")
 
         self.set_laser_enable(True)
-        sleep(sec)
+        self.monitor_get_laser_enabled(sec)
 
         if disable:
             self.set_laser_enable(False)
+
+    def monitor_get_laser_enabled(self, sec):
+        now = datetime.now()
+        end = now + timedelta(seconds=sec)
+        print(f"\nmonitoring for {sec} seconds...")
+        while now < end:
+            enabled = self.get_laser_enabled()
+            print(f"  {now}: laser_enable = {enabled}")
+            sleep(0.5)
+            now = datetime.now()
+
+    def get_laser_enabled(self):
+        return 0 != self.get_code(0xe2, label="GET_LASER_ENABLED", msb_len=1)
 
     def set_laser_watchdog(self, sec):
         print(f"Setting watchdog to {sec} seconds")
