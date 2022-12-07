@@ -893,7 +893,7 @@ class cWinMain(tk.Tk):
     ## @todo probably faster if we used set_ydata()
     def graphSpectrum(self, y, label="live"):
         x = self.getXAxis()
-        self.graph.plot(x, y, linewidth=0.5, label=label)
+        self.graph.plot(x, y, linewidth=0.5, label=label, marker='.')
         self.update_axes()
         self.graph.legend()
 
