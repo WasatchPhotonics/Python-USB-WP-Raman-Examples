@@ -27,6 +27,7 @@ Hardware Dependencies
     script assumes usage of an Adafruit FT232H USB-to-SPI adapter:
 
     https://www.adafruit.com/product/2264
+    https://learn.adafruit.com/circuitpython-on-any-computer-with-ft232h
 
 Test Mode
     The script has a special mode for quickly performing a timing test and bulk
