@@ -25,7 +25,11 @@ class Fixture(object):
         self.subformat = None
         self.dev = None
 
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(
+            description="Command-line utility to play with lasers (INHERENTLY DANGEROUS!)",
+            epilog="To manually turn the laser off after an arbitrary delay, use --max-ms 0. " +
+                   "To exit the script with laser still firing (HIGHLY DANGEROUS), use --max-ms -1."
+        )
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              action="store_true", help="fire laser")
         parser.add_argument("--max-ms",              type=int,            help="firing time (ms) (default 1000)", default=1000)
@@ -58,8 +62,13 @@ class Fixture(object):
 
         self.set_enable(True)
 
-        print("sleeping %d ms..." % self.args.max_ms)
-        sleep(self.args.max_ms / 1000.0)
+        if self.args.max_ms > 0:
+            print("sleeping %d ms..." % self.args.max_ms)
+            sleep(self.args.max_ms / 1000.0)
+        elif self.args.max_ms == 0:
+            cont = input("\nPress <enter> to disable laser...")
+        elif self.args.max_ms == -1:
+            sys.exit(1)
 
         self.set_enable(False)
 
