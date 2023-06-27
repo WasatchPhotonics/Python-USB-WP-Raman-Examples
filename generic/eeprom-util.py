@@ -220,7 +220,7 @@ class Fixture(object):
             else:
                 DATA_START = 0x3c00
                 offset = DATA_START + page * 64 
-                self.send_cmd(cmd=0xa2, value=offset, index=0, buf=buf)
+                self.send_cmd(cmd=0xa2, value=offset, buf=buf)
             sleep(0.2)
 
     def do_reprogram(self):
@@ -237,18 +237,18 @@ class Fixture(object):
         self.do_erase(value=0x00)
 
         # minimum set of defaults to allow ENLIGHTEN operation
-        self.pack((0, 63,  1), "B", 15,         "format")
-        self.pack((0,  0, 16), "s", "WP-FOO",   "model")
-        self.pack((0, 16, 16), "s", "WP-00000", "serial_number")
-        self.pack((0, 48,  4), "f", 1,          "gain") 
-        self.pack((1,  4,  4), "f", 1,          "wavecal_c1")
-        self.pack((2,  0, 16), "s", "unknown",  "detector")
+        self.pack((0, 63,  1), "B", 15,               "format")
+        self.pack((0,  0, 16), "s", "WP-FOO",         "model")
+        self.pack((0, 16, 16), "s", "WP-00000",       "serial_number")
+        self.pack((0, 48,  4), "f", 1,                "gain") 
+        self.pack((1,  4,  4), "f", 1,                "wavecal_c1")
+        self.pack((2,  0, 16), "s", "unknown",        "detector")
         self.pack((2, 16,  2), "H", self.args.pixels, "active_pixels_horizontal")
-        self.pack((2, 25,  2), "H", "actual_pixels_horizontal")
-        self.pack((3, 40,  4), "I", 1,          "min_integ")
-        self.pack((3, 44,  4), "I", 60000,      "max_integ")
+        self.pack((2, 25,  2), "H", self.args.pixels, "actual_pixels_horizontal")
+        self.pack((3, 40,  4), "I", 1,                "min_integ")
+        self.pack((3, 44,  4), "I", 60000,            "max_integ")
 
-        self.do_write()
+        self.write_eeprom()
 
     def parse_eeprom(self):
         print("Parsing EEPROM")
