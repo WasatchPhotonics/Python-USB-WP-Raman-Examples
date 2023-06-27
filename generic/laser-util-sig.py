@@ -10,6 +10,8 @@ import argparse
 import struct
 import sys
 
+import matplotlib.pyplot as plt
+
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 1000
@@ -18,7 +20,7 @@ MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
-# An extensible, stateful "Test Fixture" 
+# An extensible, stateful "Test Fixture"
 class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
@@ -30,15 +32,18 @@ class Fixture(object):
         parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              type=str,            help="dis/enable laser (bool)", default="off")
-        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
-        parser.add_argument("--mod-enable",          type=str,            help="dis/enable laser modulation")
+        parser.add_argument("--integration-time-ms", type=int,            help="integration time (default 100ms)", default=100)
+        parser.add_argument("--mod-enable",          type=str,            help="dis/enable laser modulation (bool)")
         parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--raman-delay-ms",      type=int,            help="set laser warm-up delay in Raman Mode (~ms)")
         parser.add_argument("--raman-mode",          type=str,            help="dis/enable raman mode (links firing to integration) (bool)")
         parser.add_argument("--selected-adc",        type=int,            help="set selected adc")
         parser.add_argument("--startline",           type=int,            help="set startline for binning (not laser but hey)")
         parser.add_argument("--stopline",            type=int,            help="set stopline for binning (not laser)")
+        parser.add_argument("--optimize-roi",        action="store_true", help="optimize vertical ROI")
         parser.add_argument("--watchdog-sec",        type=int,            help="set laser watchdog (sec)")
+        parser.add_argument("--pixels",              type=int,            help="number of pixels (default 1952)", default=1952)
+        parser.add_argument("--scans-to-average",    type=int,            help="scans to average (default 10)", default=10)
 
         self.args = parser.parse_args()
 
@@ -51,11 +56,13 @@ class Fixture(object):
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def run(self):
+        plt.ion()
+
         self.dump("before")
 
         if self.args.acquire_before:
             self.acquire()
-            
+
         if self.args.mod_enable is not None:
             self.set_modulation_enable(self.str2bool(self.args.mod_enable))
 
@@ -83,6 +90,9 @@ class Fixture(object):
         if self.args.stopline is not None:
             self.set_stopline(self.args.stopline)			
 
+        if self.args.optimize_roi:
+            self.optimize_roi()
+
         if self.args.acquire_after:
             self.acquire()
 
@@ -100,9 +110,26 @@ class Fixture(object):
 
     ### Acquire ###############################################################
 
+    def stomp_first(self, a, count):
+        for i in range(count):
+            a[i] = a[count]
+
+    def stomp_last(self, a, count):
+        for i in range(count):
+            a[-(i+1)] = a[-(count+1)]
+
     def acquire(self):
-        print("performing acquire")
-        self.send_cmd(0xad, 1)
+        timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+        self.send_cmd(0xad, 0)
+        data = self.dev.read(0x82, self.args.pixels * 2, timeout=timeout_ms)
+        spectrum = []
+        for i in range(0, len(data), 2):
+            spectrum.append(data[i] | (data[i+1] << 8))
+
+        self.stomp_first(spectrum, 3)
+        self.stomp_last(spectrum, 1)
+
+        return spectrum
 
     ### Enabled ###############################################################
 		
@@ -210,12 +237,13 @@ class Fixture(object):
     def set_startline(self, linenum):
         if not self.is_sig():
             return
-        if linenum < 0 or linenum > 0x0436:
+        if linenum < 0 or linenum > 1078:
             print("ERROR: choose a line between 0 and 1078")
             return
 
         print("setting startline to %d" % linenum)
         self.send_cmd(0xff, 0x21, linenum)	
+
 
     ### Stop Line ##############################################################
 
@@ -234,6 +262,84 @@ class Fixture(object):
 
         print("setting stopline to %d" % linenum)
         self.send_cmd(0xff, 0x23, linenum)	
+
+    ### Optimize Start/Stop ####################################################
+
+    def take_averaged_measurement(self):
+        spectrum = self.acquire()
+        for i in range(2, self.args.scans_to_average):
+            tmp = self.acquire()
+            for j in range(len(spectrum)):
+                spectrum[j] += tmp[j]
+        for i in range(len(spectrum)):
+            spectrum[i] /= self.args.scans_to_average
+
+        plt.plot(spectrum)
+        plt.draw()
+        plt.pause(0.0001)
+        plt.clf()
+
+        return spectrum
+
+    def measure_intensity(self):
+        self.set_enable(False)
+        dark = self.take_averaged_measurement()
+        self.set_enable(True)
+        signal = self.take_averaged_measurement()
+        self.set_enable(False)
+        for i in range(len(signal)):
+            signal[i] -= dark[i]
+        top = max(signal)
+        return top
+
+    def optimize_roi(self):
+        start = 50
+        stop = 1050
+
+        self.set_startline(start)
+        self.set_stopline(stop)
+
+        full = self.measure_intensity()
+        thresh = full / 5.0
+        print(f"full {full} (thresh {thresh})")
+
+        # optimize start
+        while True:
+            if start + 50 >= stop:
+                print(f"can't exceed start {start} due to stop {stop}")
+                break
+            start += 50
+            self.set_startline(start)
+            after = self.measure_intensity()
+            delta = full - after
+            print(f"start {start} = after {after} (delta {delta})")
+            if delta > thresh:
+                print(f"found good start {start}")
+                break
+        new_start = start
+
+        # optimize stop
+        start = 50
+        self.set_startline(start)
+        while True:
+            if stop - 50 <= start:
+                print(f"can't exceed stop {stop} due to start {start}")
+                break
+            stop -= 50
+            self.set_stopline(stop)
+            after = self.measure_intensity()
+            delta = full - after
+            print(f"stop {stop} = after {after} (delta {delta})")
+            if delta > thresh:
+                print(f"found good stop {stop}")
+                break
+
+        start = new_start
+        self.set_startline(start)
+        self.set_stopline(stop)
+        intensity = self.measure_intensity()
+        print(f"optimized ROI ({start}, {stop})")
+        print(f"full {full}, roi {intensity}")
 
     ### Battery ################################################################
 
@@ -259,19 +365,19 @@ class Fixture(object):
         print("    Laser enabled:       %s" % self.get_enable())
         print("    Selected ADC:        %s" % self.get_selected_adc())
         print("    Integration Time ms: %s" % self.get_integration_time_ms())
-        print("    Modulation enabled:  %s" % self.get_modulation_enable())
         print("    Watchdog sec:        %s" % self.get_watchdog_sec())
-        print("    Raman Mode:          %s" % self.get_raman_mode())
-        print("    Raman Delay ms:      %s" % self.get_raman_delay_ms())
-        print("    Start line:          %s" % self.get_startline())
-        print("    Stop line:           %s" % self.get_stopline())
+        # print("    Modulation enabled:  %s" % self.get_modulation_enable())
+        # print("    Raman Mode:          %s" % self.get_raman_mode())
+        # print("    Raman Delay ms:      %s" % self.get_raman_delay_ms())
+        # print("    Start line:          %s" % self.get_startline())
+        # print("    Stop line:           %s" % self.get_stopline())
 
     ############################################################################
     # Utility Methods
     ############################################################################
 
     def is_arm(self):
-        return self.pid == 0x4000 
+        return self.pid == 0x4000
 
     def is_sig(self):
         return self.is_arm() # close enough
