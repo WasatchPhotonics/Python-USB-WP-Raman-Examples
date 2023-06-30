@@ -151,46 +151,39 @@ class RegisterUtil(tk.Tk):
 
         self.title("FPGA Register Utility")
         
-        self.frame = tk.Frame(self)
-        self.frame.grid(row=0, column=0, sticky="news")
-
-        # what would these do?
-        # self.grid_rowconfigure(0, weight=1)
-        # self.grid_columnconfigure(1, weight=1)
-
         row = 0
 
-        self.label_addr = tk.Label(self.frame, text="Address")
+        self.label_addr = tk.Label(text="Address")
         self.label_addr.grid(row=row, column=1)
 
-        self.label_value = tk.Label(self.frame, text="Value")
+        self.label_value = tk.Label(text="Value")
         self.label_value.grid(row=row, column=2)
 
         row += 1
 
-        self.btn_write = tk.Button(self.frame, text="Write", command=self.write)
+        self.btn_write = tk.Button(text="Write", command=self.write)
         self.btn_write.grid(row=row, column=0)
 
-        self.text_write_addr = tk.Text(self.frame, height=1, width=6)
+        self.text_write_addr = tk.Text(height=1, width=6)
         self.text_write_addr.grid(row=row, column=1)
 
-        self.text_write_value = tk.Text(self.frame, height=1, width=6)
+        self.text_write_value = tk.Text(height=1, width=6)
         self.text_write_value.grid(row=row, column=2)
 
         row += 1
 
-        self.btn_read = tk.Button(self.frame, text="Read", command=self.read)
+        self.btn_read = tk.Button(text="Read", command=self.read)
         self.btn_read.grid(row=row, column=0)
 
-        self.text_read_addr = tk.Text(self.frame, height=1, width=6)
+        self.text_read_addr = tk.Text(height=1, width=6)
         self.text_read_addr.grid(row=row, column=1)
 
-        self.text_read_values = tk.Text(self.frame, height=10, width=6)
+        self.text_read_values = tk.Text(height=10, width=6)
         self.text_read_values.grid(row=row, column=2)
 
         row += 1
 
-        self.text_log = tk.Text(self.frame, height=5, width=50)
+        self.text_log = tk.Text(height=5, width=50)
         self.text_log.grid(row=row, column=0, columnspan=3)
 
     def write(self):
