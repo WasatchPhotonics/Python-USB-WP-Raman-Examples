@@ -44,21 +44,37 @@ class RegisterUtil(tk.Tk):
         tk.Label(text="Value").grid(row=row, column=2)
 
         row += 1
-        tk.Button(text="Write", command=self.write).grid(row=row, column=0)
+        tk.Button(text="Write", command=self.write_callback).grid(row=row, column=0)
         self.write_addr = self.make_addr_combobox(tk.StringVar(), row, 1)
         self.write_value = tk.Text(height=1, width=6)
         self.write_value.grid(row=row, column=2)
 
         row += 1
-        tk.Button(text="Read", command=self.read).grid(row=row, column=0)
+        tk.Button(text="Read", command=self.read_callback).grid(row=row, column=0)
         self.read_addr = self.make_addr_combobox(tk.StringVar(), row, 1)
         self.read_value = tk.Text(height=1, width=6)
         self.read_value.grid(row=row, column=2)
 
-    def read(self):
+        row += 1
+        tk.Button(text="Read All", width=30, command=self.read_all_callback).grid(row=row, column=0, columnspan=3)
+
+    def write_callback(self):
+        addr = self.write_addr.get()
+        value = int(self.get_value(self.write_addr), 16)
+        print(f"writing addr 0x{addr:04x} <- 0x{value:04x}")
+
+        buf = usb.util.create_buffer(8)
+        bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
+        self.dev.ctrl_transfer(bmReqType, 0x91, addr, value, buf)
+
+    def read_callback(self):
         addr = self.read_addr.get()
         print(f"reading addr 0x{addr:04x}")
 
+        value = self.read(addr)
+        print(f"read addr 0x{addr:04x} received 0x{value:04x}")
+
+    def read(self, addr):
         buf = usb.util.create_buffer(4)
         bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR, usb.util.CTRL_RECIPIENT_DEVICE)
         self.dev.ctrl_transfer(bmReqType, 0x81, addr, 0x00, buf)
@@ -68,16 +84,15 @@ class RegisterUtil(tk.Tk):
             value |= rbuf[i]
             value <<= 8
 
-        print(f"read addr 0x{addr:04x} received 0x{value:04x}")
+        return value
 
-    def write(self):
-        addr = self.write_addr.get()
-        value = int(self.get_value(self.write_addr), 16)
-        print(f"writing addr 0x{addr:04x} <- 0x{value:04x}")
+    def read_all_callback(self):
+        print("Name            Addr    Default Description")
+        print("--------------- ------- ------- ------------------------")
 
-        buf = usb.util.create_buffer(8)
-        bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
-        self.dev.ctrl_transfer(bmReqType, 0x91, addr, value, buf)
+        for addr in sorted(self.reg):
+            value = self.read(addr)
+            print(f'{self.reg[addr]["name"]:-10s} 0x{addr:04x} 0x{self.reg[addr]["default"]} {self.reg["description"]}')
 
     def init_table(self):
         #   Name            Addr    Default Description
