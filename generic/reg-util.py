@@ -1,11 +1,8 @@
 #!/usr/bin/python
 
-import re
 import sys
 import usb.core
 import usb.util
-import usb.control
-import inspect
 
 import tkinter as tk
 from tkinter import ttk
@@ -114,7 +111,7 @@ class RegisterUtil(tk.Tk):
         row += 1 # [ (Write) | [name v] | [_____] ]
         tk.Button(text="Write", command=self.write_callback).grid(row=row, column=0)
         self.write_addr = self.make_addr_combobox(row, 1)
-        self.write_value = tk.Text(height=1, width=6)
+        self.write_value = tk.Entry(width=6)
         self.write_value.grid(row=row, column=2)
 
         row += 1 # [ (Read)  | [name v] | [_____] ]
@@ -135,15 +132,18 @@ class RegisterUtil(tk.Tk):
         name = self.write_addr.get().strip()
         if name not in self.reg:
             return
-        addr = self.reg[name]["addr"]
 
+        addr = self.reg[name]["addr"]
+        desc = self.reg[name]["desc"]
         try:
-            s = self.write_value.get("1.0", "end-1c")
+            s = self.write_value.get().lower()
+            if s.startswith("0x"):
+                s = s[2:]
             value = int(s, 16)
         except:
             return
 
-        print(f"writing {name} 0x{addr:04x} <- 0x{value:04x}")
+        print(f"writing {name} 0x{addr:04x} <- 0x{value:04x} ({desc})")
 
         buf = usb.util.create_buffer(8)
         bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
@@ -156,7 +156,8 @@ class RegisterUtil(tk.Tk):
             return
 
         addr = self.reg[name]["addr"]
-        print(f"reading {name} 0x{addr:04x}")
+        desc = self.reg[name]["desc"]
+        print(f"reading {name} 0x{addr:04x} ({desc})")
 
         value = self.read(addr)
         self.read_value.set(f"0x{value:04x}")
@@ -209,7 +210,7 @@ class RegisterUtil(tk.Tk):
         cb = ttk.Combobox(self, width=10, textvariable=string_var)
         cb.grid(row=row, column=col)
         cb['values'] = sorted(self.reg.keys())
-        cb.current()
+        cb.current(0)
         return string_var
 
     def init_table(self):
