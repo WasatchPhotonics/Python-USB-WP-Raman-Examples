@@ -123,6 +123,11 @@ class RegisterUtil(tk.Tk):
         row += 1 # [ (__________READ_ALL________) ]
         tk.Button(text="Read All", width=30, command=self.read_all_callback).grid(row=row, column=0, columnspan=3)
 
+        # keyboard shortcuts (untested)
+        self.bind('<Control-R>', self.read_callback)
+        self.bind('<Control-W>', self.write_callback)
+        self.bind('<Control-V>', self.write_value.set_focus)
+
     ############################################################################
     # event callbacks
     ############################################################################
