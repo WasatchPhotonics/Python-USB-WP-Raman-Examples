@@ -48,6 +48,7 @@ class Fixture(object):
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def run(self):
+        self.read_revs()
         self.read_eeprom()
         self.parse_eeprom()
         self.dump_eeprom()
@@ -425,6 +426,27 @@ class Fixture(object):
             struct.pack_into(data_type, buf, start_byte, value)
 
         # self.debug("Packed (%d, %2d, %2d) '%s' value %s -> %s" % (page, start_byte, length, data_type, value, buf[start_byte:end_byte]))
+
+    def get_firmware_version(self):
+        result = self.get_cmd(0xc0)
+        if result is not None and len(result) >= 4:
+            return "%d.%d.%d.%d" % (result[3], result[2], result[1], result[0]) 
+
+    def get_fpga_version(self):
+        s = ""
+        result = self.get_cmd(0xb4)
+        if result is not None:
+            for i in range(len(result)):
+                c = result[i]
+                if 0x20 <= c < 0x7f:
+                    s += chr(c)
+        return s
+
+    def read_revs(self):
+        fpga = self.get_fpga_version()
+        fw = self.get_firmware_version()
+        print(f"FPGA = {fpga}")
+        print(f"FW   = {fw}")
 
 fixture = Fixture()
 if fixture.dev:
