@@ -1,4 +1,8 @@
 #!/usr/bin/python
+"""
+authors: Murty, Mark, Samie, Demetri
+description: Read or Write specific register values to FPGA
+"""
 
 import sys
 import usb.core
