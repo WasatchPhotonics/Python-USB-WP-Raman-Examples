@@ -3,6 +3,7 @@
 import os
 import sys
 import usb.core
+import argparse
 import platform
 from datetime import datetime
 from time import sleep
@@ -19,12 +20,16 @@ class TestFixture:
 
     def __init__(self):
 
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser.add_argument("--watchdog-sec", type=int, help="watchdog value", default=5)
+        parser.add_argument("--laser-enable-sec", type=int, help="how long to enable the laser", default=10)
+        self.args = parser.parse_args()
+
         print("searching for spectrometer with VID 0x%04x, PID 0x%04x" % (VID, PID))
         dev = usb.core.find(idVendor=VID, idProduct=PID)
         if dev is None:
             print("No matching spectrometer found")
             sys.exit(1)
-        #print(dev)
 
         if os.name == "posix":
             dev.set_configuration()
@@ -33,26 +38,31 @@ class TestFixture:
         self.dev = dev
 
     def run(self):
-        fw_ver = self.get_firmware_version()
-        fpga_ver = self.get_fpga_version()
-        print(f"firmware version: {fw_ver}")
-        print(f"FPGA version: {fpga_ver}")
+        print(f"firmware version: {self.get_firmware_version()}")
+        print(f"FPGA version: {self.get_fpga_version()}")
 
         # This doesn't work (returns NULL):
         #
         # sec = self.get_laser_watchdog()
         # print(f"laser watchdog is {sec} sec")
 
-        # This doesn't work (laser fires 5sec each time)
-        self.test_laser()
-        self.set_laser_watchdog(3)
-        self.test_laser()
+        self.test_laser("before setting watchdog")
+        self.set_laser_watchdog(self.args.watchdog_sec)
+        self.test_laser("after setting watchdog")
 
-    def test_laser(self):
-        input("\nReady to fire the laser? (ctrl-C to cancel)")
+    def test_laser(self, msg):
+        print(f"About to run test: {msg}")
+        input(f"\nReady to fire the laser for {self.args.laser_enable_sec}sec? (ctrl-C to cancel)")
         self.set_laser_enable(True)
-        sleep(5)
+        self.do_sleep(self.args.laser_enable_sec)
         self.set_laser_enable(False)
+
+    def do_sleep(self, sec):
+        print(f"Pausing for ", end='')
+        for i in range(sec, 0, -1):
+            print(f"{i}...", end='')
+            sleep(1)
+        print("done")
 
     def set_laser_watchdog(self, sec):
         return self.send_code(0xff, 0x18, sec, label="SET_LASER_WATCHDOG")
