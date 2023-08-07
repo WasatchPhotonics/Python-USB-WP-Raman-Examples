@@ -31,7 +31,7 @@ class Fixture(object):
         parser.add_argument("--acquire-after",       action="store_true", help="acquire after")
         parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
         parser.add_argument("--debug",               action="store_true", help="debug output")
-        parser.add_argument("--enable",              type=str,            help="dis/enable laser (bool)", default="off")
+        parser.add_argument("--enable",              action="store_true", help="enable laser")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (default 100ms)", default=100)
         parser.add_argument("--mod-enable",          type=str,            help="dis/enable laser modulation (bool)")
         parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
@@ -81,8 +81,8 @@ class Fixture(object):
         if self.args.raman_mode is not None:
             self.set_raman_mode(self.str2bool(self.args.raman_mode))
 			
-        if self.args.enable is not None:
-            self.set_enable(self.str2bool(self.args.enable))
+        if self.args.enable:
+            self.set_enable(True)
 
         if self.args.startline is not None:
             self.set_startline(self.args.startline)
@@ -95,6 +95,9 @@ class Fixture(object):
 
         if self.args.acquire_after:
             self.acquire()
+
+        if self.args.enable:
+            self.set_enable(False)
 
         self.dump("after")
 
@@ -282,15 +285,18 @@ class Fixture(object):
         return spectrum
 
     def measure_intensity(self):
-        self.set_enable(False)
-        dark = self.take_averaged_measurement()
-        self.set_enable(True)
-        signal = self.take_averaged_measurement()
-        self.set_enable(False)
-        for i in range(len(signal)):
-            signal[i] -= dark[i]
-        top = max(signal)
-        return top
+        if self.args.enable:
+            self.set_enable(False)
+            dark = self.take_averaged_measurement()
+            self.set_enable(True)
+            signal = self.take_averaged_measurement()
+            self.set_enable(False)
+            for i in range(len(signal)):
+                signal[i] -= dark[i]
+        else:
+            signal = self.take_averaged_measurement()
+            
+        return sum(signal)
 
     def optimize_roi(self):
         start = 50
