@@ -60,7 +60,7 @@ class TestFixture:
     def do_sleep(self, sec):
         print(f"Pausing for ", end='')
         for i in range(sec, 0, -1):
-            print(f"{i}...", end='')
+            print(f"{i}...", end='', flush=True)
             sleep(1)
         print("done")
 
