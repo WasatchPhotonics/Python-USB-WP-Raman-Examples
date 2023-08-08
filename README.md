@@ -44,7 +44,7 @@ software products:
 
 We recommend Git for Windows:
 
-    https://gitforwindows.org/
+- https://gitforwindows.org/
 
 After installation, open a Git Command shell (looks like a DOS prompt), change
 into whatever directory holds your source code projects, and type (HTTPS
@@ -59,7 +59,7 @@ _TODO: add example for creating SSH keys and adding to GitHub profile_
 
 You can get Python from Python.org here:
 
-    https://www.python.org/downloads/windows/
+- https://www.python.org/downloads/windows/
 
 We recommend the latest "stable / released" 64-bit version, currently
 3.10 or 3.11 by platform.
@@ -89,7 +89,7 @@ These examples assume that your computer can see and control your spectrometer
 via a libusb-compatible driver (appears under "libusb-win32" in Device Manager).
 The simplest way to install these drivers is generally to install ENLIGHTEN:
 
-    https://wasatchphotonics.com/enlighten/
+- https://wasatchphotonics.com/enlighten/
 
 Otherwise, see [Wasatch.PY](https://github.com/WasatchPhotonics/Wasatch.PY) for
 information on configuring libusb for your platform (remembering to include the
