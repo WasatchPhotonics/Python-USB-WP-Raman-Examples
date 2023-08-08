@@ -31,7 +31,7 @@ hosted at the same link.
 
 # Installation
 
-To use these Python scripts, you may need to install up to four different
+To use these Python scripts, you may need to install up to five different
 software products:
 
 1. Git (unless already installed)
