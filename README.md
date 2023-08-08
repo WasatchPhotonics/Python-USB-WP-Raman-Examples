@@ -81,7 +81,7 @@ by opening a DOS or Git Cmd shell and typing:
 The following pip modules should allow you to run the majority of scripts
 in the repository:
 
-    C:> pip install pyusb libusb matplotlib numpy
+    C:> py -m pip install pyusb libusb matplotlib numpy
 
 ## libusb-win32 .inf files
 
