@@ -42,11 +42,11 @@ software products:
 
 ## Git Installation
 
-We recommend Git for Windows:
+Download the latesst 64 bit version of Git for Windows.
 
-- https://gitforwindows.org/
+[https://git-scm.com/download/win](https://git-scm.com/download/win)
 
-After installation, open a Git Command shell (looks like a DOS prompt), change
+After installation, open a Git Command shell, change
 into whatever directory holds your source code projects, and type (HTTPS
 example shown):
 
@@ -68,7 +68,7 @@ The Python.org distribution will install into /Users/username/AppData/Local/Prog
 and will not add a program "python.exe" to your path.
 
 However, it will add a "py.exe" to your path, which you should be able to confirm
-by opening a DOS or Git Cmd shell and typing:
+by opening Command Prompt or Git Cmd shell and typing:
 
     C:> where py
     C:\Windows\py.exe
