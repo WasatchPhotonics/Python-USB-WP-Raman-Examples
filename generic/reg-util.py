@@ -1,5 +1,14 @@
 #!/usr/bin/python
 
+"""
+Continue Graphical Reg Util in greg-util.py
+
+This file should contain the CLI version and/or module implementation
+
+Note, that even if this is a module implementation, we will keep it baked into
+greg-util such that everything is standalone.
+"""
+
 import sys
 import usb.core
 import usb.util
