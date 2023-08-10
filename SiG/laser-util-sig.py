@@ -3,6 +3,7 @@
 import sys
 import re
 from time import sleep
+from datetime import datetime
 
 import traceback
 import usb.core
@@ -14,27 +15,28 @@ import matplotlib.pyplot as plt
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
-TIMEOUT_MS = 1000
+TIMEOUT_MS = 3000
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
-# An extensible, stateful "Test Fixture"
 class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
         self.subformat = None
         self.dev = None
 
-        parser = argparse.ArgumentParser()
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--acquire-after",       action="store_true", help="acquire after")
         parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              action="store_true", help="enable laser")
-        parser.add_argument("--integration-time-ms", type=int,            help="integration time (default 100ms)", default=100)
-        parser.add_argument("--mod-enable",          type=str,            help="dis/enable laser modulation (bool)")
-        parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
+        parser.add_argument("--integration-time-ms", type=int,            help="integration time", default=100)
+        parser.add_argument("--mod-enable",          action="store_true", help="enable laser modulation")
+        parser.add_argument("--mod-period-us",       type=int,            help="laser modulation pulse period (µs)", default=1000)
+        parser.add_argument("--mod-width-us",        type=int,            help="laser modulation pulse width (µs)", default=100)
+        parser.add_argument("--pid",                 default="4000",      help="USB PID in hex", choices=["1000", "2000", "4000"])
         parser.add_argument("--raman-delay-ms",      type=int,            help="set laser warm-up delay in Raman Mode (~ms)")
         parser.add_argument("--raman-mode",          type=str,            help="dis/enable raman mode (links firing to integration) (bool)")
         parser.add_argument("--selected-adc",        type=int,            help="set selected adc")
@@ -42,8 +44,16 @@ class Fixture(object):
         parser.add_argument("--stopline",            type=int,            help="set stopline for binning (not laser)")
         parser.add_argument("--optimize-roi",        action="store_true", help="optimize vertical ROI")
         parser.add_argument("--watchdog-sec",        type=int,            help="set laser watchdog (sec)")
-        parser.add_argument("--pixels",              type=int,            help="number of pixels (default 1952)", default=1952)
-        parser.add_argument("--scans-to-average",    type=int,            help="scans to average (default 10)", default=10)
+        parser.add_argument("--power-attenuator",    type=int,            help="set laser power attenuator (max power control via 8-bit digital potentiometer)")
+        parser.add_argument("--pixels",              type=int,            help="number of pixels", default=1952)
+        parser.add_argument("--wait-sec",            type=int,            help="delay after setting power (how long to fire laser)")
+        parser.add_argument("--scans-to-average",    type=int,            help="scans to average", default=10)
+        parser.add_argument("--ramp-power-attenuator", action="store_true", help="ramp laser power attenuator (0 to 255 and back by 10 with 5sec soak)")
+        parser.add_argument("--tec-setpoint",        type=int,            help="set the laser TEC setpoint (12-bit range)", default=792)
+        parser.add_argument("--ramp-tec",            action="store_true", help="ramp TEC setpoint min->max->min")
+        parser.add_argument("--ramp-tec-step",       type=int,            help="ramp increment", default=200)
+        parser.add_argument("--ramp-tec-max",        type=int,            help="ramp max", default=4095)
+        parser.add_argument("--ramp-tec-min",        type=int,            help="ramp min", default=0)
 
         self.args = parser.parse_args()
 
@@ -58,13 +68,29 @@ class Fixture(object):
     def run(self):
         plt.ion()
 
+        self.set_enable(False)
+
         self.dump("before")
 
         if self.args.acquire_before:
-            self.acquire()
+            self.take_averaged_measurement()
 
-        if self.args.mod_enable is not None:
-            self.set_modulation_enable(self.str2bool(self.args.mod_enable))
+        if self.args.tec_setpoint:
+            self.set_tec_setpoint(self.args.tec_setpoint)
+
+        if self.args.mod_enable:
+            self.set_modulation_params()
+
+        if self.args.ramp_power_attenuator:
+            self.do_ramp_power_attenuator()
+
+        if self.args.power_attenuator is not None:
+            self.get_power_attenuator()
+            self.set_power_attenuator(self.args.power_attenuator)
+            self.get_power_attenuator()
+
+        if self.args.ramp_tec:
+            self.do_ramp_tec()
 
         if self.args.watchdog_sec is not None:
             self.set_watchdog_sec(self.args.watchdog_sec)
@@ -94,10 +120,12 @@ class Fixture(object):
             self.optimize_roi()
 
         if self.args.acquire_after:
-            self.acquire()
+            self.take_averaged_measurement()
 
-        if self.args.enable:
-            self.set_enable(False)
+        if self.args.wait_sec is not None:
+            self.sleep_sec(self.args.wait_sec)
+
+        self.set_enable(False)
 
         self.dump("after")
 
@@ -123,8 +151,11 @@ class Fixture(object):
 
     def acquire(self):
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
-        self.send_cmd(0xad, 0)
-        data = self.dev.read(0x82, self.args.pixels * 2, timeout=timeout_ms)
+        print("sending acquire")
+        self.send_cmd(0xad)
+        bytes_to_read = self.args.pixels * 2
+        print(f"reading {bytes_to_read} bytes")
+        data = self.dev.read(0x82, bytes_to_read, timeout=timeout_ms)
         spectrum = []
         for i in range(0, len(data), 2):
             spectrum.append(data[i] | (data[i+1] << 8))
@@ -142,6 +173,56 @@ class Fixture(object):
     def set_enable(self, flag):
         print("setting laserEnable to %s" % ("on" if flag else "off"))
         self.send_cmd(0xbe, 1 if flag else 0)
+
+    def set_tec_setpoint(self, dac):
+        dac = min(0xfff, max(0, int(round(dac))))
+        print(f"setting LASER_TEC_SETPOINT 0x{dac:02x}")
+        self.send_cmd(0xe7, dac)
+
+    ### Laser Power Attenuator ################################################
+
+    def get_power_attenuator(self):
+        value = self.get_cmd(0x83, msb_len=1)
+        print(f"laser power attenuator is 0x{value:02x}")
+        return value
+
+    def set_power_attenuator(self, value):
+        value &= 0xff
+        print(f"setting laser power attenuator to 0x{value:02x}")
+        self.set_enable(False)
+        self.send_cmd(0x82, value)
+        self.set_enable(True)
+
+    def do_ramp_power_attenuator(self):
+        for i in range(0, 255, 32):
+            self.set_power_attenuator(i)
+            self.sleep_sec(self.args.wait_sec)
+        for i in range(255, -1, -32):
+            self.set_power_attenuator(i)
+            self.sleep_sec(self.args.wait_sec)
+
+    ### Laser TEC #############################################################
+
+    def do_ramp_tec(self):
+        lo = self.args.ramp_tec_min
+        hi = self.args.ramp_tec_max
+        step = self.args.ramp_tec_step
+
+        self.set_enable(True)
+        for dac in range(lo, hi+1, step):
+            self.set_tec_setpoint(dac)
+            self.sleep_sec(self.args.wait_sec)
+
+        for dac in range(hi, lo-1, -1 * step):
+            self.set_tec_setpoint(dac)
+            self.sleep_sec(self.args.wait_sec)
+
+        self.set_enable(False)
+        sys.exit(0)
+            
+    def set_tec_setpoint(self, dac):
+        print(f"setting LASER_TEC_SETPOINT 0x{dac:02x}")
+        self.send_cmd(0xe7, dac)
 
     ### Selected ADC ##########################################################
 
@@ -179,6 +260,29 @@ class Fixture(object):
     def set_modulation_enable(self, flag):
         print("setting laserModulationEnable to %s" % ("on" if flag else "off"))
         self.send_cmd(0xbd, 1 if flag else 0)
+
+    def set_modulation_params(self):
+        if not self.args.mod_enable:
+            return
+
+        if self.args.mod_period_us > 0xffff or \
+           self.args.mod_width_us > 0xffff:
+            print("error: lame script doesn't support full 40-bit 5-byte args")
+            return
+
+        # should we modulate after all?
+        if self.args.mod_period_us <= self.args.mod_width_us:
+            print("disabling modulation because period %d <= width %d" % (self.args.mod_period_us, self.args.mod_width_us))
+            self.set_modulation_enable(False)
+            return
+
+        print("setting LASER_MOD_PULSE_PERIOD %d" % self.args.mod_period_us)
+        self.send_cmd(0xc7, self.args.mod_period_us, buf=[0]*8)
+
+        print("setting LASER_MOD_PULSE_WIDTH %d" % self.args.mod_width_us)
+        self.send_cmd(0xdb, self.args.mod_width_us, buf=[0]*8)
+
+        self.set_modulation_enable(True)
 
     ### Raman Mode ############################################################
 
@@ -395,7 +499,7 @@ class Fixture(object):
         if self.args.debug:
             print("DEBUG: %s" % msg)
 
-    def send_cmd(self, cmd, value, index=0, buf=None):
+    def send_cmd(self, cmd, value=0, index=0, buf=None):
         if buf is None:
             if self.is_arm():
                 buf = [0] * 8
@@ -404,8 +508,33 @@ class Fixture(object):
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
-    def get_cmd(self, cmd, value=0, index=0, length=64):
-        return self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+    def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None):
+        result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+
+        value = 0
+        if msb_len is not None:
+            for i in range(msb_len):
+                value = value << 8 | result[i]
+            return value
+        elif lsb_len is not None:
+            for i in range(lsb_len):
+                value = (result[i] << (8 * i)) | value
+            return value
+        else:
+            return result
+
+    def sleep_sec(self, sec):
+        if self.pid == 0x4000:
+            # monitor battery while sleeping
+            start = datetime.now()
+            elapsed_sec = (datetime.now() - start).total_seconds()
+            while elapsed_sec < sec:
+                remaining = sec - elapsed_sec
+                print(f"Battery: {self.get_battery_state()} ({round(remaining)}sec remaining)")
+                sleep(min(5, remaining))
+                elapsed_sec = (datetime.now() - start).total_seconds()
+        else:
+            sleep(sec)
 
 fixture = Fixture()
 if fixture.dev:
