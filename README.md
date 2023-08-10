@@ -31,7 +31,7 @@ hosted at the same link.
 
 # Installation
 
-To use these Python scripts, you may need to install up to four different
+To use these Python scripts, you may need to install up to five different
 software products:
 
 1. Git (unless already installed)
@@ -42,11 +42,11 @@ software products:
 
 ## Git Installation
 
-We recommend Git for Windows:
+Download the latesst 64 bit version of Git for Windows.
 
-    https://gitforwindows.org/
+[https://git-scm.com/download/win](https://git-scm.com/download/win)
 
-After installation, open a Git Command shell (looks like a DOS prompt), change
+After installation, open a Git Command shell, change
 into whatever directory holds your source code projects, and type (HTTPS
 example shown):
 
@@ -59,7 +59,7 @@ _TODO: add example for creating SSH keys and adding to GitHub profile_
 
 You can get Python from Python.org here:
 
-    https://www.python.org/downloads/windows/
+- https://www.python.org/downloads/windows/
 
 We recommend the latest "stable / released" 64-bit version, currently
 3.10 or 3.11 by platform.
@@ -68,7 +68,7 @@ The Python.org distribution will install into /Users/username/AppData/Local/Prog
 and will not add a program "python.exe" to your path.
 
 However, it will add a "py.exe" to your path, which you should be able to confirm
-by opening a DOS or Git Cmd shell and typing:
+by opening Command Prompt or Git Cmd shell and typing:
 
     C:> where py
     C:\Windows\py.exe
@@ -81,7 +81,7 @@ by opening a DOS or Git Cmd shell and typing:
 The following pip modules should allow you to run the majority of scripts
 in the repository:
 
-    C:> pip install pyusb libusb matplotlib numpy
+    C:> py -m pip install pyusb libusb matplotlib numpy
 
 ## libusb-win32 .inf files
 
@@ -89,7 +89,7 @@ These examples assume that your computer can see and control your spectrometer
 via a libusb-compatible driver (appears under "libusb-win32" in Device Manager).
 The simplest way to install these drivers is generally to install ENLIGHTEN:
 
-    https://wasatchphotonics.com/enlighten/
+- https://wasatchphotonics.com/enlighten/
 
 Otherwise, see [Wasatch.PY](https://github.com/WasatchPhotonics/Wasatch.PY) for
 information on configuring libusb for your platform (remembering to include the
