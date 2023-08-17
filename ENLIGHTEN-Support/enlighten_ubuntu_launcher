@@ -29,7 +29,7 @@ if [ -e "$INSTALLPATH/completed.txt" ]; then
 	export PYTHONUTF8=1
 	export QT_AUTO_SCREEN_SCALE_FACTOR=1
 	export PYTHONPATH="../SpyC_Writer/src:../Wasatch.PY:pluginExamples:.:enlighten/assets/uic_qrc"
-	python3.7 scripts/Enlighten.py
+	python3.7 scripts/Enlighten.py --log-level debug 1>enlighten.out 2>enlighten.err
 else
 
 	echo "Enlighten is not yet installed. Would you like to install it?"
