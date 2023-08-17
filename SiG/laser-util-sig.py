@@ -119,7 +119,7 @@ class Fixture(object):
 
         if self.args.raman_mode is not None:
             self.set_raman_mode(self.str2bool(self.args.raman_mode))
-			
+            
         if self.args.enable:
             self.set_enable(True)
 
@@ -127,7 +127,7 @@ class Fixture(object):
             self.set_startline(self.args.startline)
 
         if self.args.stopline is not None:
-            self.set_stopline(self.args.stopline)			
+            self.set_stopline(self.args.stopline)           
 
         if self.args.optimize_roi:
             self.optimize_roi()
@@ -179,7 +179,7 @@ class Fixture(object):
         return spectrum
 
     ### Enabled ###############################################################
-		
+        
     def get_enable(self):
         return 0 != self.get_cmd(0xe2)[0]
 
@@ -289,15 +289,15 @@ class Fixture(object):
         if raw is None:
             raw = self.get_laser_thermistor_raw()
 
-        degC = 0
-        voltage    = 2.5 * raw / 4096
-        resistance = 21450.0 * voltage / (2.5 - voltage) 
-
-        if resistance < 0:
-            print(f"get_laser_temperature_degC: can't compute degC: raw 0x{raw:04x}, voltage = {voltage}, resistance = {resistance}")
-            return -999
-
         try:
+            degC = 0
+            voltage    = 2.5 * raw / 4096
+            resistance = 21450.0 * voltage / (2.5 - voltage) 
+
+            if resistance < 0:
+                print(f"get_laser_temperature_degC: can't compute degC: raw 0x{raw:04x}, voltage = {voltage}, resistance = {resistance}")
+                return -999
+
             logVal     = math.log(resistance / 10000.0)
             insideMain = logVal + 3977.0 / (25 + 273.0)
             degC       = 3977.0 / insideMain - 273.0
@@ -424,7 +424,7 @@ class Fixture(object):
             return
 
         print("setting startline to %d" % linenum)
-        self.send_cmd(0xff, 0x21, linenum)	
+        self.send_cmd(0xff, 0x21, linenum)  
 
 
     ### Stop Line ##############################################################
@@ -443,7 +443,7 @@ class Fixture(object):
             return
 
         print("setting stopline to %d" % linenum)
-        self.send_cmd(0xff, 0x23, linenum)	
+        self.send_cmd(0xff, 0x23, linenum)  
 
     ### Optimize Start/Stop ####################################################
 
