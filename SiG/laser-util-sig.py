@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
-import sys
 import re
+import sys
+import math
+
 from time import sleep
 from datetime import datetime
 
@@ -26,6 +28,8 @@ class Fixture(object):
         self.eeprom_pages = None
         self.subformat = None
         self.dev = None
+        self.selected_adc = None
+        self.tec_enabled = True
 
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--acquire-after",       action="store_true", help="acquire after")
@@ -49,7 +53,9 @@ class Fixture(object):
         parser.add_argument("--wait-sec",            type=int,            help="delay after setting power (how long to fire laser)")
         parser.add_argument("--scans-to-average",    type=int,            help="scans to average", default=10)
         parser.add_argument("--ramp-power-attenuator", action="store_true", help="ramp laser power attenuator (0 to 255 and back by 10 with 5sec soak)")
-        parser.add_argument("--tec-setpoint",        type=int,            help="set the laser TEC setpoint (12-bit range)", default=792)
+        parser.add_argument("--tec-setpoint",        type=int,            help="set the laser TEC setpoint (12-bit range)", default=0x318)
+        parser.add_argument("--tec-disable",         action="store_true", help="disable TEC (rare)")
+        parser.add_argument("--tec-enable",          action="store_true", help="forcibly enable TEC (rare)")
         parser.add_argument("--ramp-tec",            action="store_true", help="ramp TEC setpoint min->max->min")
         parser.add_argument("--ramp-tec-step",       type=int,            help="ramp increment", default=200)
         parser.add_argument("--ramp-tec-max",        type=int,            help="ramp max", default=4095)
@@ -71,9 +77,16 @@ class Fixture(object):
         self.set_enable(False)
 
         self.dump("before")
-
         if self.args.acquire_before:
             self.take_averaged_measurement()
+
+        # by default, the TEC *should* already be on, and current FW will 
+        # forcibly enable it whenever you set the TEC setpoint, but these can be 
+        # used to test corner-cases
+        if self.args.tec_disable:
+            self.set_tec_enable(False)
+        elif self.args.tec_enable:
+            self.set_tec_enable(True)
 
         if self.args.tec_setpoint:
             self.set_tec_setpoint(self.args.tec_setpoint)
@@ -89,11 +102,11 @@ class Fixture(object):
             self.set_power_attenuator(self.args.power_attenuator)
             self.get_power_attenuator()
 
-        if self.args.ramp_tec:
-            self.do_ramp_tec()
-
         if self.args.watchdog_sec is not None:
             self.set_watchdog_sec(self.args.watchdog_sec)
+
+        if self.args.ramp_tec:
+            self.do_ramp_tec()
 
         if self.args.integration_time_ms is not None:
             self.set_integration_time_ms(self.args.integration_time_ms)
@@ -106,7 +119,7 @@ class Fixture(object):
 
         if self.args.raman_mode is not None:
             self.set_raman_mode(self.str2bool(self.args.raman_mode))
-			
+            
         if self.args.enable:
             self.set_enable(True)
 
@@ -114,7 +127,7 @@ class Fixture(object):
             self.set_startline(self.args.startline)
 
         if self.args.stopline is not None:
-            self.set_stopline(self.args.stopline)			
+            self.set_stopline(self.args.stopline)           
 
         if self.args.optimize_roi:
             self.optimize_roi()
@@ -166,18 +179,13 @@ class Fixture(object):
         return spectrum
 
     ### Enabled ###############################################################
-		
+        
     def get_enable(self):
         return 0 != self.get_cmd(0xe2)[0]
 
     def set_enable(self, flag):
         print("setting laserEnable to %s" % ("on" if flag else "off"))
         self.send_cmd(0xbe, 1 if flag else 0)
-
-    def set_tec_setpoint(self, dac):
-        dac = min(0xfff, max(0, int(round(dac))))
-        print(f"setting LASER_TEC_SETPOINT 0x{dac:02x}")
-        self.send_cmd(0xe7, dac)
 
     ### Laser Power Attenuator ################################################
 
@@ -203,7 +211,16 @@ class Fixture(object):
 
     ### Laser TEC #############################################################
 
+    def set_tec_enable(self, flag):
+        print(f"setting TEC enable {flag}")
+        self.send_cmd(0xb4, 1 if flag else 0)
+        self.tec_enabled = flag
+
     def do_ramp_tec(self):
+        if not self.tec_enabled:
+            print("can't set TEC setpoint because TEC disabled")
+            return
+
         lo = self.args.ramp_tec_min
         hi = self.args.ramp_tec_max
         step = self.args.ramp_tec_step
@@ -221,10 +238,16 @@ class Fixture(object):
         sys.exit(0)
             
     def set_tec_setpoint(self, dac):
+        if not self.tec_enabled:
+            print("can't set TEC setpoint because TEC disabled")
+            return
+
+        dac = min(0xfff, max(0, int(round(dac))))
         print(f"setting LASER_TEC_SETPOINT 0x{dac:02x}")
         self.send_cmd(0xe7, dac)
 
-    ### Selected ADC ##########################################################
+
+    ### ADC ###################################################################
 
     def get_selected_adc(self):
         return self.get_cmd(0xee)[0]
@@ -234,9 +257,60 @@ class Fixture(object):
             print("ERROR: selectedADC requires 0 or 1")
             return
 
-        print("setting selectedADC to %d" % n)
-        self.send_cmd(0xed, n)
+        if self.selected_adc is not None and self.selected_adc == n:
+            return
 
+        # print("setting selectedADC to %d" % n)
+        self.send_cmd(0xed, n)
+        self.selected_adc = n
+
+        # stabilization throwaways
+        for i in range(2):
+            self.get_adc()
+
+    def get_adc(self, n=None):
+        if n is not None:
+            self.set_selected_adc(n)
+        return self.get_cmd(0xd5, lsb_len=2) & 0xfff
+
+    ### Laser Thermistor ######################################################
+
+    def get_laser_thermistor_raw(self):
+        return self.get_adc(0)
+
+    def get_laser_thermistor_degC(self, raw=None):
+        """
+        @see  docs in wasatch.FID.get_laser_thermistor_degC
+        @note we're not actually reading the thermistor here, we're reading the 
+              TEC IC's "buffered copy" of the thermistor value (likely different
+              than the original), and it is likely this calibration is invalid;
+              however it may still be USEFUL, so we're giving it a try
+        """
+        if raw is None:
+            raw = self.get_laser_thermistor_raw()
+
+        try:
+            degC = 0
+            voltage    = 2.5 * raw / 4096
+            resistance = 21450.0 * voltage / (2.5 - voltage) 
+
+            if resistance < 0:
+                print(f"get_laser_temperature_degC: can't compute degC: raw 0x{raw:04x}, voltage = {voltage}, resistance = {resistance}")
+                return -999
+
+            logVal     = math.log(resistance / 10000.0)
+            insideMain = logVal + 3977.0 / (25 + 273.0)
+            degC       = 3977.0 / insideMain - 273.0
+        except:
+            degC = -998
+
+        return degC
+
+    ### ViTEC (correlates to TEC current) #####################################
+
+    def get_laser_vitec_raw(self):
+        return self.get_adc(1)
+    
     ### Integration Time ######################################################
 
     def get_integration_time_ms(self):
@@ -325,6 +399,7 @@ class Fixture(object):
 
     def set_watchdog_sec(self, sec):
         if not self.is_sig():
+            print(f"set_watchdog_sec: skipping because not SiG")
             return
         if sec < 0 or sec > 0xffff:
             print("ERROR: watchdog requires uint16")
@@ -349,7 +424,7 @@ class Fixture(object):
             return
 
         print("setting startline to %d" % linenum)
-        self.send_cmd(0xff, 0x21, linenum)	
+        self.send_cmd(0xff, 0x21, linenum)  
 
 
     ### Stop Line ##############################################################
@@ -368,7 +443,7 @@ class Fixture(object):
             return
 
         print("setting stopline to %d" % linenum)
-        self.send_cmd(0xff, 0x23, linenum)	
+        self.send_cmd(0xff, 0x23, linenum)  
 
     ### Optimize Start/Stop ####################################################
 
@@ -524,18 +599,27 @@ class Fixture(object):
             return result
 
     def sleep_sec(self, sec):
-        if self.pid == 0x4000:
-            # monitor battery while sleeping
-            start = datetime.now()
-            elapsed_sec = (datetime.now() - start).total_seconds()
-            while elapsed_sec < sec:
-                remaining = sec - elapsed_sec
-                print(f"Battery: {self.get_battery_state()} ({round(remaining)}sec remaining)")
-                sleep(min(5, remaining))
-                elapsed_sec = (datetime.now() - start).total_seconds()
-        else:
+        if self.pid != 0x4000:
             sleep(sec)
+            return
+
+        # monitor battery and thermistor while sleeping
+        start = datetime.now()
+        elapsed_sec = (datetime.now() - start).total_seconds()
+        while elapsed_sec < sec:
+            remaining = sec - elapsed_sec
+            bat = self.get_battery_state()
+            therm = self.get_laser_thermistor_raw()
+            degC = self.get_laser_thermistor_degC(therm)
+            vitec = self.get_laser_vitec_raw()
+            print(f"Battery: battery {bat}, viTEC 0x{vitec:03x}, therm 0x{therm:03x} ({degC:.2f}C), {round(remaining)}sec remaining")
+            sleep(min(2, remaining))
+            elapsed_sec = (datetime.now() - start).total_seconds()
 
 fixture = Fixture()
 if fixture.dev:
-    fixture.run()
+    try:
+        fixture.run()
+    except Exception as ex:
+        print(f"caught {ex}")
+    fixture.set_enable(False)
