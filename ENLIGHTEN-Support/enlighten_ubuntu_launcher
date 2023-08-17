@@ -50,11 +50,6 @@ else
 	sudo apt install python3.7
 	sudo apt install python3.7-venv
 
-	# Didn't need to install pip separately the first time. Why not working?
-	#sudo apt install curl
-	#curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-	#python3.7 get-pip.py
-
 	sudo apt install libxcb-xinerama0
 	sudo apt install libusb-0.1-4
 
@@ -72,40 +67,46 @@ else
 	git checkout ubu-py37
 
 	# back to INSTALLPATH root
-	source $INSTALLPATH
+	cd $INSTALLPATH
+
+	# try to keep subsequent pip install scripts from failing ;_;
+	sudo apt install curl
+	curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+	python3.7 get-pip.py
+	python3.7 -m pip install numpy
 
 	# create venv for python dependencies
 	python3.7 -m venv pyEnl4_venv
 
 	# activate
-	source $INSTALLPATH/pyEnl4_venv/bin/activate
-
-	# try to keep subsequent pip install scripts from failing ;_;
-	python3.7 -m pip install --upgrade pip
+	source $INSTALLPATH/pyEnl4_venv/bin/activate                                           # Activated pyEnl4_venv
+                                                                                               # .....................
+	python3.7 -m pip install --upgrade pip                                                 # .....................
+	python3.7 get-pip.py
 	python3.7 -m pip install numpy
-
-	# install pip requirements
-	python3.7 -m pip install -r Enlighten/requirements.txt # crashes here (spc install script fails due to missing numpy??)
-	python3.7 -m pip install -r SpyC_Writer/requirements.txt
-	python3.7 -m pip install -r Wasatch.PY/requirements.txt
-
-	# install conda requirements (using venv, instead of conda, for easy dist)
-	python3.7 -m pip install PySide2
-	python3.7 -m pip install xlwt
-	python3.7 -m pip install superman
-	python3.7 -m pip install pyqtgraph
-	python3.7 -m pip install crcmod
-	python3.7 -m pip install bleak
-	python3.7 -m pip install numpy
-	python3.7 -m pip install pandas
-	python3.7 -m pip install pexpect
-	python3.7 -m pip install psutil
-	python3.7 -m pip install pytest
-	python3.7 -m pip install scipy
-	python3.7 -m pip install qimage2ndarray
-	python3.7 -m pip install pyudev
-
-	echo "installation completed $(date)" >> $INSTALLPATH/completed.txt
-
-	echo "The installation is complete. Rerun enlighten_ubuntu_launcher to use Enlighten."
-fi
+                                                                                               # .....................
+	# install pip requirements                                                             # .....................
+	python3.7 -m pip install -r Enlighten/requirements.txt                                 # .....................
+	python3.7 -m pip install -r SpyC_Writer/requirements.txt                               # .....................
+	python3.7 -m pip install -r Wasatch.PY/requirements.txt                                # .....................
+                                                                                               # .....................
+	# install conda requirements (using venv, instead of conda, for easy dist)             # .....................
+	python3.7 -m pip install PySide2                                                       # .....................
+	python3.7 -m pip install xlwt                                                          # .....................
+	python3.7 -m pip install superman                                                      # .....................
+	python3.7 -m pip install pyqtgraph                                                     # .....................
+	python3.7 -m pip install crcmod                                                        # .....................
+	python3.7 -m pip install bleak                                                         # .....................
+	python3.7 -m pip install numpy                                                         # .....................
+	python3.7 -m pip install pandas                                                        # .....................
+	python3.7 -m pip install pexpect                                                       # .....................
+	python3.7 -m pip install psutil                                                        # .....................
+	python3.7 -m pip install pytest                                                        # .....................
+	python3.7 -m pip install scipy                                                         # .....................
+	python3.7 -m pip install qimage2ndarray                                                # .....................
+	python3.7 -m pip install pyudev                                                        # .....................
+                                                                                               # .....................
+	echo "installation completed $(date)" >> $INSTALLPATH/completed.txt                    # .....................
+                                                                                               # .....................
+	echo "The installation is complete. Rerun enlighten_ubuntu_launcher to use Enlighten." # .....................
+fi                                                                                             # Activated pyEnl4_venv
