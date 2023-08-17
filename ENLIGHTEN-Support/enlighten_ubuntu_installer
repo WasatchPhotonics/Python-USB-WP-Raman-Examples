@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+
+# Title: Enlighten Ubuntu Installer
+# Author: Samie Bee 2023
+# Description: This script has no dependencies. It will install and run Enlighten on Ubuntu from source.
+
+# This installer is written for Enlighten 4.0.12 to be installed to Ubuntu 22
+# It includes an installation of Python3.7 separate from the system install.
+
+# Do not adapt this script for installations of Enlighten 4.2.0+
+# Python3.7 support is in decline
+
+# The ubu-py37 is to be considered a downstream distribution branch
+# containing a tag + patches required to run on Ubuntu.
+
+# It is not recommended to adapt this installer for Enlighten 4.0.18+
+# Write a new one instead.
+
+INSTALLPATH="src-dist-Enlighten"
+
+echo "This script will install files necessary to run Enlighten into a folder called \"$INSTALLPATH\"."
+echo "You may continue a partially completed install this way."
+
+# requiring additional interaction was annoying, I imagine you'll check this source anyway
+#echo ""
+#echo "Press enter to continue, or Ctrl-C to cancel."
+#read null
+
+echo "Your password might be needed for system dependencies: git, python3.7, python3.7-venv, libxcb-xinerama0, libusb-0.1-4"
+sudo apt update
+sudo apt install git
+sudo apt install software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt install python3.7
+sudo apt install python3.7-venv
+python3.7 -m pip install --upgrade pip
+sudo apt install libxcb-xinerama0
+sudo apt install libusb-0.1-4
+
+mkdir "$INSTALLPATH" 
+cd "$INSTALLPATH"
+
+# clone Enlighten and internal dependencies
+git clone https://github.com/WasatchPhotonics/Enlighten
+git clone https://github.com/WasatchPhotonics/SpyC_Writer
+git clone https://github.com/WasatchPhotonics/Wasatch.PY
+
+# checkout Ubuntu distribution branch on each
+cd Enlighten
+git checkout ubu-py37
+cd ../SpyC_Writer
+git checkout ubu-py37
+cd ../Wasatch.PY
+git checkout ubu-py37
+
+# back to INSTALLPATH root
+cd ..
+
+# create venv for python dependencies
+python3.7 -m venv pyEnl4_venv
+
+# activate
+source $(pwd)/pyEnl4_venv/bin/activate
+
+# some install scripts seem to require numpy?
+# if this is commented, it means I was able to run without it
+#python3.7 -m pip install numpy
+
+# install pip requirements
+python3.7 -m pip install -r Enlighten/requirements.txt
+python3.7 -m pip install -r SpyC_Writer/requirements.txt
+python3.7 -m pip install -r Wasatch.PY/requirements.txt
+
+# install conda requirements (using venv, instead of conda, for easy dist)
+python3.7 -m pip install PySide2
+python3.7 -m pip install xlwt
+python3.7 -m pip install superman
+python3.7 -m pip install pyqtgraph
+python3.7 -m pip install crcmod
+python3.7 -m pip install bleak
+python3.7 -m pip install numpy
+python3.7 -m pip install pandas
+python3.7 -m pip install pexpect
+python3.7 -m pip install psutil
+python3.7 -m pip install pytest
+python3.7 -m pip install scipy
+python3.7 -m pip install qimage2ndarray
+python3.7 -m pip install pyudev
+
+# run Enlighten for the first time
+cd Enlighten
+export PYTHONUTF8=1
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+export PYTHONPATH="../SpyC_Writer/src:../Wasatch.PY:pluginExamples:.:enlighten/assets/uic_qrc"
+python3.7 scripts/Enlighten.py

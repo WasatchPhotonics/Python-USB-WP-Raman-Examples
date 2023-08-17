@@ -1,14 +1,5 @@
 #!/usr/bin/python
 
-"""
-Continue Graphical Reg Util in greg-util.py
-
-This file should contain the CLI version and/or module implementation
-
-Note, that even if this is a module implementation, we will keep it baked into
-greg-util such that everything is standalone.
-"""
-
 import sys
 import usb.core
 import usb.util
@@ -135,7 +126,8 @@ class RegisterUtil(tk.Tk):
         # keyboard shortcuts (untested)
         self.bind('<Control-R>', self.read_callback)
         self.bind('<Control-W>', self.write_callback)
-        self.bind('<Control-V>', self.write_value.set_focus)
+
+        self.bind('<Control-V>', self.write_value.focus)
 
     ############################################################################
     # event callbacks
@@ -186,7 +178,7 @@ class RegisterUtil(tk.Tk):
             desc = self.reg[name]["desc"]
             default = self.reg[name]["default"]
             value = self.read(addr)
-            print(f"{name:-16s}   0x{addr:04x}   0x{value:04x}   0x{default:04x} {desc}")
+            print(f"{name:16s}   0x{addr:04x}   0x{value:04x}   0x{default:04x} {desc}")
 
     ############################################################################
     # methods
