@@ -16,6 +16,9 @@
 # It is not recommended to adapt this installer for Enlighten 4.0.18+
 # Write a new one instead.
 
+# fail on error
+set -e
+
 INSTALLPATH="$HOME/.enlighten"
 
 if [ -e "$INSTALLPATH/completed.txt" ]; then
@@ -36,7 +39,7 @@ else
 	echo "Press enter to continue, or Ctrl-C to cancel."
 	read null
 
-	mkdir "$INSTALLPATH" 
+	mkdir -p "$INSTALLPATH" 
 	cd "$INSTALLPATH"
 
 	echo "Your password might be needed for system dependencies: git, python3.7, python3.7-venv, libxcb-xinerama0, libusb-0.1-4, curl"
@@ -47,11 +50,11 @@ else
 	sudo apt install python3.7
 	sudo apt install python3.7-venv
 
-	sudo apt install curl
-	curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-	python3.7 get-pip.py
+	# Didn't need to install pip separately the first time. Why not working?
+	#sudo apt install curl
+	#curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+	#python3.7 get-pip.py
 
-	python3.7 -m pip install --upgrade pip
 	sudo apt install libxcb-xinerama0
 	sudo apt install libusb-0.1-4
 
@@ -69,7 +72,7 @@ else
 	git checkout ubu-py37
 
 	# back to INSTALLPATH root
-	cd ..
+	source $INSTALLPATH
 
 	# create venv for python dependencies
 	python3.7 -m venv pyEnl4_venv
@@ -77,12 +80,12 @@ else
 	# activate
 	source $INSTALLPATH/pyEnl4_venv/bin/activate
 
-	# some install scripts seem to require numpy?
-	# if this is commented, it means I was able to run without it
+	# try to keep subsequent pip install scripts from failing ;_;
+	python3.7 -m pip install --upgrade pip
 	python3.7 -m pip install numpy
 
 	# install pip requirements
-	python3.7 -m pip install -r Enlighten/requirements.txt
+	python3.7 -m pip install -r Enlighten/requirements.txt # crashes here (spc install script fails due to missing numpy??)
 	python3.7 -m pip install -r SpyC_Writer/requirements.txt
 	python3.7 -m pip install -r Wasatch.PY/requirements.txt
 
