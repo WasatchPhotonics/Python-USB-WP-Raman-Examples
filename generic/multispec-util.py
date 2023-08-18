@@ -47,6 +47,7 @@ class Fixture(object):
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--pixels",              type=int,            help="override pixel count")
         parser.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
+        parser.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
         parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
@@ -288,6 +289,10 @@ class Fixture(object):
         degC       = 3977.0 / insideMain - 273.0
         print(f"laser temperature = {degC:.2f} C")
 
+    def get_frame_count(self, dev):
+        count = self.get_cmd(dev, 0xe4, lsb_len=2)
+        print(f"frame count = {count} (0x{count:04x})")
+
     def do_acquisitions(self):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
@@ -304,6 +309,9 @@ class Fixture(object):
 
                     if self.args.laser_enable:
                         self.get_laser_temperature(dev)
+
+                    if self.args.frame_id:
+                        self.get_frame_count(dev)
 
             self.debug(f"sleeping {self.args.delay_ms}ms")
             sleep(self.args.delay_ms / 1000.0 )
