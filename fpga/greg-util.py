@@ -99,7 +99,7 @@ class RegisterUtil(tk.Tk):
                 print(f"found VID 0x{dev.idVendor:04x} PID 0x{dev.idProduct:04x}")
                 self.dev = dev
                 self.dev.set_configuration()
-                usb.util.claim_interface(device, 0)
+                usb.util.claim_interface(self.dev, 0)
 
                 # TODO from ENG-001
                 # these probably default to correct, but that would be undefined behavior
