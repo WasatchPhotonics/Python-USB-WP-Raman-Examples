@@ -98,6 +98,15 @@ class RegisterUtil(tk.Tk):
             if dev.idVendor == 0x24aa and dev.idProduct == 0x4000:
                 print(f"found VID 0x{dev.idVendor:04x} PID 0x{dev.idProduct:04x}")
                 self.dev = dev
+                self.dev.set_configuration()
+                usb.util.claim_interface(device, 0)
+
+                # TODO from ENG-001
+                # these probably default to correct, but that would be undefined behavior
+                # LINK_MOD_TO_INTEGRATION = 0
+                # MOD_ENABLE = 0
+                # SET_TRIGGER_SOURCE = 0
+
                 return True
 
     def init_gui(self):
