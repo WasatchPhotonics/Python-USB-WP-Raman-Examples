@@ -111,7 +111,7 @@ class RegisterUtil(tk.Tk):
             print("Starting in Offline Mode: ignoring connected spectrometers and showing messages in stdout.")
             return True
         elif self.dev:
-            print(f"found VID 0x{dev.idVendor:04x} PID 0x{dev.idProduct:04x}")
+            print(f"found VID 0x{self.dev.idVendor:04x} PID 0x{self.dev.idProduct:04x}")
             self.dev.set_configuration()
             usb.util.claim_interface(self.dev, 0)
             return True
@@ -155,6 +155,31 @@ class RegisterUtil(tk.Tk):
         self.bind('<Control-W>', self.btn_write_clicked)
 
         self.bind('<Control-V>', self.textbox_write.focus)
+
+    def read(self, addr):
+
+        buf = usb.util.create_buffer(2)
+        if not offline_mode:
+            bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR, usb.util.CTRL_RECIPIENT_DEVICE)
+            self.dev.ctrl_transfer(bmReqType, 0x81, addr, 0x00, buf)
+        else:
+            # respond to reads with offline memory (default to 'beef') in offline mode
+            buf[0] = offline_mem.get(2*addr, 0xbe)
+            buf[1] = offline_mem.get(2*addr+1, 0xef)
+        
+        value = 0
+        if True:
+            # currently assuming register values are returned little-endian (network order)
+            for i in range(2):
+                value <<= 8
+                value |= buf[i]
+        else:
+            # ...if it turns out to be big-endian, easy fix :-)
+            for i in range(1, -1, -1):
+                value <<= 8
+                value |= buf[i]
+
+        return value
 
     ############################################################################
     # event callbacks
@@ -225,27 +250,7 @@ class RegisterUtil(tk.Tk):
         addr = self.reg[name]["addr"]
         desc = self.reg[name]["desc"]
         print(f"reading {name} 0x{addr:04x} ({desc})")
-
-        buf = usb.util.create_buffer(2)
-        if not offline_mode:
-            bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR, usb.util.CTRL_RECIPIENT_DEVICE)
-            self.dev.ctrl_transfer(bmReqType, 0x81, addr, 0x00, buf)
-        else:
-            # respond to reads with offline memory (default to 'beef') in offline mode
-            buf[0] = offline_mem.get(2*addr, 0xbe)
-            buf[1] = offline_mem.get(2*addr+1, 0xef)
-        
-        value = 0
-        if True:
-            # currently assuming register values are returned little-endian (network order)
-            for i in range(2):
-                value <<= 8
-                value |= buf[i]
-        else:
-            # ...if it turns out to be big-endian, easy fix :-)
-            for i in range(1, -1, -1):
-                value <<= 8
-                value |= buf[i]
+        value = self.read(addr)
 
         self.read_value.set(f"0x{value:04x}")
         print(f"read {name} 0x{addr:04x} received 0x{value:04x}")
