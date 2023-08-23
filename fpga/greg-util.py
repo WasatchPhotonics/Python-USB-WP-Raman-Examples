@@ -157,8 +157,8 @@ class RegisterUtil(tk.Tk):
         self.bind('<Control-V>', self.textbox_write.focus)
 
     def read(self, addr):
-
-        buf = usb.util.create_buffer(2)
+        """ reads register and returns value as int """
+        buf = usb.util.create_buffer(4)
         if not offline_mode:
             bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR, usb.util.CTRL_RECIPIENT_DEVICE)
             self.dev.ctrl_transfer(bmReqType, 0x81, addr, 0x00, buf)
