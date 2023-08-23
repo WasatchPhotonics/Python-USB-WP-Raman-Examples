@@ -6,6 +6,19 @@ import usb.util
 
 import tkinter as tk
 from tkinter import ttk
+from tkinter import StringVar
+
+# The UI is being developed by Samie who does not have a device that is 
+# compatible with these instructions. She will run this with 
+#offline_mode = True
+# The full program will be executed by Demetrios or Murty who will use
+#offline_mode = False
+# This should only be pushed to git with offline_mode = False
+offline_mode = False
+
+# offline memory is used in offline mode so I can test
+# writing to a register, followed by reading it's value back
+offline_mem = {}
 
 class RegisterUtil(tk.Tk):
 
@@ -93,21 +106,18 @@ class RegisterUtil(tk.Tk):
         self.init_gui()
 
     def init_usb(self):
-        self.dev = None
-        for dev in usb.core.find(find_all=True):
-            if dev.idVendor == 0x24aa and dev.idProduct == 0x4000:
-                print(f"found VID 0x{dev.idVendor:04x} PID 0x{dev.idProduct:04x}")
-                self.dev = dev
-                self.dev.set_configuration()
-                usb.util.claim_interface(self.dev, 0)
-
-                # TODO from ENG-001
-                # these probably default to correct, but that would be undefined behavior
-                # LINK_MOD_TO_INTEGRATION = 0
-                # MOD_ENABLE = 0
-                # SET_TRIGGER_SOURCE = 0
-
-                return True
+        self.dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+        if offline_mode:
+            print("Starting in Offline Mode: ignoring connected spectrometers and showing messages in stdout.")
+            return True
+        elif self.dev:
+            print(f"found VID 0x{dev.idVendor:04x} PID 0x{dev.idProduct:04x}")
+            self.dev.set_configuration()
+            usb.util.claim_interface(self.dev, 0)
+            return True
+        else:
+            print("No ARM-based Wasatch Photonics spectrometer found")
+            return False
 
     def init_gui(self):
         self.title("FPGA Register Utility")
@@ -118,31 +128,39 @@ class RegisterUtil(tk.Tk):
         tk.Label(text="Value").grid(row=row, column=2)
 
         row += 1 # [ (Write) | [name v] | [_____] ]
-        tk.Button(text="Write", command=self.write_callback).grid(row=row, column=0)
+        self.btn_write = tk.Button(text="Write", command=self.btn_write_clicked).grid(row=row, column=0)
         self.write_addr = self.make_addr_combobox(row, 1)
-        self.write_value = tk.Entry(width=6)
-        self.write_value.grid(row=row, column=2)
+
+        self.textbox_write_stringvar = StringVar()
+        self.textbox_write_stringvar.set('0000')
+        self.textbox_write_stringvar.trace("w", self.textbox_write_textchanged)
+        self.textbox_write = tk.Entry(width=6, textvariable=self.textbox_write_stringvar)
+
+        # special case for backspace on 4 character hex display
+        self.textbox_write.bind("<BackSpace>", self.textbox_write_backspace)
+
+        self.textbox_write.grid(row=row, column=2)
 
         row += 1 # [ (Read)  | [name v] | [_____] ]
-        tk.Button(text="Read", command=self.read_callback).grid(row=row, column=0)
+        self.btn_read = tk.Button(text="Read", command=self.btn_read_clicked).grid(row=row, column=0)
         self.read_addr = self.make_addr_combobox(row, 1)
         self.read_value = tk.StringVar(value="0xBEEF")
         tk.Label(height=1, width=6, textvariable=self.read_value).grid(row=row, column=2)
 
         row += 1 # [ (__________READ_ALL________) ]
-        tk.Button(text="Read All", width=30, command=self.read_all_callback).grid(row=row, column=0, columnspan=3)
+        self.btn_read_all  = tk.Button(text="Read All", width=30, command=self.btn_read_all_clicked).grid(row=row, column=0, columnspan=3)
 
         # keyboard shortcuts (untested)
-        self.bind('<Control-R>', self.read_callback)
-        self.bind('<Control-W>', self.write_callback)
+        self.bind('<Control-R>', self.btn_read_clicked)
+        self.bind('<Control-W>', self.btn_write_clicked)
 
-        self.bind('<Control-V>', self.write_value.focus)
+        self.bind('<Control-V>', self.textbox_write.focus)
 
     ############################################################################
     # event callbacks
     ############################################################################
 
-    def write_callback(self):
+    def btn_write_clicked(self):
         """ user clicked the "write" button """
         name = self.write_addr.get().strip()
         if name not in self.reg:
@@ -151,7 +169,7 @@ class RegisterUtil(tk.Tk):
         addr = self.reg[name]["addr"]
         desc = self.reg[name]["desc"]
         try:
-            s = self.write_value.get().lower()
+            s = self.textbox_write.get().lower()
             if s.startswith("0x"):
                 s = s[2:]
             value = int(s, 16)
@@ -160,12 +178,46 @@ class RegisterUtil(tk.Tk):
 
         print(f"writing {name} 0x{addr:04x} <- 0x{value:04x} ({desc})")
 
-        buf = usb.util.create_buffer(8)
-        bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
-        self.dev.ctrl_transfer(bmReqType, 0x91, addr, value, buf)
+        if not offline_mode:
+            buf = usb.util.create_buffer(8)
+            bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
+            self.dev.ctrl_transfer(bmReqType, 0x91, addr, value, buf)
+        else:
+            # in offline mode, fake a memset in internal memory
+            offline_mem[2*addr] = int(s[0:2], 16)
+            offline_mem[2*addr+1] = int(s[2:4], 16)
 
-    def read_callback(self):
+    def textbox_write_backspace(self, event):
+        insert_index = self.textbox_write.index("insert")
+        if insert_index == 4:
+            textcontent = self.textbox_write_stringvar.get()
+            textcontent = textcontent[:3].zfill(4)
+            self.textbox_write_stringvar.set(textcontent)
+            # when deleting last character, keep cursor at end
+            return "break"
+
+    def textbox_write_textchanged(self, name, index, mode):
+        textcontent = self.textbox_write_stringvar.get()
+
+        insert_index = self.textbox_write.index("insert")
+        
+        # emulate 'replace mode'
+        textcontent = textcontent[:insert_index] + textcontent[insert_index+1:]
+
+        # we make sure that there's only 0-f characters
+        # and that there's always 4.
+        filtered_textcontent = ""
+        for c in textcontent:
+            if c in "0123456789abcdefABCDEF":
+                filtered_textcontent += c
+        filtered_textcontent = filtered_textcontent[:4]
+        filtered_textcontent = filtered_textcontent.zfill(4)
+
+        self.textbox_write_stringvar.set(filtered_textcontent)
+
+    def btn_read_clicked(self):
         """ user clicked the "read" button """
+        """ reads register and returns value as int """
         name = self.read_addr.get()
         if name not in self.reg:
             return
@@ -174,11 +226,31 @@ class RegisterUtil(tk.Tk):
         desc = self.reg[name]["desc"]
         print(f"reading {name} 0x{addr:04x} ({desc})")
 
-        value = self.read(addr)
+        buf = usb.util.create_buffer(2)
+        if not offline_mode:
+            bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR, usb.util.CTRL_RECIPIENT_DEVICE)
+            self.dev.ctrl_transfer(bmReqType, 0x81, addr, 0x00, buf)
+        else:
+            # respond to reads with offline memory (default to 'beef') in offline mode
+            buf[0] = offline_mem.get(2*addr, 0xbe)
+            buf[1] = offline_mem.get(2*addr+1, 0xef)
+        
+        value = 0
+        if True:
+            # currently assuming register values are returned little-endian (network order)
+            for i in range(2):
+                value <<= 8
+                value |= buf[i]
+        else:
+            # ...if it turns out to be big-endian, easy fix :-)
+            for i in range(1, -1, -1):
+                value <<= 8
+                value |= buf[i]
+
         self.read_value.set(f"0x{value:04x}")
         print(f"read {name} 0x{addr:04x} received 0x{value:04x}")
 
-    def read_all_callback(self):
+    def btn_read_all_clicked(self):
         print("Name            Addr    Value   Default Description")
         print("--------------- ------- ------- ------- ------------------------")
 
@@ -192,26 +264,6 @@ class RegisterUtil(tk.Tk):
     ############################################################################
     # methods
     ############################################################################
-
-    def read(self, addr):
-        """ reads register and returns value as int """
-        buf = usb.util.create_buffer(4)
-        bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR, usb.util.CTRL_RECIPIENT_DEVICE)
-        self.dev.ctrl_transfer(bmReqType, 0x81, addr, 0x00, buf)
-        
-        value = 0
-        if True:
-            # currently assuming register values are returned little-endian (network order)
-            for i in range(4):
-                value |= buf[i]
-                value <<= 8
-        else:
-            # ...if it turns out to be big-endian, easy fix :-)
-            for i in range(3, -1, -1):
-                value |= buf[i]
-                value <<= 8
-
-        return value
 
     def make_addr_combobox(self, row, col):
         """ 
@@ -243,8 +295,5 @@ class RegisterUtil(tk.Tk):
 # main()
 if __name__ == "__main__":
     util = RegisterUtil()
-    if not util.dev:
-        print("No ARM-based Wasatch Photonics spectrometer found")
-        sys.exit(1)
-
-    util.mainloop()
+    if util.dev or offline_mode:
+        util.mainloop()
