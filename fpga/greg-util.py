@@ -169,16 +169,10 @@ class RegisterUtil(tk.Tk):
             buf[1] = offline_mem.get(2*addr+1, 0xef)
         
         value = 0
-        if True:
-            # currently assuming register values are returned little-endian (network order)
-            for i in range(2):
-                value <<= 8
-                value |= buf[i]
-        else:
-            # ...if it turns out to be big-endian, easy fix :-)
-            for i in range(1, -1, -1):
-                value <<= 8
-                value |= buf[i]
+        # capture bytes from buf into value, LSB-first.
+        for b in buf[::-1]:
+            value <<= 8
+            value |= b
 
         return value
 
