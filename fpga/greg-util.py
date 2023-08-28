@@ -157,6 +157,25 @@ class RegisterUtil(tk.Tk):
 
         self.bind('<Control-V>', self.textbox_write.focus)
 
+    def bswap_bytes(self, buf):
+        """ cuts to 16-bit and swaps BIG<->LITTLE from buffer byte array """
+        # FPGA Sends and Receives in big endian
+        # ARM translates the i2c address
+        # ARM does not translate the data
+        buf = buf[0:2]
+        val = int.from_bytes(buf, "big")
+        return val
+    
+    def bswap_int(self, val):
+        """ cuts to 16-bit and swaps BIG<->LITTLE from int """
+        # FPGA Sends and Receives in big endian
+        # ARM translates the i2c address
+        # ARM does not translate the data
+        val = val.to_bytes(4, "little")
+        val = val[0:2]
+        val = int.from_bytes(val, "big")
+        return val
+
     def read(self, addr):
         """ reads register and returns value as int """
         buf = usb.util.create_buffer(4)
@@ -167,15 +186,21 @@ class RegisterUtil(tk.Tk):
             # respond to reads with offline memory (default to 'beef') in offline mode
             buf[0] = offline_mem.get(2*addr, 0xbe)
             buf[1] = offline_mem.get(2*addr+1, 0xef)
+
+        return self.bswap_bytes(buf)
+    
+    def write(self, addr, val):
+        """ writes values into fpga register """
+        val = self.bswap_int(val)
+        if not offline_mode:
+            buf = usb.util.create_buffer(4)
+            bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
+            self.dev.ctrl_transfer(bmReqType, 0x91, addr, val, buf)
+        else:
+            # in offline mode, fake a memset in internal memory
+            offline_mem[2*addr] = int(s[0:2], 16)
+            offline_mem[2*addr+1] = int(s[2:4], 16)
         
-        value = 0
-        # capture bytes from buf into value, LSB-first.
-        for b in buf[::-1]:
-            value <<= 8
-            value |= b
-
-        return value
-
     ############################################################################
     # event callbacks
     ############################################################################
@@ -198,14 +223,7 @@ class RegisterUtil(tk.Tk):
 
         print(f"writing {name} 0x{addr:04x} <- 0x{value:04x} ({desc})")
 
-        if not offline_mode:
-            buf = usb.util.create_buffer(8)
-            bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
-            self.dev.ctrl_transfer(bmReqType, 0x91, addr, value, buf)
-        else:
-            # in offline mode, fake a memset in internal memory
-            offline_mem[2*addr] = int(s[0:2], 16)
-            offline_mem[2*addr+1] = int(s[2:4], 16)
+        self.write(addr, value)
 
     def textbox_write_backspace(self, event):
         insert_index = self.textbox_write.index("insert")
