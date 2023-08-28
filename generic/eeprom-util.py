@@ -30,6 +30,7 @@ class Fixture(object):
         parser.add_argument("--erase",          action="store_true",    help="erase (write all 0xff)")
         parser.add_argument("--hex",            action="store_true",    help="output in hex")
         parser.add_argument("--force-offset",   action="store_true",    help="force ARMs to use the old 'offset' write method")
+        parser.add_argument("--noparse",        action="store_true",    help="don't parse EEPROM fields")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
@@ -50,7 +51,10 @@ class Fixture(object):
     def run(self):
         self.read_revs()
         self.read_eeprom()
-        self.parse_eeprom()
+
+        if not self.args.noparse:
+            self.parse_eeprom()
+
         self.dump_eeprom()
 
         if self.args.erase:
@@ -335,10 +339,11 @@ class Fixture(object):
                 buf = [0] * 8
             else:
                 buf = ""
-        self.debug("ctrl_transfer(%02x, %02x, %04x, %04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
+        self.debug("sending ctrl_transfer(%02x, %02x, %04x, %04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_cmd(self, cmd, value=0, index=0, length=64):
+        self.debug("reading ctrl_transfer(%02x, %02x, %04x, %04x, len %d)" % (HOST_TO_DEVICE, cmd, value, index, length))
         return self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
 
     ##  
@@ -380,10 +385,8 @@ class Fixture(object):
                 print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
                 return
 
-        if field is None:
-            self.debug("Unpacked [%s]: %s" % (data_type, unpack_result))
-        else:
-            self.debug("Unpacked [%s]: %s (%s)" % (data_type, unpack_result, field))
+        extra = "" if field is None else f"({field})"
+        self.debug(f"Unpacked page {page:02d}, offset {start_byte:02d}, len {length:02d}, datatype {data_type}: {unpack_result} {extra}")
 
         self.field_names.append(field)
         self.fields[field] = unpack_result
