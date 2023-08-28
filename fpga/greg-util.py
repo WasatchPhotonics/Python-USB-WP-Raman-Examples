@@ -92,7 +92,7 @@ class RegisterUtil(tk.Tk):
         REG_D2			0x00D2		0x0000		IMX Control/Status
         REG_D3			0x00D3		0x0000		BLE Control/Status
         REG_D4			0x00D4		0xD4D4		Spare
-        REG_D5			0x00D5		0xD4D4		Spare
+        REG_D5			0x00D5		0xD5D5		Spare
         REG_D6			0x00D6      0x0000		FIFO RD Pointer
         REG_D7			0x00D7		0x0000		FIFO WR Pointer
     """
