@@ -33,6 +33,7 @@ class Fixture(object):
         parser.add_argument("--noparse",        action="store_true",    help="don't parse EEPROM fields")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
+        parser.add_argument("--set",            action="append",        help="set a name:value pair")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
         parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with zeros, then populates minimal defaults (HIGHLY DANGEROUS)")
         parser.add_argument("--pixels",         type=int, default=1024, help="active_pixels_horizontal when reprogramming")
@@ -63,6 +64,9 @@ class Fixture(object):
 
         if self.args.reprogram:
             self.do_reprogram()
+
+        if self.args.set:
+            self.do_set()
 
         if self.args.dump:
             return
@@ -228,16 +232,44 @@ class Fixture(object):
                 self.send_cmd(cmd=0xa2, value=offset, buf=buf)
             sleep(0.2)
 
-    def do_reprogram(self):
-        print("\n*** HAZARDOUS OPERATION ***\n")
-        print("Reprogram EEPROM to bland defaults? This is a destructive")
-        print("operation which will overwrite all configuration data on")
-        print("the spectrometer, destroying any factory calibrations.\n")
-        cont = input("\nReprogram EEPROM to bland defaults? (y/N)")
-        if cont.lower() != "y":
-            print("Cancelled")
-            return
+    def do_set(self):
+        changes = []
+        for pair in self.args.set:
+            tok = pair.split("=")
+            if len(tok) != 2:
+                print(f"skipping pair {pair}")
+                continue
 
+            k, v = tok
+            k = k.lower()
+
+            if k == "startup_integration_time_ms":
+                v = int(v)
+                self.pack((0, 43, 2), "H", v)
+                print(f"changing {k} -> {v}")
+            elif k == "startup_temp_degc":
+                v = int(v)
+                self.pack((0, 45, 2), "h", v)
+                print(f"changing {k} -> {v}")
+            else:
+                print(f"unsupported key: {k} ({v})")
+        
+        self.dump_eeprom("Proposed")
+        if not self.verify("Will re-write EEPROM with updated contents"):
+            return
+        self.write_eeprom()
+
+    def verify(self, msg):
+        print(msg)
+        cont = input("\n\nContinue? (y/N) ")
+        return cont.lower() == "y"
+
+    def do_reprogram(self):
+        if not self.verify("*** HAZARDOUS OPERATION ***\n" +
+                           "Reprogram EEPROM to bland defaults? This is a destructive\n" +
+                           "operation which will overwrite all configuration data on\n" +
+                           "the spectrometer, destroying any factory calibrations."): return
+            
         # set all buffers to zero
         self.do_erase(value=0x00)
 
@@ -306,6 +338,8 @@ class Fixture(object):
         self.unpack((2, 37,  2), "H", "roi_vertical_region_2_end")
         self.unpack((2, 39,  2), "H", "roi_vertical_region_3_start")
         self.unpack((2, 41,  2), "H", "roi_vertical_region_3_end")
+        self.unpack((0, 43,  2), "H", "startup_integration_time_ms")
+        self.unpack((0, 45,  2), "h", "startup_temp_degC")
         self.unpack((2, 43,  4), "f", "linearity_c0")
         self.unpack((2, 47,  4), "f", "linearity_c1")
         self.unpack((2, 51,  4), "f", "linearity_c2")
