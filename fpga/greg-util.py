@@ -121,15 +121,20 @@ class RegisterUtil(tk.Tk):
             return False
 
     def init_gui(self):
-        self.title("FPGA Register Utility")
-        self.geometry("400x200")
+        width = 250
+        height = 250
+        pad_y = 3
+        pad_x = 3
+
+        self.title("GLA Reg Util")
+        self.geometry(f"{width}x{height}")
 
         row = 0  # [         | Address  |  Value  ]
         tk.Label(text="Address").grid(row=row, column=1)
         tk.Label(text="Value").grid(row=row, column=2)
 
         row += 1 # [ (Write) | [name v] | [_____] ]
-        self.btn_write = tk.Button(text="Write", command=self.btn_write_clicked).grid(row=row, column=0)
+        self.btn_write = tk.Button(text="Write", command=self.btn_write_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
         self.write_addr = self.make_addr_combobox(row, 1)
 
         self.textbox_write_stringvar = StringVar()
@@ -140,21 +145,41 @@ class RegisterUtil(tk.Tk):
         # special case for backspace on 4 character hex display
         self.textbox_write.bind("<BackSpace>", self.textbox_write_backspace)
 
-        self.textbox_write.grid(row=row, column=2)
+        self.textbox_write.grid(row=row, column=2, pady=pad_y, padx=pad_x)
 
         row += 1 # [ (Read)  | [name v] | [_____] ]
-        self.btn_read = tk.Button(text="Read", command=self.btn_read_clicked).grid(row=row, column=0)
+        self.btn_read = tk.Button(text="Read", command=self.btn_read_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
         self.read_addr = self.make_addr_combobox(row, 1)
         self.read_value = tk.StringVar(value="0xBEEF")
-        tk.Label(height=1, width=6, textvariable=self.read_value).grid(row=row, column=2)
+        tk.Label(height=1, width=6, textvariable=self.read_value).grid(row=row, column=2, pady=pad_y, padx=pad_x)
 
-        row += 1 # [ (__________READ_ALL________) ]
-        self.btn_read_all  = tk.Button(text="Read All", width=30, command=self.btn_read_all_clicked).grid(row=row, column=0, columnspan=3)
+        row += 1 # [ (__________READ_ALL_________) ]
+        self.btn_read_all  = tk.Button(text="Read All", width=20, command=self.btn_read_all_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+
+        row += 1 # [ (___________________________) ]
+        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=3, ipadx=100, pady=pad_y)
+
+        row += 1 # [ (__________INIT IMX_________) ]
+        self.btn_init_imx  = tk.Button(text="Initalize IMX", width=20, command=self.btn_init_imx_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        
+        row += 1 # [ (___________________________) ]
+        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=3, ipadx=100, pady=pad_y)
+
+        row += 1 # [ (________GET FPGA VER_______) ]
+        self.btn_init_imx  = tk.Button(text="Get FPGA Version", width=20, command=self.btn_get_fpga_ver_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        
+        row += 1 # [ (_FPGA V: | [ver v] |         ]
+        tk.Label(text="FPGA Version:").grid(row=row, column=0)
+        self.version_value = tk.StringVar(value="--.--.--.--")
+        self.get_FPGA_version()
+        tk.Label(height=1, textvariable=self.version_value).grid(row=row, column=1, pady=pad_y, padx=pad_x, columnspan=2)
+
+        row += 1 # [ (___________________________) ]
+        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=3, ipadx=100, pady=pad_y)
 
         # keyboard shortcuts (untested)
         self.bind('<Control-R>', self.btn_read_clicked)
         self.bind('<Control-W>', self.btn_write_clicked)
-
         self.bind('<Control-V>', self.textbox_write.focus)
 
     def bswap_bytes(self, buf):
@@ -279,6 +304,12 @@ class RegisterUtil(tk.Tk):
             value = self.read(addr)
             print(f"{name:8s}   0x{addr:04x}   0x{value:04x}   0x{default:04x}    {desc}")
 
+    def btn_init_imx_clicked(self):
+        print("Not yet implemented.")
+
+    def btn_get_fpga_ver_clicked(self):
+        self.get_FPGA_version()
+
     ############################################################################
     # methods
     ############################################################################
@@ -309,6 +340,15 @@ class RegisterUtil(tk.Tk):
                 default = int(tok[2][2:], 16)
                 desc = " ".join(tok[3:])
                 self.reg[name] = { "addr": addr, "default": default, "desc": desc }
+
+    def get_FPGA_version(self):
+        """ read the FPGA registers for the version and return the version string """
+        ver_string = ""
+        for i in reversed(range(1, 5)):
+            ver_string = ver_string + f"{self.read(i):02d}."
+        
+        print(f"Read FPGA Version: {ver_string[0:-1]}")
+        self.version_value.set(ver_string[0:-1])
 
 # main()
 if __name__ == "__main__":
