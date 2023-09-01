@@ -18,7 +18,7 @@ from tkinter import StringVar
 # The full program will be executed by Demetrios or Murty who will use
 #offline_mode = False
 # This should only be pushed to git with offline_mode = False
-offline_mode = False
+offline_mode = True
 
 # offline memory is used in offline mode so I can test
 # writing to a register, followed by reading it's value back
@@ -97,13 +97,21 @@ class RegisterUtil(tk.Tk):
         REG_D7			0x00D7		0x0000		FIFO WR Pointer
     """
 
+    IMX_REGISTERS = """
+        REG_00  01  0x01    0x01    sample register in bank 01
+        REG_00  02  0x01    0x01    sample register in bank 02
+        REG_00  03  0x01    0x01    sample register in bank 03
+        REG_00  04  0x01    0x01    sample register in bank 04
+    """
+
     def __init__(self):
         super().__init__()
 
         if not self.init_usb():
             return
 
-        self.init_table()
+        self.init_reg_table()
+        self.init_imx_table()
         self.init_gui()
 
     def init_usb(self):
@@ -122,16 +130,40 @@ class RegisterUtil(tk.Tk):
 
     def init_gui(self):
         width = 250
-        height = 250
+        height = 450
         pad_y = 3
         pad_x = 3
 
         self.title("GLA Reg Util")
         self.geometry(f"{width}x{height}")
 
-        row = 0  # [         | Address  |  Value  ]
-        tk.Label(text="Address").grid(row=row, column=1)
-        tk.Label(text="Value").grid(row=row, column=2)
+        row = 0
+        tk.Label(text="IMX Functions").grid(row=row, column=0, padx=pad_x, pady=pad_y, columnspan=3)
+
+        row += 1 # [ (INIT) | (READ) | (WRITE) ]
+        self.btn_init_imx  = tk.Button(text="Initalize", command=self.btn_init_imx_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        self.btn_init_imx  = tk.Button(text="Read IMX Reg", command=self.btn_read_imx_clicked).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        self.btn_init_imx  = tk.Button(text="Write IMX Reg", command=self.btn_write_imx_clicked).grid(row=row, column=2, pady=pad_y, padx=pad_x)
+
+        row += 1 # [ ]
+        tk.Label(text="Bank:").grid(row=row, column=0, padx=pad_x, pady=pad_y)
+        ttk.Combobox(self, width=2, values=[1,2,3,4]).grid(row=row, column=1, padx=pad_x, pady=pad_y)
+
+        row += 1 # [ ]
+        tk.Label(text="Register:").grid(row=row, column=0, padx=pad_x, pady=pad_y)
+        ttk.Combobox(self, width=2, values=[1,2,3,4]).grid(row=row, column=1, padx=pad_x, pady=pad_y)
+        
+        row += 1 # [ (___________________________) ]
+        self.make_separator(row, 0, 3, pad_y)
+
+        row += 1
+        tk.Label(text="FPGA Status Registers").grid(row=row, column=0, columnspan=3)
+
+        row += 1 # [ (___________________________) ]
+        self.make_separator(row, 0, 3, pad_y)
+
+        row += 1
+        tk.Label(text="Individual Register Read / Write").grid(row=row, column=0, columnspan=3)
 
         row += 1 # [ (Write) | [name v] | [_____] ]
         self.btn_write = tk.Button(text="Write", command=self.btn_write_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
@@ -154,29 +186,22 @@ class RegisterUtil(tk.Tk):
         tk.Label(height=1, width=6, textvariable=self.read_value).grid(row=row, column=2, pady=pad_y, padx=pad_x)
 
         row += 1 # [ (__________READ_ALL_________) ]
-        self.btn_read_all  = tk.Button(text="Read All", width=20, command=self.btn_read_all_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        self.btn_read_all  = tk.Button(text="Read All to Terminal", width=20, command=self.btn_read_all_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
 
-        row += 1 # [ (___________________________) ]
-        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=3, ipadx=100, pady=pad_y)
-
-        row += 1 # [ (__________INIT IMX_________) ]
-        self.btn_init_imx  = tk.Button(text="Initalize IMX", width=20, command=self.btn_init_imx_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
-        
-        row += 1 # [ (___________________________) ]
-        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=3, ipadx=100, pady=pad_y)
-
-        row += 1 # [ (________GET FPGA VER_______) ]
-        self.btn_init_imx  = tk.Button(text="Get FPGA Version", width=20, command=self.btn_get_fpga_ver_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        row += 1
+        self.make_separator(row, 0, 3, pad_y)
         
         row += 1 # [ (_FPGA V: | [ver v] |         ]
-        tk.Label(text="FPGA Version:").grid(row=row, column=0)
-        self.version_value = tk.StringVar(value="--.--.--.--")
+        self.version_value = tk.StringVar(value="")
         self.get_FPGA_version()
-        tk.Label(height=1, textvariable=self.version_value).grid(row=row, column=1, pady=pad_y, padx=pad_x, columnspan=2)
+        tk.Label(height=1, textvariable=self.version_value).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+
+        row += 1 # [ (________GET FPGA VER_______) ]
+        self.btn_init_imx  = tk.Button(text="Get FPGA Version", width=15, command=self.btn_get_fpga_ver_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
 
         row += 1 # [ (___________________________) ]
-        ttk.Separator(self, orient="horizontal").grid(row=row, column=0, columnspan=3, ipadx=100, pady=pad_y)
-
+        self.make_separator(row, 0, 3, pad_y)
+        
         # keyboard shortcuts (untested)
         self.bind('<Control-R>', self.btn_read_clicked)
         self.bind('<Control-W>', self.btn_write_clicked)
@@ -306,6 +331,12 @@ class RegisterUtil(tk.Tk):
 
     def btn_init_imx_clicked(self):
         print("Not yet implemented.")
+    
+    def btn_read_imx_clicked(self):
+        print("Not yet implemented.")
+    
+    def btn_write_imx_clicked(self):
+        print("Not yet implemented.")
 
     def btn_get_fpga_ver_clicked(self):
         self.get_FPGA_version()
@@ -328,8 +359,11 @@ class RegisterUtil(tk.Tk):
         cb['values'] = sorted(self.reg.keys())
         cb.current(0)
         return string_var
+    
+    def make_separator(self, row, col, span, pad):
+        return ttk.Separator(self, orient="horizontal").grid(row=row, column=col, columnspan=span, ipadx=100, pady=pad)
 
-    def init_table(self):
+    def init_reg_table(self):
         """ parse the register table into a dict """
         self.reg = {}
         for line in self.REGISTERS.split("\n"):
@@ -341,14 +375,18 @@ class RegisterUtil(tk.Tk):
                 desc = " ".join(tok[3:])
                 self.reg[name] = { "addr": addr, "default": default, "desc": desc }
 
+    def init_imx_table(self):
+        """ parse the imx reg table into a dict """
+        self.imx_reg = {}
+
     def get_FPGA_version(self):
-        """ read the FPGA registers for the version and return the version string """
+        """ read the FPGA registers for the version and set the version string """
         ver_string = ""
         for i in reversed(range(1, 5)):
             ver_string = ver_string + f"{self.read(i):02d}."
         
         print(f"Read FPGA Version: {ver_string[0:-1]}")
-        self.version_value.set(ver_string[0:-1])
+        self.version_value.set(f"FPGA Version: {ver_string[0:-1]}")
 
 # main()
 if __name__ == "__main__":
