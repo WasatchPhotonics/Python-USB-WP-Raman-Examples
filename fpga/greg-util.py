@@ -96,6 +96,7 @@ class RegisterUtil(tk.Tk):
         REG_D6			0x00D6      0x0000		FIFO RD Pointer
         REG_D7			0x00D7		0x0000		FIFO WR Pointer
     """
+    STATUS_REGISTERS = ["REG_12", "REG_83", "REG_13", "REG_C1", "REG_14", "REG_D0", "REG_15", "REG_D1", "REG_47", "REG_D2", "REG_D3"]
 
     def __init__(self):
         super().__init__()
@@ -121,25 +122,28 @@ class RegisterUtil(tk.Tk):
             return False
 
     def init_gui(self):
-        width = 250
-        height = 450
+        width = 285
+        height = 525
         pad_y = 3
         pad_x = 3
+        num_cols = 4
 
         self.title("GLA Reg Util")
         self.geometry(f"{width}x{height}")
 
         row = 0
-        tk.Label(text="IMX Functions").grid(row=row, column=0, padx=pad_x, pady=pad_y, columnspan=3)
+        tk.Label(text="IMX Functions").grid(row=row, column=0, padx=pad_x, pady=pad_y, columnspan=4)
 
         row += 1 # [ (INIT) | (READ) | (WRITE) ]
-        self.btn_init_imx  = tk.Button(text="Initalize", command=self.btn_init_imx_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
-        self.btn_init_imx  = tk.Button(text="Read IMX Reg", command=self.btn_read_imx_clicked).grid(row=row, column=1, pady=pad_y, padx=pad_x)
-        self.btn_init_imx  = tk.Button(text="Write IMX Reg", command=self.btn_write_imx_clicked).grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        self.btn_init_imx  = tk.Button(text="Enable IMX", command=self.btn_enable_imx_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        self.btn_mode_imx  = tk.Button(text="Init IMX", command=self.btn_init_imx_clicked).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        self.btn_mode_imx  = tk.Button(text="Mode1", command=self.btn_mode_imx_clicked).grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        self.btn_mode_imx  = tk.Button(text="Mode2", command=self.btn_mode_imx_clicked).grid(row=row, column=3, pady=pad_y, padx=pad_x)
 
         row += 1 # [ ]
         tk.Label(text="Bank:").grid(row=row, column=0, padx=pad_x, pady=pad_y)
         self.imx_bank = self.make_imx_bank_combobox(row, 1)
+        self.btn_init_imx  = tk.Button(text="Write IMX", command=self.btn_write_imx_clicked).grid(row=row, column=2, pady=pad_y, padx=pad_x)
 
         self.textbox_write_imx_stringvar = StringVar()
         self.textbox_write_imx_stringvar.set('0000')
@@ -149,29 +153,71 @@ class RegisterUtil(tk.Tk):
         # special case for backspace on 4 character hex display
         self.textbox_write_imx.bind("<BackSpace>", self.textbox_write_imx_backspace)
 
-        self.textbox_write_imx.grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        self.textbox_write_imx.grid(row=row, column=3, pady=pad_y, padx=pad_x)
         
         row += 1 # [ ]
         tk.Label(text="Register:").grid(row=row, column=0, padx=pad_x, pady=pad_y)
         self.imx_addr = self.make_imx_addr_combobox(row, 1)
+        self.btn_init_imx  = tk.Button(text="Read IMX", command=self.btn_read_imx_clicked).grid(row=row, column=2, pady=pad_y, padx=pad_x)
 
         self.read_imx_value = tk.StringVar(value="0xBEEF")
-        tk.Label(height=1, width=6, textvariable=self.read_imx_value).grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.read_imx_value).grid(row=row, column=3, pady=pad_y, padx=pad_x)
         
         row += 1 # [ (___________________________) ]
-        self.make_separator(row, 0, 3, pad_y)
+        self.make_separator(row, 0, num_cols, pad_y)
 
         row += 1
-        tk.Label(text="FPGA Status Registers").grid(row=row, column=0, columnspan=3)
+        tk.Label(text="FPGA Status Registers").grid(row=row, column=0, columnspan=num_cols)
+        # [0] REG_12    # [5] REG_83
+        # [1] REG_13    # [6] REG_C1
+        # [2] REG_14    # [7] REG_D0
+        # [3] REG_15    # [8] REG_D1
+        # [4] REG_47    # [9] REG_D2
+        # [10] REG_D3
+        self.status_regs = []
+        for i in range(11):
+            self.status_regs.append(tk.StringVar(value="0xBEEF"))
+        
+        row += 1
+        tk.Label(text="REG_12").grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[0]).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        tk.Label(text="REG_83").grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[5]).grid(row=row, column=3, pady=pad_y, padx=pad_x)
+        
+        row += 1
+        tk.Label(text="REG_13").grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[1]).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        tk.Label(text="REG_C1").grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[6]).grid(row=row, column=3, pady=pad_y, padx=pad_x)
+        
+        row += 1
+        tk.Label(text="REG_14").grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[2]).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        tk.Label(text="REG_D0").grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[7]).grid(row=row, column=3, pady=pad_y, padx=pad_x)
+        
+        row += 1
+        tk.Label(text="REG_15").grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[3]).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        tk.Label(text="REG_D1").grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[8]).grid(row=row, column=3, pady=pad_y, padx=pad_x)
+        
+        row += 1
+        tk.Label(text="REG_47").grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[4]).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        tk.Label(text="REG_D2").grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[9]).grid(row=row, column=3, pady=pad_y, padx=pad_x)
 
-        # REG_12 to REG_15, REG_47, REG_83, REG_C1, and REG_D0 to REG_D3
-        # REFRESH ALL Button
+        row += 1 # [ (_______REFRESH_ALL_______) ]
+        tk.Label(text="REG_D3").grid(row=row, column=0, pady=pad_y, padx=pad_x)
+        tk.Label(height=1, width=6, textvariable=self.status_regs[10]).grid(row=row, column=1, pady=pad_y, padx=pad_x)
+        self.btn_read_all  = tk.Button(text="Refresh Status", command=self.btn_refresh_status_clicked).grid(row=row, column=2, pady=pad_y, padx=pad_x, columnspan=2)
 
         row += 1 # [ (___________________________) ]
-        self.make_separator(row, 0, 3, pad_y)
+        self.make_separator(row, 0, num_cols, pad_y)
 
         row += 1
-        tk.Label(text="Individual Register Read / Write").grid(row=row, column=0, columnspan=3)
+        tk.Label(text="Individual Register Read / Write").grid(row=row, column=0, columnspan=num_cols)
 
         row += 1 # [ (Write) | [name v] | [_____] ]
         self.btn_write = tk.Button(text="Write", command=self.btn_write_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x)
@@ -194,22 +240,26 @@ class RegisterUtil(tk.Tk):
         tk.Label(height=1, width=6, textvariable=self.read_value).grid(row=row, column=2, pady=pad_y, padx=pad_x)
 
         row += 1 # [ (__________READ_ALL_________) ]
-        self.btn_read_all  = tk.Button(text="Read All to Terminal", width=20, command=self.btn_read_all_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        self.btn_read_all  = tk.Button(text="Read All to Terminal", command=self.btn_read_all_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=num_cols)
 
         row += 1
-        self.make_separator(row, 0, 3, pad_y)
+        self.make_separator(row, 0, num_cols, pad_y)
         
         row += 1 # [ (_FPGA V: | [ver v] |         ]
         self.version_value = tk.StringVar(value="")
-        self.get_FPGA_version()
-        tk.Label(height=1, textvariable=self.version_value).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        
+        tk.Label(height=1, textvariable=self.version_value).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=num_cols)
 
         row += 1 # [ (________GET FPGA VER_______) ]
-        self.btn_init_imx  = tk.Button(text="Get FPGA Version", width=15, command=self.btn_get_fpga_ver_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=3)
+        self.btn_init_imx  = tk.Button(text="Get FPGA Version", command=self.btn_get_fpga_ver_clicked).grid(row=row, column=0, pady=pad_y, padx=pad_x, columnspan=num_cols)
 
         row += 1 # [ (___________________________) ]
-        self.make_separator(row, 0, 3, pad_y)
+        self.make_separator(row, 0, num_cols, pad_y)
         
+        # fill default values
+        self.get_FPGA_version()
+        self.get_status_registers()
+
         # keyboard shortcuts (untested)
         self.bind('<Control-R>', self.btn_read_clicked)
         self.bind('<Control-W>', self.btn_write_clicked)
@@ -240,10 +290,10 @@ class RegisterUtil(tk.Tk):
         self.dev.ctrl_transfer(bmReqType, 0x91, addr, val, buf)
 
     def read_imx(self, bank, addr):
-        print()
+        print("Not yet implemented.")
 
     def write_imx(self, bank, addr, value):
-        print()
+        print("Not yet implemented.")
 
     def bswap_bytes(self, buf):
         """ cuts to 16-bit and swaps BIG<->LITTLE from buffer byte array """
@@ -375,14 +425,23 @@ class RegisterUtil(tk.Tk):
             value = self.read(addr)
             print(f"{name:8s}   0x{addr:04x}   0x{value:04x}   0x{default:04x}    {desc}")
 
-    def btn_init_imx_clicked(self):
-        print(" *** INIT IMX ***")
+    def btn_enable_imx_clicked(self):
+        print(" *** ENABLING IMX ***")
         print("Writing 0x30 to FPGA register REG_D2 to enable IMX.")
         self.write(0xD2, 0x30)
         print(f"  Read REG_D2: {self.read(0xD2):04x}")
-        print("More initilization steps are required for full IMX operation and are not yet implemented.")
-        print(" *** END INIT IMX ***")
+        print(" *** IMX ENABLED ***")
+
+    def btn_init_imx_clicked(self):
+        print(" *** INITIALIZE IMX ***")
+        print("Not yet implemented ....... ")
+        #self.write(0xD2, 0x30)
+        #print(f"  Read REG_D2: {self.read(0xD2):04x}")
+        print(" *** IMX INITIALIZED ***")
     
+    def btn_mode_imx_clicked(self):
+        print("Not yet implemented.")
+
     def btn_read_imx_clicked(self):
         """ IMX read is {0x8[BANK][REGISTER ADDRESS]} """
         print(" *** BEGIN IMX READ ***")
@@ -440,6 +499,8 @@ class RegisterUtil(tk.Tk):
         print(f"  Read REG_57: {value:04x}")
         print(" *** END IMX WRITE ***")
 
+    def btn_refresh_status_clicked(self):
+        self.get_status_registers()
 
     def btn_get_fpga_ver_clicked(self):
         self.get_FPGA_version()
@@ -519,6 +580,20 @@ class RegisterUtil(tk.Tk):
         
         print(f"Read FPGA Version: {ver_string[0:-1]}")
         self.version_value.set(f"FPGA Version: {ver_string[0:-1]}")
+
+    def get_status_registers(self):
+        # [0] REG_12    # [5] REG_83
+        # [1] REG_13    # [6] REG_C1
+        # [2] REG_14    # [7] REG_D0
+        # [3] REG_15    # [8] REG_D1
+        # [4] REG_47    # [9] REG_D2
+        # [10] REG_D3
+        i = 0
+        for name in sorted(self.STATUS_REGISTERS):
+            addr = self.reg[name]["addr"]
+            value = self.read(addr)
+            self.status_regs[i].set(f"0x{value:04x}")
+            i += 1
 
 # main()
 if __name__ == "__main__":
