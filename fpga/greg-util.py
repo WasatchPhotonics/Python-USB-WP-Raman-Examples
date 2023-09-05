@@ -18,7 +18,7 @@ from tkinter import StringVar
 # The full program will be executed by Demetrios or Murty who will use
 #offline_mode = False
 # This should only be pushed to git with offline_mode = False
-offline_mode = True
+offline_mode = False
 
 # offline memory is used in offline mode so I can test
 # writing to a register, followed by reading it's value back
@@ -97,13 +97,6 @@ class RegisterUtil(tk.Tk):
         REG_D7			0x00D7		0x0000		FIFO WR Pointer
     """
 
-    IMX_REGISTERS = """
-        REG_00  01  0x01    0x01    sample register in bank 01
-        REG_00  02  0x01    0x01    sample register in bank 02
-        REG_00  03  0x01    0x01    sample register in bank 03
-        REG_00  04  0x01    0x01    sample register in bank 04
-    """
-
     def __init__(self):
         super().__init__()
 
@@ -111,7 +104,6 @@ class RegisterUtil(tk.Tk):
             return
 
         self.init_reg_table()
-        self.init_imx_table()
         self.init_gui()
 
     def init_usb(self):
@@ -147,17 +139,33 @@ class RegisterUtil(tk.Tk):
 
         row += 1 # [ ]
         tk.Label(text="Bank:").grid(row=row, column=0, padx=pad_x, pady=pad_y)
-        ttk.Combobox(self, width=2, values=[1,2,3,4]).grid(row=row, column=1, padx=pad_x, pady=pad_y)
+        self.imx_bank = self.make_imx_bank_combobox(row, 1)
 
+        self.textbox_write_imx_stringvar = StringVar()
+        self.textbox_write_imx_stringvar.set('0000')
+        self.textbox_write_imx_stringvar.trace("w", self.textbox_write_imx_textchanged)
+        self.textbox_write_imx = tk.Entry(width=6, textvariable=self.textbox_write_imx_stringvar)
+
+        # special case for backspace on 4 character hex display
+        self.textbox_write_imx.bind("<BackSpace>", self.textbox_write_imx_backspace)
+
+        self.textbox_write_imx.grid(row=row, column=2, pady=pad_y, padx=pad_x)
+        
         row += 1 # [ ]
         tk.Label(text="Register:").grid(row=row, column=0, padx=pad_x, pady=pad_y)
-        ttk.Combobox(self, width=2, values=[1,2,3,4]).grid(row=row, column=1, padx=pad_x, pady=pad_y)
+        self.imx_addr = self.make_imx_addr_combobox(row, 1)
+
+        self.read_imx_value = tk.StringVar(value="0xBEEF")
+        tk.Label(height=1, width=6, textvariable=self.read_imx_value).grid(row=row, column=2, pady=pad_y, padx=pad_x)
         
         row += 1 # [ (___________________________) ]
         self.make_separator(row, 0, 3, pad_y)
 
         row += 1
         tk.Label(text="FPGA Status Registers").grid(row=row, column=0, columnspan=3)
+
+        # REG_12 to REG_15, REG_47, REG_83, REG_C1, and REG_D0 to REG_D3
+        # REFRESH ALL Button
 
         row += 1 # [ (___________________________) ]
         self.make_separator(row, 0, 3, pad_y)
@@ -206,26 +214,11 @@ class RegisterUtil(tk.Tk):
         self.bind('<Control-R>', self.btn_read_clicked)
         self.bind('<Control-W>', self.btn_write_clicked)
         self.bind('<Control-V>', self.textbox_write.focus)
-
-    def bswap_bytes(self, buf):
-        """ cuts to 16-bit and swaps BIG<->LITTLE from buffer byte array """
-        # FPGA Sends and Receives in big endian
-        # ARM translates the i2c address
-        # ARM does not translate the data
-        buf = buf[0:2]
-        val = int.from_bytes(buf, "big")
-        return val
     
-    def bswap_int(self, val):
-        """ cuts to 16-bit and swaps BIG<->LITTLE from int """
-        # FPGA Sends and Receives in big endian
-        # ARM translates the i2c address
-        # ARM does not translate the data
-        val = val.to_bytes(4, "little")
-        val = val[0:2]
-        val = int.from_bytes(val, "big")
-        return val
-
+    ############################################################################
+    # read/write methods
+    ############################################################################
+    
     def read(self, addr):
         """ reads register and returns value as int """
         buf = usb.util.create_buffer(4)
@@ -244,7 +237,32 @@ class RegisterUtil(tk.Tk):
         val = self.bswap_int(val)
         buf = usb.util.create_buffer(4)
         bmReqType = usb.util.build_request_type(usb.util.CTRL_IN, usb.util.CTRL_TYPE_VENDOR,usb.util.CTRL_RECIPIENT_DEVICE)
-        self.dev.ctrl_transfer(bmReqType, 0x91, addr, val, buf)            
+        self.dev.ctrl_transfer(bmReqType, 0x91, addr, val, buf)
+
+    def read_imx(self, bank, addr):
+        print()
+
+    def write_imx(self, bank, addr, value):
+        print()
+
+    def bswap_bytes(self, buf):
+        """ cuts to 16-bit and swaps BIG<->LITTLE from buffer byte array """
+        # FPGA Sends and Receives in big endian
+        # ARM translates the i2c address
+        # ARM does not translate the data
+        buf = buf[0:2]
+        val = int.from_bytes(buf, "big")
+        return val
+    
+    def bswap_int(self, val):
+        """ cuts to 16-bit and swaps BIG<->LITTLE from int """
+        # FPGA Sends and Receives in big endian
+        # ARM translates the i2c address
+        # ARM does not translate the data
+        val = val.to_bytes(4, "little")
+        val = val[0:2]
+        val = int.from_bytes(val, "big")
+        return val            
         
     ############################################################################
     # event callbacks
@@ -283,6 +301,15 @@ class RegisterUtil(tk.Tk):
             self.textbox_write_stringvar.set(textcontent)
             # when deleting last character, keep cursor at end
             return "break"
+    
+    def textbox_write_imx_backspace(self, event):
+        insert_index = self.textbox_write_imx.index("insert")
+        if insert_index == 4:
+            textcontent = self.textbox_write_imx_stringvar.get()
+            textcontent = textcontent[:3].zfill(4)
+            self.textbox_write_imx_stringvar.set(textcontent)
+            # when deleting last character, keep cursor at end
+            return "break"
 
     def textbox_write_textchanged(self, name, index, mode):
         textcontent = self.textbox_write_stringvar.get()
@@ -302,6 +329,25 @@ class RegisterUtil(tk.Tk):
         filtered_textcontent = filtered_textcontent.zfill(4)
 
         self.textbox_write_stringvar.set(filtered_textcontent)
+
+    def textbox_write_imx_textchanged(self, name, index, mode):
+        textcontent = self.textbox_write_imx_stringvar.get()
+
+        insert_index = self.textbox_write_imx.index("insert")
+        
+        # emulate 'replace mode'
+        textcontent = textcontent[:insert_index] + textcontent[insert_index+1:]
+
+        # we make sure that there's only 0-f characters
+        # and that there's always 4.
+        filtered_textcontent = ""
+        for c in textcontent:
+            if c in "0123456789abcdefABCDEF":
+                filtered_textcontent += c
+        filtered_textcontent = filtered_textcontent[:4]
+        filtered_textcontent = filtered_textcontent.zfill(4)
+
+        self.textbox_write_imx_stringvar.set(filtered_textcontent)
 
     def btn_read_clicked(self):
         """ user clicked the "read" button """
@@ -330,13 +376,70 @@ class RegisterUtil(tk.Tk):
             print(f"{name:8s}   0x{addr:04x}   0x{value:04x}   0x{default:04x}    {desc}")
 
     def btn_init_imx_clicked(self):
-        print("Not yet implemented.")
+        print(" *** INIT IMX ***")
+        print("Writing 0x30 to FPGA register REG_D2 to enable IMX.")
+        self.write(0xD2, 0x30)
+        print(f"  Read REG_D2: {self.read(0xD2):04x}")
+        print("More initilization steps are required for full IMX operation and are not yet implemented.")
+        print(" *** END INIT IMX ***")
     
     def btn_read_imx_clicked(self):
-        print("Not yet implemented.")
+        """ IMX read is {0x8[BANK][REGISTER ADDRESS]} """
+        print(" *** BEGIN IMX READ ***")
+        bank = self.imx_bank.get()
+        addr = self.imx_addr.get()
+        print(f"Reading IMX bank {bank}, register {addr}...")
+        print(f"Writing 0x8{bank}{addr} to FPGA register REG_56.")
+        addr_val = int(f"8{bank}{addr}", 16)
+        self.write(0x56, addr_val)
+        print("Reading FPGA register REG_56 to confirm...")
+        print(f"  Read REG_56: {self.read(0x56):04x}")
+        print("Writing 0x0000 to FPGA register REG_57.")
+        self.write(0x57, 0)
+        print(f"Reading FPGA register REG_57 for IMX data...")
+        value = self.read(0x57)
+        print(f"  Read REG_57: {value:04x}")
+        self.read_imx_value.set(f"0x{value:04x}")
+        print(" *** END IMX READ ***")
+
     
     def btn_write_imx_clicked(self):
-        print("Not yet implemented.")
+        """ IMX write is {0x0[BANK][REGISTER ADDRESS]} """
+        print(" *** BEGIN IMX WRITE ***")
+        bank = self.imx_bank.get()
+        addr = self.imx_addr.get()
+        try:
+            s = self.textbox_write_imx.get().lower()
+            if s.startswith("0x"):
+                s = s[2:]
+            value = int(s, 16)
+        except:
+            return
+        print(f"Writing 0x{value:04x} into IMX bank {bank}, register {addr}...")
+        print(f"Writing 0x0{bank}{addr} to FPGA register REG_56.")
+        addr_val = int(f"0{bank}{addr}", 16)
+        self.write(0x56, addr_val)
+        print("Reading FPGA register REG_56 to confirm.")
+        print(f"  Read REG_56: {self.read(0x56):04x}")
+        print(f"Writing FPGA register REG_57 with data, 0x{value:04x}.")
+        self.write(0x57, value)
+        print("Reading FPGA register REG_57 to confirm.")
+        print(f"  Read REG_57: {self.read(0x57):04x}")
+        print("First byte is to confirm REG_57 was written, second byte is stale data.")
+        print("Reading IMX register to confirm write operation.")
+        print(f"Reading IMX bank {bank}, register {addr}...")
+        print(f"Writing 0x8{bank}{addr} to FPGA register REG_56.")
+        addr_val = int(f"8{bank}{addr}", 16)
+        self.write(0x56, addr_val)
+        print("Reading FPGA register REG_56 to confirm...")
+        print(f"  Read REG_56: {self.read(0x56):04x}")
+        print("Writing 0x0000 to FPGA register REG_57.")
+        self.write(0x57, 0)
+        print(f"Reading FPGA register REG_57 for IMX data...")
+        value = self.read(0x57)
+        print(f"  Read REG_57: {value:04x}")
+        print(" *** END IMX WRITE ***")
+
 
     def btn_get_fpga_ver_clicked(self):
         self.get_FPGA_version()
@@ -360,6 +463,39 @@ class RegisterUtil(tk.Tk):
         cb.current(0)
         return string_var
     
+    def make_imx_addr_combobox(self, row, col):
+        """ 
+        Utility method to generate a new Tk Combobox and pre-populate the 
+        pull-down items with register address 00 through ff.
+
+        Returns a Tk StringVar whose get() method can be used to read the current
+        selection.
+        """
+        string_var = tk.StringVar()
+        cb = ttk.Combobox(self, width=5, textvariable=string_var)
+        cb.grid(row=row, column=col)
+        addrs = []
+        for i in range(256):
+            addrs.append(f"{i:02x}")
+        cb['values'] = addrs
+        cb.current(0)
+        return string_var
+    
+    def make_imx_bank_combobox(self, row, col):
+        """ 
+        Utility method to generate a new Tk Combobox and pre-populate the 
+        pull-down items with imx banks 2, 3, 4, and 5.
+
+        Returns a Tk StringVar whose get() method can be used to read the current
+        selection.
+        """
+        string_var = tk.StringVar()
+        cb = ttk.Combobox(self, width=5, textvariable=string_var)
+        cb.grid(row=row, column=col)
+        cb['values'] = [2, 3, 4, 5]
+        cb.current(0)
+        return string_var
+    
     def make_separator(self, row, col, span, pad):
         return ttk.Separator(self, orient="horizontal").grid(row=row, column=col, columnspan=span, ipadx=100, pady=pad)
 
@@ -374,10 +510,6 @@ class RegisterUtil(tk.Tk):
                 default = int(tok[2][2:], 16)
                 desc = " ".join(tok[3:])
                 self.reg[name] = { "addr": addr, "default": default, "desc": desc }
-
-    def init_imx_table(self):
-        """ parse the imx reg table into a dict """
-        self.imx_reg = {}
 
     def get_FPGA_version(self):
         """ read the FPGA registers for the version and set the version string """
