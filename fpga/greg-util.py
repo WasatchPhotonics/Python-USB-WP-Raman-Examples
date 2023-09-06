@@ -290,10 +290,29 @@ class RegisterUtil(tk.Tk):
         self.dev.ctrl_transfer(bmReqType, 0x91, addr, val, buf)
 
     def read_imx(self, bank, addr):
-        print("Not yet implemented.")
+        """ 
+        set IMX address in FPGA REG_56
+        IMX addresses are 0x[8 read, 0 write][bank][register]
+        write anything to FPGA REG_57
+        read data from IMX on FPGA REG_57
+        """
+        addr_val = int(f"8{bank}{addr}", 16)
+        self.write(0x56, addr_val)
+        self.write(0x57, 0)
+        return self.read(0x57)
 
     def write_imx(self, bank, addr, value):
-        print("Not yet implemented.")
+        """ 
+        set IMX address in FPGA REG_56
+        IMX addresses are 0x[8 read, 0 write][bank][register]
+        write data to be written to IMX to FPGA REG_57
+        read the data back and return the value to confirm write success
+        """
+        addr_val = int(f"0{bank}{addr}", 16)
+        self.write(0x56, addr_val)
+        self.write(0x57, value)
+        return self.read_imx(bank, addr)
+
 
     def bswap_bytes(self, buf):
         """ cuts to 16-bit and swaps BIG<->LITTLE from buffer byte array """
