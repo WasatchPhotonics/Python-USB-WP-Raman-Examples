@@ -46,8 +46,9 @@ class Fixture(object):
         parser.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
         parser.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
         parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
+        parser.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
         parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=10)
-        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
+        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--pixels",              type=int,            help="override pixel count")
@@ -76,10 +77,10 @@ class Fixture(object):
         # read configuration
         for dev in self.devices:
             dev.fw_version = self.get_firmware_version(dev)
-            print(f"firmware version: {dev.fw_version}")
+            #print(f"firmware version: {dev.fw_version}")
 
             dev.fpga_version = self.get_fpga_version(dev)
-            print(f"FPGA version: {dev.fpga_version}")
+            #print(f"FPGA version: {dev.fpga_version}")
 
             self.read_eeprom(dev)
             dev.pixels = dev.eeprom["pixels"] if self.args.pixels is None else self.args.pixels
@@ -307,49 +308,47 @@ class Fixture(object):
         print(f"frame count = {count} (0x{count:04x})")
 
     def do_eeprom_load_test(self):
-        outfile = open(self.args.outfile, 'a') if self.args.outfile is not None else None
-
+        print(f"Testing {len(self.devices)}")
         failures = {}
-
-        # allow test to be killed with ctrl-C
-        try:
-            print("load test iterations...", end='')
+        print("load test iterations...", end='')
+        with open("eeprom-load-test.log", 'a') as out:
             for count in range(self.args.loop):
                 print(".", end='', flush=True)
                 for dev in self.devices:
                     key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
-                    #print(f"  loop {count} dev {key}")
+                    # test same spectrometer several times in a row
+                    for inner in range(self.args.inner_loop):
 
-                    if key not in failures:
-                        failures[key] = 0
+                        if key not in failures:
+                            failures[key] = 0
 
-                    # read all 8 pages
-                    ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
-                    ss = {}
-                    for i, buf in enumerate(ee):
-                        ss[i] = " ".join([f"{v:02x}" for v in buf])
+                        # read all 8 pages
+                        ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
+                        ss = {}
+                        for i, buf in enumerate(ee):
+                            ss[i] = " ".join([f"{v:02x}" for v in buf])
 
-                    # does any page match the immutable string?
-                    failed = False
-                    for i, s in ss.items():
-                        orig = dev.eeprom["hexdump"][i]
-                        if s == IMMUTABLE:
-                            print(f"\n    {key} failure on loop {count}: page {i} matches immutable")
-                            failed = True
-                        elif s != orig:
-                            print(f"\n    {key} failure on loop {count}: page {i} differed from original")
-                            print(f"        read: {s}")
-                            print(f"        orig: {orig}")
-                            failed = True
-                        else:
-                            pass
+                        # does any page match the immutable string?
+                        passed = True
+                        for i, s in ss.items():
+                            orig = dev.eeprom["hexdump"][i]
+                            if s == IMMUTABLE:
+                                print(f"\n    {key} failure on loop {count}: page {i} matches immutable")
+                                passed = False
+                            elif s != orig:
+                                print(f"\n    {key} failure on loop {count}: page {i} differed from original")
+                                print(f"        read: {s}")
+                                print(f"        orig: {orig}")
+                                passed = False
+                            else:
+                                pass
 
-                    if failed:
-                        failures[key] += 1
+                        if not passed:
+                            failures[key] += 1
 
-                sleep(self.args.delay_ms / 1000.0 )
-        except:
-            print("ending EEPROM load test")
+                        out.write(f"{datetime.now()}, {key}, {passed}\n")
+
+                #sleep(self.args.delay_ms / 1000.0 )
 
         print("\nEEPROM Load Test report:")
         for key in failures:
