@@ -309,8 +309,9 @@ class Fixture(object):
 
         # allow test to be killed with ctrl-C
         try:
+            print("load test iterations...", end='')
             for count in range(self.args.loop):
-                print(f"loop {count}")
+                print(".", end='', flush=True)
                 for dev in self.devices:
                     key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
                     #print(f"  loop {count} dev {key}")
@@ -329,10 +330,10 @@ class Fixture(object):
                     for i, s in ss.items():
                         orig = dev.eeprom["hexdump"][i]
                         if s == IMMUTABLE:
-                            print(f"    {key} failure on loop {count}: page {i} matches immutable")
+                            print(f"\n    {key} failure on loop {count}: page {i} matches immutable")
                             failed = True
                         elif s != orig:
-                            print(f"    {key} failure on loop {count}: page {i} differed from original")
+                            print(f"\n    {key} failure on loop {count}: page {i} differed from original")
                             print(f"        read: {s}")
                             print(f"        orig: {orig}")
                             failed = True
@@ -346,7 +347,7 @@ class Fixture(object):
         except:
             print("ending EEPROM load test")
 
-        print("EEPROM Load Test report:")
+        print("\nEEPROM Load Test report:")
         for key in failures:
             print(f"  {key} had {failures[key]} failures")
 

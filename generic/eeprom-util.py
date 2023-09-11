@@ -64,8 +64,7 @@ class Fixture(object):
 
         if self.args.reprogram:
             self.do_reprogram()
-
-        if self.args.set:
+        elif self.args.set:
             self.do_set()
 
         if self.args.dump:
@@ -232,7 +231,7 @@ class Fixture(object):
                 self.send_cmd(cmd=0xa2, value=offset, buf=buf)
             sleep(0.2)
 
-    def do_set(self):
+    def do_set(self, write=True):
         changes = []
         for pair in self.args.set:
             tok = pair.split("=")
@@ -258,10 +257,11 @@ class Fixture(object):
             else:
                 print(f"unsupported key: {k} ({v})")
         
-        self.dump_eeprom("Proposed")
-        if not self.verify("Will re-write EEPROM with updated contents"):
-            return
-        self.write_eeprom()
+        if write:
+            self.dump_eeprom("Proposed")
+            if not self.verify("Will re-write EEPROM with updated contents"):
+                return
+            self.write_eeprom()
 
     def verify(self, msg):
         print(msg)
@@ -288,6 +288,8 @@ class Fixture(object):
         self.pack((2, 25,  2), "H", self.args.pixels, "actual_pixels_horizontal")
         self.pack((3, 40,  4), "I", 1,                "min_integ")
         self.pack((3, 44,  4), "I", 60000,            "max_integ")
+
+        self.do_set(write=False)
 
         self.write_eeprom()
 
