@@ -23,7 +23,10 @@ MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
-IMMUTABLE = "ff c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 00 4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 90 e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
+IMMUTABLE = "ff c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 " \
+          + "00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 " \
+          + "00 4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 " \
+          + "90 e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
 
 # An extensible, stateful "Test Fixture" 
 class Fixture(object):
@@ -56,6 +59,7 @@ class Fixture(object):
         parser.add_argument("--model",               type=str,            help="desired model")
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
+        parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
         self.args = parser.parse_args()
 
         self.devices = []
@@ -320,7 +324,7 @@ class Fixture(object):
                         failures[key] = 0
 
                     # read all 8 pages
-                    ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
+                    ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
                     ss = {}
                     for i, buf in enumerate(ee):
                         ss[i] = " ".join([f"{v:02x}" for v in buf])
