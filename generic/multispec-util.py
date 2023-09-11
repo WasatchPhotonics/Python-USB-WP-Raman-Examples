@@ -313,7 +313,7 @@ class Fixture(object):
                 print(f"loop {count}")
                 for dev in self.devices:
                     key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
-                    print(f"  loop {count} dev {key}")
+                    #print(f"  loop {count} dev {key}")
 
                     if key not in failures:
                         failures[key] = 0

@@ -251,9 +251,9 @@ class Fixture(object):
                 v = int(v)
                 self.pack((0, 45, 2), "h", v)
                 print(f"changing {k} -> {v}")
-            elif k == "serial_number":
-                self.pack((0,  0, 16), "s", v)
             elif k == "model":
+                self.pack((0,  0, 16), "s", v)
+            elif k == "serial_number":
                 self.pack((0, 16, 16), "s", v)
             else:
                 print(f"unsupported key: {k} ({v})")
@@ -458,7 +458,7 @@ class Fixture(object):
                 page, start_byte, length, data_type, buf))
 
         if data_type == "s":
-            for i in range(min(length, len(value))):
+            for i in range(length):
                 if i < len(value):
                     buf[start_byte + i] = ord(value[i])
                 else:
