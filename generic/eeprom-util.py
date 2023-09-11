@@ -251,6 +251,10 @@ class Fixture(object):
                 v = int(v)
                 self.pack((0, 45, 2), "h", v)
                 print(f"changing {k} -> {v}")
+            elif k == "serial_number":
+                self.pack((0,  0, 16), "s", v)
+            elif k == "model":
+                self.pack((0, 16, 16), "s", v)
             else:
                 print(f"unsupported key: {k} ({v})")
         

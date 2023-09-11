@@ -23,6 +23,8 @@ MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
+IMMUTABLE = "ff c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 00 4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 90 e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
+
 # An extensible, stateful "Test Fixture" 
 class Fixture(object):
 
@@ -53,6 +55,7 @@ class Fixture(object):
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
         parser.add_argument("--model",               type=str,            help="desired model")
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
+        parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
         self.args = parser.parse_args()
 
         self.devices = []
@@ -67,17 +70,15 @@ class Fixture(object):
             self.connect(dev)
 
         # read configuration
-        for count in range(self.args.loop):
-            print(f"loop {count}")
-            for dev in self.devices:
-                dev.fw_version = self.get_firmware_version(dev)
-                print(f"firmware version: {dev.fw_version}")
+        for dev in self.devices:
+            dev.fw_version = self.get_firmware_version(dev)
+            print(f"firmware version: {dev.fw_version}")
 
-                dev.fpga_version = self.get_fpga_version(dev)
-                print(f"FPGA version: {dev.fpga_version}")
+            dev.fpga_version = self.get_fpga_version(dev)
+            print(f"FPGA version: {dev.fpga_version}")
 
-                self.read_eeprom(dev)
-                dev.pixels = dev.eeprom["pixels"] if self.args.pixels is None else self.args.pixels
+            self.read_eeprom(dev)
+            dev.pixels = dev.eeprom["pixels"] if self.args.pixels is None else self.args.pixels
 
         # apply filters
         self.filter_by_serial()
@@ -116,6 +117,11 @@ class Fixture(object):
         dev.eeprom["model"]         = self.unpack(dev, (0,  0, 16), "s")
         dev.eeprom["serial_number"] = self.unpack(dev, (0, 16, 16), "s")
         dev.eeprom["pixels"]        = self.unpack(dev, (2, 16,  2), "H")
+
+        # save each page as hex string
+        dev.eeprom["hexdump"] = {}
+        for i, buf in enumerate(dev.buffers):
+            dev.eeprom["hexdump"][i] = " ".join([f"{v:02x}" for v in buf])
 
     ############################################################################
     # Commands
@@ -158,6 +164,9 @@ class Fixture(object):
             [self.set_laser_enable(dev, 1) for dev in self.devices]
 
         self.do_acquisitions()
+
+        if self.args.eeprom_load_test:
+            self.do_eeprom_load_test()
 
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 0) for dev in self.devices]
@@ -292,6 +301,54 @@ class Fixture(object):
     def get_frame_count(self, dev):
         count = self.get_cmd(dev, 0xe4, lsb_len=2)
         print(f"frame count = {count} (0x{count:04x})")
+
+    def do_eeprom_load_test(self):
+        outfile = open(self.args.outfile, 'a') if self.args.outfile is not None else None
+
+        failures = {}
+
+        # allow test to be killed with ctrl-C
+        try:
+            for count in range(self.args.loop):
+                print(f"loop {count}")
+                for dev in self.devices:
+                    key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
+                    print(f"  loop {count} dev {key}")
+
+                    if key not in failures:
+                        failures[key] = 0
+
+                    # read all 8 pages
+                    ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
+                    ss = {}
+                    for i, buf in enumerate(ee):
+                        ss[i] = " ".join([f"{v:02x}" for v in buf])
+
+                    # does any page match the immutable string?
+                    failed = False
+                    for i, s in ss.items():
+                        orig = dev.eeprom["hexdump"][i]
+                        if s == IMMUTABLE:
+                            print(f"    {key} failure on loop {count}: page {i} matches immutable")
+                            failed = True
+                        elif s != orig:
+                            print(f"    {key} failure on loop {count}: page {i} differed from original")
+                            print(f"        read: {s}")
+                            print(f"        orig: {orig}")
+                            failed = True
+                        else:
+                            pass
+
+                    if failed:
+                        failures[key] += 1
+
+                sleep(self.args.delay_ms / 1000.0 )
+        except:
+            print("ending EEPROM load test")
+
+        print("EEPROM Load Test report:")
+        for key in failures:
+            print(f"  {key} had {failures[key]} failures")
 
     def do_acquisitions(self):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
