@@ -47,7 +47,7 @@ class Fixture(object):
         parser.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
         parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
         parser.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
-        parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=10)
+        parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
@@ -325,50 +325,52 @@ class Fixture(object):
             msg = f"Each of the following {self.args.loop} iterations will read {self.args.max_pages} pages " \
                  +f"{self.args.inner_loop} times consecutively over {len(self.devices)} spectrometers with " \
                  +f"{self.args.delay_ms}ms delay between reads " \
-                 +f"({self.args.loop * self.args.max_pages * self.args.inner_loop} total page reads)"
+                 +f"({self.args.loop * self.args.max_pages * self.args.inner_loop * len(self.devices)} " \
+                 +f"total page reads)"
             out.write(f"{msg}\n")
             print(msg)
 
             print("load test iterations...", end='')
             failures = {}
-            for count in range(self.args.loop):
-                print(".", end='', flush=True)
+            try:
+                for count in range(self.args.loop):
+                    print(".", end='', flush=True)
 
-                for dev in self.devices:
-                    key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
-                    # test same spectrometer several times in a row
-                    for inner in range(self.args.inner_loop):
+                    for dev in self.devices:
+                        key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
+                        # test same spectrometer several times in a row
+                        for inner in range(self.args.inner_loop):
 
-                        if key not in failures:
-                            failures[key] = 0
+                            if key not in failures:
+                                failures[key] = 0
 
-                        # read all 8 pages
-                        ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
-                        ss = {}
-                        for i, buf in enumerate(ee):
-                            ss[i] = " ".join([f"{v:02x}" for v in buf])
+                            # read all 8 pages
+                            ee = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
+                            ss = {}
+                            for i, buf in enumerate(ee):
+                                ss[i] = " ".join([f"{v:02x}" for v in buf])
 
-                        # does any page match the immutable regex?
-                        passed = True
-                        for i, s in ss.items():
-                            orig = dev.eeprom["hexdump"][i]
-                            if re.match(IMMUTABLE, s):
-                                print(f"\n    {key} failure on loop {count}: page {i} matches immutable")
-                                passed = False
-                            elif s != orig:
-                                print(f"\n    {key} failure on loop {count}: page {i} differed from original")
-                                print(f"        read: {s}")
-                                print(f"        orig: {orig}")
-                                passed = False
-                            else:
-                                pass
+                            # does any page match the immutable regex?
+                            passed = True
+                            for i, s in ss.items():
+                                orig = dev.eeprom["hexdump"][i]
+                                if re.match(IMMUTABLE, s):
+                                    print(f"\n    {key} failure on loop {count}: page {i} matches immutable")
+                                    passed = False
+                                elif s != orig:
+                                    print(f"\n    {key} failure on loop {count}: page {i} differed from original")
+                                    print(f"        read: {s}")
+                                    print(f"        orig: {orig}")
+                                    passed = False
+                                else:
+                                    pass
 
-                        if not passed:
-                            failures[key] += 1
+                            if not passed:
+                                failures[key] += 1
 
-                        out.write(f"{datetime.now()}, {key}, {passed}\n")
-
-                #sleep(self.args.delay_ms / 1000.0 )
+                            out.write(f"{datetime.now()}, {key}, {passed}\n")
+            except usb.core.USBError as ex:
+                out.write(f"{datetime.now()}, {key}, False: {ex}\n")
 
         print("\nEEPROM Load Test report:")
         for key in failures:
