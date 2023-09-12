@@ -308,12 +308,32 @@ class Fixture(object):
         print(f"frame count = {count} (0x{count:04x})")
 
     def do_eeprom_load_test(self):
-        print(f"Testing {len(self.devices)}")
-        failures = {}
-        print("load test iterations...", end='')
-        with open("eeprom-load-test.log", 'a') as out:
+        
+        def make_key(dev):
+            return f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
+
+        filename = f"eeprom-load-test-{datetime.now().strftime('%Y%m%d')}.log"
+        with open(filename, 'a') as out:
+
+            # write file header
+            out.write("EEPROM Load Test Starting\n")
+            for dev in self.devices:
+                out.write(f"{make_key(dev)} initial EEPROM:\n")
+                for i, s in dev.eeprom["hexdump"].items():
+                    out.write(f"  {i}: {s}\n")
+
+            msg = f"Each of the following {self.args.loop} iterations will read {self.args.max_pages} pages " \
+                 +f"{self.args.inner_loop} times consecutively over {len(self.devices)} spectrometers with " \
+                 +f"{self.args.delay_ms}ms delay between reads " \
+                 +f"({self.args.loop * self.args.max_pages * self.args.inner_loop} total page reads)"
+            out.write(f"{msg}\n")
+            print(msg)
+
+            print("load test iterations...", end='')
+            failures = {}
             for count in range(self.args.loop):
                 print(".", end='', flush=True)
+
                 for dev in self.devices:
                     key = f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
                     # test same spectrometer several times in a row
