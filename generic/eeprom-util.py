@@ -28,7 +28,6 @@ class Fixture(object):
         parser.add_argument("--debug",          action="store_true",    help="debug output")
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
         parser.add_argument("--erase",          action="store_true",    help="erase (write all 0xff)")
-        parser.add_argument("--hex",            action="store_true",    help="output in hex")
         parser.add_argument("--force-offset",   action="store_true",    help="force ARMs to use the old 'offset' write method")
         parser.add_argument("--noparse",        action="store_true",    help="don't parse EEPROM fields")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
@@ -212,10 +211,7 @@ class Fixture(object):
         print("%s EEPROM:" % state)
         for page in range(len(self.eeprom_pages)):
             print(f"  Page {page}: ", end='')
-            if self.args.hex:
-                print(" ".join([f"{i:02x}" for i in self.eeprom_pages[page]]))
-            else:
-                print(self.eeprom_pages[page])
+            print(" ".join([f"{i:02x}" for i in self.eeprom_pages[page]]))
 
     def write_eeprom(self):
         print("Writing EEPROM")
