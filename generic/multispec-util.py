@@ -23,11 +23,6 @@ MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
-IMMUTABLE =r".. c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 " \
-          + "00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 " \
-          + "00 4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 " \
-          + "90 e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
-
 # An extensible, stateful "Test Fixture" 
 class Fixture(object):
 
@@ -308,7 +303,11 @@ class Fixture(object):
         print(f"frame count = {count} (0x{count:04x})")
 
     def do_eeprom_load_test(self):
-        
+        """
+        When validating a new source of EEPROM chips, or FX2 FW responsible for 
+        reading same, it can be useful to "hammer" the EEPROM on one or more 
+        connected units with a rapid series of read tests.
+        """
         def make_key(dev):
             return f"0x{dev.idVendor:04x}:0x{dev.idProduct:04x}:0x{dev.address:04x}:{dev.eeprom['serial_number']}"
 
@@ -323,7 +322,7 @@ class Fixture(object):
                     out.write(f"  {i}: {s}\n")
 
             msg = f"Each of the following {self.args.loop} iterations will read {self.args.max_pages} pages " \
-                 +f"{self.args.inner_loop} times consecutively over {len(self.devices)} spectrometers with " \
+                 +f"{self.args.inner_loop} times consecutively over {len(self.devices)} spectrometers with\n" \
                  +f"{self.args.delay_ms}ms delay between reads " \
                  +f"({self.args.loop * self.args.max_pages * self.args.inner_loop * len(self.devices)} " \
                  +f"total page reads)"
@@ -350,11 +349,17 @@ class Fixture(object):
                             for i, buf in enumerate(ee):
                                 ss[i] = " ".join([f"{v:02x}" for v in buf])
 
-                            # does any page match the immutable regex?
+                            # the following sequence of 63 bytes is of engineering interest
+                            # if it appears anywhere within a 64-byte EEPROM page
+                            IMMUTABLE = r"c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 00 " \
+                                      +  "03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 00 " \
+                                      +  "4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 90 " \
+                                      +  "e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
+
                             passed = True
                             for i, s in ss.items():
                                 orig = dev.eeprom["hexdump"][i]
-                                if re.match(IMMUTABLE, s):
+                                if re.search(IMMUTABLE, s):
                                     print(f"\n    {key} failure on loop {count}: page {i} matches immutable")
                                     passed = False
                                 elif s != orig:
