@@ -207,7 +207,7 @@ class Fixture(object):
 
     def get_fpga_version(self, dev):
         s = ""
-        result = self.get_cmd(dev, 0xb4)
+        result = self.get_cmd(dev, 0xb4, length=7)
         if result is not None:
             for i in range(len(result)):
                 c = result[i]
