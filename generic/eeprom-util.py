@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 
+import traceback
+import argparse
+import random
+import struct
 import array
 import json
 import sys
 import re
-from time import sleep
 
-import traceback
+from time import sleep
 import usb.core
-import argparse
-import struct
-import sys
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -23,6 +23,7 @@ class Fixture(object):
         self.eeprom_pages = None
         self.fields = {}
         self.field_names = []
+        self.pattern_count = 0
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",          action="store_true",    help="debug output")
@@ -35,7 +36,9 @@ class Fixture(object):
         parser.add_argument("--set",            action="append",        help="set a name:value pair")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
         parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with zeros, then populates minimal defaults (HIGHLY DANGEROUS)")
-        parser.add_argument("--pixels",         type=int, default=1024, help="active_pixels_horizontal when reprogramming")
+        parser.add_argument("--pixels",         type=int,               help="active_pixels_horizontal when reprogramming", default=1024)
+        parser.add_argument("--pattern",        type=str,               help="for reprogram or erase, use this base pattern", default="zeros",
+                                                                        choices=["zeros", "ones", "random", "ramp", "ramp-all"])
         self.args = parser.parse_args()
 
         if not (self.args.dump or \
@@ -58,10 +61,10 @@ class Fixture(object):
         self.dump_eeprom()
 
         if self.args.erase:
-            self.do_erase()
-            self.write_eeprom()
-
-        if self.args.reprogram:
+            if self.verify("Preparing to erase EEPROM."):
+                self.do_erase()
+                self.write_eeprom()
+        elif self.args.reprogram:
             self.do_reprogram()
         elif self.args.set:
             self.do_set()
@@ -83,10 +86,26 @@ class Fixture(object):
 
         self.write_eeprom()
 
-    def do_erase(self, value=0xff):
+    def pattern_generator(self):
+        if self.args.pattern == "zeros":
+            value = 0x00
+        elif self.args.pattern == "ones":
+            value = 0xff
+        elif self.args.pattern == "random":
+            value = random.randint(0, 255)
+        elif self.args.pattern == "ramp":
+            value = self.pattern_count % 64
+        elif self.args.pattern == "ramp-all":
+            value = self.pattern_count % 256
+
+        self.pattern_count += 1
+        return value
+        
+    def do_erase(self):
         print("Erasing buffers")
         for page in range(len(self.eeprom_pages)):
             for i in range(PAGE_SIZE):
+                value = self.pattern_generator()
                 self.pack((page, i, 1), "B", value)
 
     def load(self, filename):
@@ -273,8 +292,8 @@ class Fixture(object):
                            "operation which will overwrite all configuration data on\n" +
                            "the spectrometer, destroying any factory calibrations."): return
             
-        # set all buffers to zero
-        self.do_erase(value=0x00)
+        # set all buffers to base pattern
+        self.do_erase()
 
         # minimum set of defaults to allow ENLIGHTEN operation
         self.pack((0, 63,  1), "B", 15,               "format")
