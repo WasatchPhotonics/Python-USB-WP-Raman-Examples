@@ -29,7 +29,6 @@ class Fixture(object):
         parser.add_argument("--debug",          action="store_true",    help="debug output")
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
         parser.add_argument("--erase",          action="store_true",    help="erase (pages filled per --pattern)")
-        parser.add_argument("--force-offset",   action="store_true",    help="force ARMs to use the old 'offset' write method")
         parser.add_argument("--noparse",        action="store_true",    help="don't parse EEPROM fields")
         parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
@@ -241,7 +240,7 @@ class Fixture(object):
             buf = self.eeprom_pages[page]
             print(f"  writing page {page}: {buf}")
 
-            if self.pid == 0x4000 and not self.args.force_offset:
+            if self.pid == 0x4000:
                 self.send_cmd(cmd=0xff, value=0x02, index=page, buf=buf)
             else:
                 DATA_START = 0x3c00
