@@ -35,7 +35,8 @@ class Fixture(object):
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--set",            action="append",        help="set a name:value pair")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
-        parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with zeros, then populates minimal defaults (HIGHLY DANGEROUS)")
+        parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with zeros, then populates minimal defaults")
+        parser.add_argument("--verify",         action="store_true",    help="verifies EEPROM contents match the specified pattern and not immutable string")
         parser.add_argument("--pixels",         type=int,               help="active_pixels_horizontal when reprogramming", default=1024)
         parser.add_argument("--pattern",        type=str,               help="for reprogram or erase, use this base pattern", default="zeros",
                                                                         choices=["zeros", "ones", "random", "ramp", "ramp-all"])
@@ -61,13 +62,15 @@ class Fixture(object):
         self.dump_eeprom()
 
         if self.args.erase:
-            if self.verify("Preparing to erase EEPROM."):
+            if self.confirm("Preparing to erase EEPROM."):
                 self.do_erase()
                 self.write_eeprom()
         elif self.args.reprogram:
             self.do_reprogram()
         elif self.args.set:
             self.do_set()
+        elif self.args.verify:
+            self.do_verify()
 
         if self.args.dump:
             return
@@ -277,17 +280,33 @@ class Fixture(object):
         
         if write:
             self.dump_eeprom("Proposed")
-            if not self.verify("Will re-write EEPROM with updated contents"):
+            if not self.confirm("Will re-write EEPROM with updated contents"):
                 return
             self.write_eeprom()
 
-    def verify(self, msg):
+    def confirm(self, msg):
         print(msg)
         cont = input("\n\nContinue? (y/N) ")
         return cont.lower() == "y"
 
+    def do_verify(self):
+        IMMUTABLE = r"c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 00 " \
+                  +  "4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 90 e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
+        for page in range(self.args.max_pages):
+            buf = self.eeprom_pages[page] 
+            s = " ".join([f"{v:02x}" for v in buf])
+            if s == IMMUTABLE:
+                print(f"ERROR: page {page} matches immutable")
+                continue
+            
+            for i in range(len(buf)):
+                expected = self.pattern_generator()
+                if buf[i] != expected:
+                    print(f"ERROR: page {page} did not match {self.args.pattern}: {s}")
+                    break
+
     def do_reprogram(self):
-        if not self.verify("*** HAZARDOUS OPERATION ***\n" +
+        if not self.confirm("*** HAZARDOUS OPERATION ***\n" +
                            "Reprogram EEPROM to bland defaults? This is a destructive\n" +
                            "operation which will overwrite all configuration data on\n" +
                            "the spectrometer, destroying any factory calibrations."): return
@@ -307,6 +326,7 @@ class Fixture(object):
         self.pack((3, 40,  4), "I", 1,                "min_integ")
         self.pack((3, 44,  4), "I", 60000,            "max_integ")
 
+        # override the above with any cmd-line overrides
         self.do_set(write=False)
 
         self.write_eeprom()
