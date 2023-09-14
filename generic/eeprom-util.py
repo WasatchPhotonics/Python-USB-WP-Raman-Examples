@@ -228,6 +228,9 @@ class Fixture(object):
             sleep(0.2)
 
     def do_set(self, write=True):
+        if self.args.set is None:
+            return
+
         changes = []
         for pair in self.args.set:
             tok = pair.split("=")
