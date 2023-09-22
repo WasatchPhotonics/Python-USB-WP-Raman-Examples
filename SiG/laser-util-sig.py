@@ -213,7 +213,7 @@ class Fixture(object):
 
     def set_tec_enable(self, flag):
         print(f"setting TEC enable {flag}")
-        self.send_cmd(0xb4, 1 if flag else 0)
+        self.send_cmd(0x84, 1 if flag else 0)
         self.tec_enabled = flag
 
     def do_ramp_tec(self):
