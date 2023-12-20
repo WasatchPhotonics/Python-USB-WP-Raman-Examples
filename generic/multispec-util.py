@@ -13,7 +13,6 @@ import traceback
 import usb.core
 import argparse
 import struct
-import sys
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -414,7 +413,10 @@ class Fixture(object):
             return self.get_spectrum_hw_trigger(dev)
 
     def get_spectrum_sw_trigger(self, dev):
-        timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+        if self.args.integration_time_ms:
+            timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+        else:
+            timeout_ms = TIMEOUT_MS + 100 * 2
 
         print(f"{datetime.now()} sending trigger...")
         self.send_cmd(dev, 0xad, 1)
