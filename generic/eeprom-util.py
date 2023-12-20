@@ -42,6 +42,8 @@ class Fixture(object):
         self.args = parser.parse_args()
 
         if not (self.args.dump or \
+                self.args.erase or \
+                self.args.verify or \
                 self.args.restore):
             self.args.dump = True
 
@@ -274,6 +276,8 @@ class Fixture(object):
                 self.pack((0,  0, 16), "s", v)
             elif k == "serial_number":
                 self.pack((0, 16, 16), "s", v)
+            elif k == "laser_watchdog_sec":
+                self.pack((3, 52, 4), "H", v)
             else:
                 print(f"unsupported key: {k} ({v})")
         
@@ -335,6 +339,7 @@ class Fixture(object):
 
         self.format = self.unpack((0, 63,  1), "B", "format")
 
+        # capitals are unsigned
         self.unpack((0,  0, 16), "s", "model")
         self.unpack((0, 16, 16), "s", "serial_number")
         self.unpack((0, 32,  4), "I", "baud_rate")
@@ -398,6 +403,7 @@ class Fixture(object):
         self.unpack((3, 40,  4), "I", "min_integ")
         self.unpack((3, 44,  4), "I", "max_integ")
         self.unpack((3, 48,  4), "f", "avg_resolution")
+        self.unpack((3, 52,  2), "H", "laser_watchdog_sec")
 
         for field in self.field_names:
             print("%30s %s" % (field, self.fields[field]))
@@ -485,6 +491,11 @@ class Fixture(object):
         if page > len(self.eeprom_pages):
             raise Exception("error packing EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
                 page, start_byte, length, data_type, label))
+
+        if data_type.lower() in ["h", "i", "b", "l", "q"]:
+            value = int(value)
+        elif data_type.lower() in ["f", "d"]:
+            value = float(value)
 
         # don't try to write negatives to unsigned types
         if data_type in ["H", "I"] and value < 0:
