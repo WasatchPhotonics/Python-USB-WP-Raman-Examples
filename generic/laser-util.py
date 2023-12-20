@@ -34,6 +34,7 @@ class Fixture(object):
         parser.add_argument("--pid",                    default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--debug",                  action="store_true", help="debug output")
         parser.add_argument("--enable",                 action="store_true", help="fire laser")
+        parser.add_argument("--watchdog-sec",           type=int,            help="laser watchdog (seconds)")
         parser.add_argument("--max-ms",                 type=int,            help="firing time (ms) (default 1000)", default=1000)
         parser.add_argument("--mod-enable",             action="store_true", help="enable modulation")
         parser.add_argument("--mod-period-us",          type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
@@ -55,6 +56,9 @@ class Fixture(object):
         if not self.args.enable:
             self.set_enable(False)
             return
+
+        if self.args.watchdog_sec is not None:
+            self.set_laser_watchdog(self.args.watchdog_sec)
 
         # apparently we're to fire the laser
 
@@ -89,6 +93,10 @@ class Fixture(object):
     ############################################################################
     # opcodes
     ############################################################################
+
+    def set_laser_watchdog(self, sec):
+        print(f"Setting watchdog to {sec} seconds")
+        return self.send_cmd(0xff, 0x18, sec)
 
     def get_battery_level(self):
         raw = self.get_cmd(0xff, 0x13, 3)
@@ -141,7 +149,7 @@ class Fixture(object):
         if self.args.debug:
             print("DEBUG: %s" % msg)
 
-    def send_cmd(self, cmd, value, index=0, buf=None):
+    def send_cmd(self, cmd, value, index=0, buf=None, label=None):
         if buf is None:
             if self.is_arm():
                 buf = [0] * 8
