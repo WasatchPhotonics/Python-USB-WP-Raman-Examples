@@ -25,6 +25,77 @@ class Fixture(object):
         self.field_names = []
         self.pattern_count = 0
 
+        self.loc = {}
+        for triplet in [
+                # - partial list...see Wasatch.PY/wasatch/EEPROM.py for complete set
+                # - capitals are unsigned
+                ((0,  0, 16), "s", "model"),
+                ((0, 16, 16), "s", "serial_number"),
+                ((0, 32,  4), "I", "baud_rate"),
+                ((0, 36,  1), "?", "has_cooling"),
+                ((0, 37,  1), "?", "has_battery"),
+                ((0, 38,  1), "?", "has_laser"),
+                ((0, 39,  2), "H", "feature_mask"),
+                ((0, 39,  2), "H", "excitation_nm"),
+                ((0, 41,  2), "H", "slit_um"),
+                ((0, 43,  2), "H", "start_integ"),
+                ((0, 45,  2), "h", "start_temp"),
+                ((0, 47,  1), "B", "start_trigger"),
+                ((0, 48,  4), "f", "gain"), 
+                ((0, 52,  2), "h", "offset"), 
+                ((0, 54,  4), "f", "gain_odd"), 
+                ((0, 58,  2), "h", "offset_odd"), 
+                ((1,  0,  4), "f", "wavecal_c0"),
+                ((1,  4,  4), "f", "wavecal_c1"),
+                ((1,  8,  4), "f", "wavecal_c2"),
+                ((1, 12,  4), "f", "wavecal_c3"),
+                ((1, 16,  4), "f", "degCtoDAC_c0"),
+                ((1, 20,  4), "f", "degCtoDAC_c1"),
+                ((1, 24,  4), "f", "degCtoDAC_c2"),
+                ((1, 28,  2), "h", "max_temp"),
+                ((1, 30,  2), "h", "min_temp"),
+                ((1, 32,  4), "f", "adcToDegC_c0"),
+                ((1, 36,  4), "f", "adcToDegC_c1"),
+                ((1, 40,  4), "f", "adcToDegC_c2"),
+                ((1, 44,  2), "h", "r298"),
+                ((1, 46,  2), "h", "beta"),
+                ((1, 48, 12), "s", "cal_date"),
+                ((1, 60,  3), "s", "cal_tech"),
+                ((2,  0, 16), "s", "detector"),
+                ((2, 16,  2), "H", "active_pixels_horizontal"),
+                ((2, 18,  1), "B", "laser_warmup_sec"),
+                ((2, 19,  2), "H", "active_pixels_vertical"),
+                ((2, 21,  4), "f", "wavecal_c4"),
+                ((2, 25,  2), "H", "actual_pixels_horizontal"),
+                ((2, 27,  2), "H", "roi_horiz_start"),
+                ((2, 29,  2), "H", "roi_horiz_end"),
+                ((2, 31,  2), "H", "roi_vertical_region_1_start"),
+                ((2, 33,  2), "H", "roi_vertical_region_1_end"),
+                ((2, 35,  2), "H", "roi_vertical_region_2_start"),
+                ((2, 37,  2), "H", "roi_vertical_region_2_end"),
+                ((2, 39,  2), "H", "roi_vertical_region_3_start"),
+                ((2, 41,  2), "H", "roi_vertical_region_3_end"),
+                ((0, 43,  2), "H", "startup_integration_time_ms"),
+                ((0, 45,  2), "h", "startup_temp_degC"),
+                ((2, 43,  4), "f", "linearity_c0"),
+                ((2, 47,  4), "f", "linearity_c1"),
+                ((2, 51,  4), "f", "linearity_c2"),
+                ((2, 55,  4), "f", "linearity_c3"),
+                ((2, 59,  4), "f", "linearity_c4"),
+                ((3, 12,  4), "f", "laser_power_c0"),
+                ((3, 16,  4), "f", "laser_power_c1"),
+                ((3, 20,  4), "f", "laser_power_c2"),
+                ((3, 24,  4), "f", "laser_power_c3"),
+                ((3, 28,  4), "f", "max_laser_mW"),
+                ((3, 32,  4), "f", "min_laser_mW"),
+                ((3, 36,  4), "f", "excitation_nm_float"),
+                ((3, 40,  4), "I", "min_integ"),
+                ((3, 44,  4), "I", "max_integ"),
+                ((3, 48,  4), "f", "avg_resolution"),
+                ((3, 52,  2), "H", "laser_watchdog_sec") ]:
+            location, datatype, name = triplet
+            self.loc[name] = { "datatype": datatype, "location": location }
+
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",          action="store_true",    help="debug output")
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
@@ -39,6 +110,7 @@ class Fixture(object):
         parser.add_argument("--pixels",         type=int,               help="active_pixels_horizontal when reprogramming", default=1024)
         parser.add_argument("--pattern",        type=str,               help="for reprogram or erase, use this base pattern", default="zeros",
                                                                         choices=["zeros", "ones", "random", "ramp", "ramp-all"])
+        parser.add_argument("--save-file",      type=str,               help="save to JSON file")
         self.args = parser.parse_args()
 
         if not (self.args.dump or \
@@ -61,6 +133,8 @@ class Fixture(object):
             self.parse_eeprom()
 
         self.dump_eeprom()
+        if self.args.save_file:
+            self.save_file()
 
         if self.args.erase:
             if self.confirm("Preparing to erase EEPROM."):
@@ -118,7 +192,20 @@ class Fixture(object):
         else:
             self.load_other(filename)
 
+    def save_file(self):
+        # saves "something like" the files produced by ENLIGHTEN in ~/EnlightenSpectra/eeprom_backups
+        # (close enough to be compatible for our purposes)
+        doc = {}
+        doc["buffers"] = str(self.eeprom_pages) # <-- this is what we actually parse in load_json
+        for name in self.fields:                # <-- just for convenience
+            doc[name] = self.fields[name]
+        with open(self.args.save_file, "w") as f:
+            s = json.dumps(doc, indent=2, sort_keys=True)
+            f.write(s)
+
     def load_json(self, filename):
+        # loads EnlightenSpectra/eeprom_backups file, with lines like this:
+        # "buffers": "[array('B', [87, 80, 45, 54, 51, 56, 88, 45, 70, 49, 51, 45, 82, 45, 73, 76, 87, 80, 45, 48, 49, 54, 49, 54, 0, 0, 0, 0, 0, 0, 0, 0, 44, 1, 0, 0, 1, 0, 1, 9, 0, 25, 0, 8, 0, 10, 0, 0, 51, 51, 243, 63, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 14]), array('B', [201, 254, 32, 68, 33, 111, 254, 61, 88, 181, 38, 55, 141, 139, 35, 178, 129, 21, 120, 69, 40, 222, 14, 195, 226, 149, 239, 190, 20, 0, 10, 0, 157, 177, 117, 66, 246, 179, 55, 188, 149, 191, 86, 181, 16, 39, 122, 13, 49, 50, 47, 49, 52, 47, 50, 48, 50, 51, 0, 0, 65, 71, 65, 255]), array('B', [83, 49, 54, 48, 49, 49, 45, 49, 49, 48, 54, 0, 0, 0, 0, 0, 0, 8, 10, 64, 0, 232, 93, 198, 43, 20, 8, 26, 0, 255, 7, 0, 0, 63, 0, 0, 0, 63, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255]), array('B', [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 198, 63, 120, 65, 93, 166, 246, 62, 56, 220, 147, 58, 215, 203, 220, 182, 0, 0, 122, 67, 0, 0, 128, 63, 85, 100, 31, 68, 8, 0, 0, 0, 96, 234, 0, 0, 210, 137, 237, 64, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]), array('B', [0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]), array('B', [23, 3, 130, 1, 40, 5, 225, 5, 95, 6, 48, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 177, 3, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1]), array('B', [0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]), array('B', [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255])]",
         with open(filename) as f:
             doc = json.load(f)
         buffers_string = doc["buffers"][1:-2] # strip first/last []
@@ -261,25 +348,15 @@ class Fixture(object):
                 print(f"skipping pair {pair}")
                 continue
 
-            k, v = tok
-            k = k.lower()
+            name, value = tok
+            name = name.lower()
 
-            if k == "startup_integration_time_ms":
-                v = int(v)
-                self.pack((0, 43, 2), "H", v)
-                print(f"changing {k} -> {v}")
-            elif k == "startup_temp_degc":
-                v = int(v)
-                self.pack((0, 45, 2), "h", v)
-                print(f"changing {k} -> {v}")
-            elif k == "model":
-                self.pack((0,  0, 16), "s", v)
-            elif k == "serial_number":
-                self.pack((0, 16, 16), "s", v)
-            elif k == "laser_watchdog_sec":
-                self.pack((3, 52, 4), "H", v)
+            if name in self.loc:
+                datatype = self.loc[name]["datatype"]
+                location = self.loc[name]["location"]
+                self.pack(location, datatype, value)
             else:
-                print(f"unsupported key: {k} ({v})")
+                print(f"unsupported EEPROM field name: {name} ({value})")
         
         if write:
             self.dump_eeprom("Proposed")
@@ -318,16 +395,22 @@ class Fixture(object):
         self.do_erase()
 
         # minimum set of defaults to allow ENLIGHTEN operation
-        self.pack((0, 63,  1), "B", 15,               "format")
-        self.pack((0,  0, 16), "s", "WP-FOO",         "model")
-        self.pack((0, 16, 16), "s", "WP-00000",       "serial_number")
-        self.pack((0, 48,  4), "f", 1,                "gain") 
-        self.pack((1,  4,  4), "f", 1,                "wavecal_c1")
-        self.pack((2,  0, 16), "s", "unknown",        "detector")
-        self.pack((2, 16,  2), "H", self.args.pixels, "active_pixels_horizontal")
-        self.pack((2, 25,  2), "H", self.args.pixels, "actual_pixels_horizontal")
-        self.pack((3, 40,  4), "I", 1,                "min_integ")
-        self.pack((3, 44,  4), "I", 60000,            "max_integ")
+        for pair in [
+                (15,               "format"),
+                ("WP-FOO",         "model"),
+                ("WP-00000",       "serial_number"),
+                (1,                "gain"),
+                (1,                "wavecal_c1"),
+                ("unknown",        "detector"),
+                (self.args.pixels, "active_pixels_horizontal"),
+                (self.args.pixels, "actual_pixels_horizontal"),
+                (1,                "min_integ"),
+                (60000,            "max_integ") ]:
+            value, name = pair
+            if name in self.loc:
+                location = self.loc[name]["location"]
+                datatype = self.loc[name]["datatype"]
+                self.pack(location, datatype, value, name)
 
         # override the above with any cmd-line overrides
         self.do_set(write=False)
@@ -339,71 +422,10 @@ class Fixture(object):
 
         self.format = self.unpack((0, 63,  1), "B", "format")
 
-        # capitals are unsigned
-        self.unpack((0,  0, 16), "s", "model")
-        self.unpack((0, 16, 16), "s", "serial_number")
-        self.unpack((0, 32,  4), "I", "baud_rate")
-        self.unpack((0, 36,  1), "?", "has_cooling")
-        self.unpack((0, 37,  1), "?", "has_battery")
-        self.unpack((0, 38,  1), "?", "has_laser")
-        self.unpack((0, 39,  2), "H", "feature_mask")
-        self.unpack((0, 39,  2), "H", "excitation_nm")
-        self.unpack((0, 41,  2), "H", "slit_um")
-        self.unpack((0, 43,  2), "H", "start_integ")
-        self.unpack((0, 45,  2), "h", "start_temp")
-        self.unpack((0, 47,  1), "B", "start_trigger")
-        self.unpack((0, 48,  4), "f", "gain") 
-        self.unpack((0, 52,  2), "h", "offset") 
-        self.unpack((0, 54,  4), "f", "gain_odd") 
-        self.unpack((0, 58,  2), "h", "offset_odd") 
-        self.unpack((1,  0,  4), "f", "wavecal_c0")
-        self.unpack((1,  4,  4), "f", "wavecal_c1")
-        self.unpack((1,  8,  4), "f", "wavecal_c2")
-        self.unpack((1, 12,  4), "f", "wavecal_c3")
-        self.unpack((1, 16,  4), "f", "degCtoDAC_c0")
-        self.unpack((1, 20,  4), "f", "degCtoDAC_c1")
-        self.unpack((1, 24,  4), "f", "degCtoDAC_c2")
-        self.unpack((1, 28,  2), "h", "max_temp")
-        self.unpack((1, 30,  2), "h", "min_temp")
-        self.unpack((1, 32,  4), "f", "adcToDegC_c0")
-        self.unpack((1, 36,  4), "f", "adcToDegC_c1")
-        self.unpack((1, 40,  4), "f", "adcToDegC_c2")
-        self.unpack((1, 44,  2), "h", "r298")
-        self.unpack((1, 46,  2), "h", "beta")
-        self.unpack((1, 48, 12), "s", "cal_date")
-        self.unpack((1, 60,  3), "s", "cal_tech")
-        self.unpack((2,  0, 16), "s", "detector")
-        self.unpack((2, 16,  2), "H", "active_pixels_horizontal")
-        self.unpack((2, 18,  1), "B", "laser_warmup_sec")
-        self.unpack((2, 19,  2), "H", "active_pixels_vertical")
-        self.unpack((2, 21,  4), "f", "wavecal_c4")
-        self.unpack((2, 25,  2), "H", "actual_pixels_horizontal")
-        self.unpack((2, 27,  2), "H", "roi_horiz_start")
-        self.unpack((2, 29,  2), "H", "roi_horiz_end")
-        self.unpack((2, 31,  2), "H", "roi_vertical_region_1_start")
-        self.unpack((2, 33,  2), "H", "roi_vertical_region_1_end")
-        self.unpack((2, 35,  2), "H", "roi_vertical_region_2_start")
-        self.unpack((2, 37,  2), "H", "roi_vertical_region_2_end")
-        self.unpack((2, 39,  2), "H", "roi_vertical_region_3_start")
-        self.unpack((2, 41,  2), "H", "roi_vertical_region_3_end")
-        self.unpack((0, 43,  2), "H", "startup_integration_time_ms")
-        self.unpack((0, 45,  2), "h", "startup_temp_degC")
-        self.unpack((2, 43,  4), "f", "linearity_c0")
-        self.unpack((2, 47,  4), "f", "linearity_c1")
-        self.unpack((2, 51,  4), "f", "linearity_c2")
-        self.unpack((2, 55,  4), "f", "linearity_c3")
-        self.unpack((2, 59,  4), "f", "linearity_c4")
-        self.unpack((3, 12,  4), "f", "laser_power_c0")
-        self.unpack((3, 16,  4), "f", "laser_power_c1")
-        self.unpack((3, 20,  4), "f", "laser_power_c2")
-        self.unpack((3, 24,  4), "f", "laser_power_c3")
-        self.unpack((3, 28,  4), "f", "max_laser_mW")
-        self.unpack((3, 32,  4), "f", "min_laser_mW")
-        self.unpack((3, 36,  4), "f", "excitation_nm_float")
-        self.unpack((3, 40,  4), "I", "min_integ")
-        self.unpack((3, 44,  4), "I", "max_integ")
-        self.unpack((3, 48,  4), "f", "avg_resolution")
-        self.unpack((3, 52,  2), "H", "laser_watchdog_sec")
+        for name in self.loc:
+            datatype = self.loc[name]["datatype"]
+            location = self.loc[name]["location"]
+            self.unpack(location, datatype, name)
 
         for field in self.field_names:
             print("%30s %s" % (field, self.fields[field]))
