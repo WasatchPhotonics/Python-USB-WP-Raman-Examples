@@ -21,11 +21,14 @@ def Get_Raw(Command, ByteCount=64, index=0):
     return dev.ctrl_transfer(DEVICE_TO_HOST, Command, 0, 0, ByteCount, TIMEOUT_MS)
 
 def Get_Value(Command, ByteCount, index=0):
-    RetVal = 0
-    RetArray = Get_Raw(Command, ByteCount, index)
-    for i in range (0, ByteCount):
-        RetVal = RetVal*256 + RetArray[ByteCount - i - 1]
-    return (RetVal, RetArray)
+    try:
+        RetVal = 0
+        RetArray = Get_Raw(Command, ByteCount, index)
+        for i in range (0, ByteCount):
+            RetVal = RetVal*256 + RetArray[ByteCount - i - 1]
+        return (RetVal, RetArray)
+    except:
+        return ("error", "error")
 
 print("Integration Time   %8s %s" % Get_Value(0xbf, 6))
 print("CCD Offset         %8s %s" % Get_Value(0xc4, 2))
