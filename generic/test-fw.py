@@ -94,6 +94,9 @@ class Fixture:
             print("---------------------------------------------------------")
             print(self.detail_report)
 
+        if self.args.outfile:
+            print(f"Spectra saved to {self.args.outfile}")
+
     ############################################################################
     # tests
     ############################################################################
@@ -129,7 +132,7 @@ class Fixture:
         all_start = datetime.now()    
         for i in range(self.args.spectra):
             this_start = datetime.now()    
-            spectrum = self.get_spectrum(label="Read Spectra")
+            spectrum = self.get_spectrum(label=f"Read Spectra[{i}]")
             this_elapsed = (datetime.now() - this_start).total_seconds()
 
             mean = np.mean(spectrum)
@@ -147,7 +150,7 @@ class Fixture:
             if check != ms:
                 return f"ERROR: wrote integration time {ms} but read {check}"
                             
-            spectrum, mean, elapsed = self.get_averaged_spectrum(ms=ms, label="Integration Time")
+            spectrum, mean, elapsed = self.get_averaged_spectrum(ms=ms, label=f"Integration Time ({ms}ms)")
             self.detail_report += f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
 
         # reset for subsequent tests
@@ -164,7 +167,7 @@ class Fixture:
             if abs(check - dB) > epsilon:
                 return f"ERROR: wrote gain {dB} but read {check}"
 
-            spectrum, mean, elapsed = self.get_averaged_spectrum(label="Gain")
+            spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Gain ({dB}dB)")
             self.detail_report += f"  set/get gain {dB:0.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
 
         # reset for subsequent tests
@@ -190,7 +193,7 @@ class Fixture:
                 if check != stop_line:
                     return f"ERROR: wrote start line {stop_line} but read {check}"
 
-            spectrum, mean, elapsed = self.get_averaged_spectrum(label="Vertical ROI")
+            spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Vertical ROI ({start_line}-{stop_line})")
             self.detail_report += f"  set/get vertical roi ({start_line}, {stop_line}) then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
 
         # reset for subsequent tests
