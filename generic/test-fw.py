@@ -123,7 +123,7 @@ class Fixture:
             self.detail_report += f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec at {self.args.integration_time_ms}ms\n"
         all_elapsed = (datetime.now() - all_start).total_seconds()
 
-        return f"{self.args.spectra} specta read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
+        return f"{self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
 
     ############################################################################
     # opcodes
