@@ -4,6 +4,7 @@ import traceback
 import usb.core
 import argparse
 import struct
+import numpy as np
 import sys
 import re
 import os
@@ -41,10 +42,12 @@ class Fixture:
         parser.add_argument("--spectra", type=int, default=10, help="how many spectra to read")
         parser.add_argument("--outfile", type=str, help="if provided, will receive row-ordered spectra in CSV")
 
-        for name in [ 
-                "read-firmware-rev", "read-fpga-rev", 
-                "read-eeprom", 
-                "read-spectra" ]:
+        for name in [ "read-firmware-rev", 
+                      "read-fpga-rev", 
+                      "read-eeprom", 
+                      "read-spectra",
+                      "test-integration-time",
+                      "test-detector-gain" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
         self.args = parser.parse_args()
 
@@ -72,6 +75,12 @@ class Fixture:
 
         if self.args.read_spectra:
             self.report("Read Spectra", self.read_spectra())
+
+        if self.args.test_integration_time:
+            self.report("Integration Time", self.test_integration_time())
+
+        if self.args.test_detector_gain:
+            self.report("Detector Gain", self.test_detector_gain())
 
         if self.args.verbose:
             print("\nVerbose report:")
@@ -116,39 +125,97 @@ class Fixture:
             spectrum = self.get_spectrum()
             this_elapsed = (datetime.now() - this_start).total_seconds()
 
+            mean = np.mean(spectrum)
+
             if self.args.outfile:
                 with open(self.args.outfile, "a") as f:
                     f.write(", ".join([str(x) for x in spectrum]) + "\n")
 
-            self.detail_report += f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec at {self.args.integration_time_ms}ms\n"
+            self.detail_report += f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec with mean {mean:0.2f} at {self.args.integration_time_ms}ms\n"
         all_elapsed = (datetime.now() - all_start).total_seconds()
 
         return f"{self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
 
+    def test_integration_time(self):
+        self.detail_report += "\nIntegration Time:\n"
+        values = [10, 100, 400]
+        for ms in values:
+            self.set_integration_time_ms(ms)
+            check = self.get_integration_time_ms()
+            if check != ms:
+                return f"ERROR: wrote integration time {ms} but read {check}"
+                            
+            start = datetime.now()    
+            spectrum = self.get_averaged_spectrum(ms=ms)
+            elapsed = (datetime.now() - start).total_seconds()
+
+            mean = np.mean(spectrum)
+            self.detail_report += f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
+
+        # reset for subsequent tests
+        self.set_integration_time_ms(self.args.integration_time_ms)
+        return f"collected {self.args.spectra} spectra at each of {values}ms"
+
+    def test_detector_gain(self):
+        self.detail_report += "\nDetector Gain:\n"
+        values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 8, 16, 24, 31]
+        for dB in values:
+            self.set_detector_gain(dB)
+            check = self.get_detector_gain()
+            epsilon = 0.1 if self.pid == 0x4000 else 0.001
+            if abs(check - dB) > epsilon:
+                return f"ERROR: wrote gain {dB} but read {check}"
+
+            start = datetime.now()    
+            spectrum = self.get_averaged_spectrum()
+            elapsed = (datetime.now() - start).total_seconds()
+
+            mean = np.mean(spectrum)
+            self.detail_report += f"  set/get gain {dB:0.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
+
+        return f"collected {self.args.spectra} spectra at each of {values}dB"
+
     ############################################################################
-    # opcodes
+    #                                                                          #
+    #                                 Opcodes                                  #
+    #                                                                          #
+    ############################################################################
+
+    ############################################################################
+    # Integration Time
     ############################################################################
 
     def set_integration_time_ms(self, ms):
-        ms = max(1, min(0xffff, ms)) # we're not bothering to test full 24-bit range
+        ms = max(1, min(0xffff, ms)) # just test 16-bit
         self.send_cmd(0xb2, ms)
 
     def get_integration_time_ms(self):
         return self.get_cmd(0xbf, lsb_len=3)
 
+    ############################################################################
+    # Gain
+    ############################################################################
+
+    def set_detector_gain(self, gain):
+        raw = self.float_to_uint16(gain)
+        self.send_cmd(0xb7, raw)
+    
     def get_detector_gain(self):
-        result = self.get_cmd(0xc5, label="GET_DETECTOR_GAIN")
+        result = self.get_cmd(0xc5)
         lsb = result[0] 
         msb = result[1]
-        gain = msb + lsb / 256.0
-        return gain
+        return msb + lsb / 256.0
+
+    ############################################################################
+    # Laser TEC Setpoint
+    ############################################################################
+
+    def set_laser_tec_setpoint(self, raw):
+        self.set_cmd(0xd8, wValue=0xa46)
 
     def get_detector_temperature_raw(self):
-        result = self.get_cmd(0xd7, label="GET_CCD_TEMP", msb_len=2)
+        result = self.get_cmd(0xd7, msb_len=2)
         return result
-
-    def set_detector_tec_setpoint(self, raw):
-        self.set_cmd(0xd8, wValue=0xa46, label="SET_DETECTOR_TEC_SETPOINT")
 
     ############################################################################
     # Utility Methods
@@ -162,6 +229,11 @@ class Fixture:
         if self.args.debug:
             print(f"DEBUG: {msg}")
 
+    def float_to_uint16(self, gain):
+        msb = int(round(gain, 5)) & 0xff
+        lsb = int((gain - msb) * 256) & 0xff
+        return (msb << 8) | lsb
+
     def send_cmd(self, cmd, value=0, index=0, buf=None):
         if buf is None:
             if self.pid == 0x4000:
@@ -171,7 +243,7 @@ class Fixture:
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.device.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
-    def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
+    def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None):
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d)" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
         result = self.device.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, result))
@@ -239,8 +311,24 @@ class Fixture:
         else:
             return self.eeprom.get("active_pixels_horizontal", 1952)
 
-    def get_spectrum(self):
-        ms = self.args.integration_time_ms
+    def get_averaged_spectrum(self, ms=None, count=None):
+        if ms is None:
+            ms = self.args.integration_time_ms
+        if count is None:
+            count = self.args.spectra
+
+        summed = self.get_spectrum(ms=ms)
+        for i in range(1, count):
+            spectrum = self.get_spectrum(ms=ms)
+            for px in range(len(summed)):
+                summed[px] += spectrum[px]
+        for px in range(len(summed)):
+            summed[px] /= count
+        return summed
+
+    def get_spectrum(self, ms=None):
+        if ms is None:
+            ms = self.args.integration_time_ms
         pixels = self.get_pixels()
 
         timeout_ms = TIMEOUT_MS + ms * 2
