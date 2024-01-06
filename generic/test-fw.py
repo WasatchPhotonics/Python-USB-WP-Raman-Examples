@@ -38,16 +38,20 @@ class Fixture:
 
         # for reading spectra
         parser.add_argument("--pixels", type=int, help="override EEPROM active_pixels_horizontal")
-        parser.add_argument("--integration-time-ms", type=int, default=100)
         parser.add_argument("--spectra", type=int, default=10, help="how many spectra to read")
         parser.add_argument("--outfile", type=str, help="if provided, will receive row-ordered spectra in CSV")
+
+        # for resetting after tests (could use EEPROM start fields...)
+        parser.add_argument("--integration-time-ms", type=int, default=100)
+        parser.add_argument("--detector-gain", type=float, default=1.9)
 
         for name in [ "read-firmware-rev", 
                       "read-fpga-rev", 
                       "read-eeprom", 
                       "read-spectra",
                       "test-integration-time",
-                      "test-detector-gain" ]:
+                      "test-detector-gain",
+                      "test-vertical-roi" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
         self.args = parser.parse_args()
 
@@ -81,6 +85,9 @@ class Fixture:
 
         if self.args.test_detector_gain:
             self.report("Detector Gain", self.test_detector_gain())
+
+        if self.args.test_vertical_roi:
+            self.report("Vertical ROI", self.test_vertical_roi())
 
         if self.args.verbose:
             print("\nVerbose report:")
@@ -122,15 +129,10 @@ class Fixture:
         all_start = datetime.now()    
         for i in range(self.args.spectra):
             this_start = datetime.now()    
-            spectrum = self.get_spectrum()
+            spectrum = self.get_spectrum(label="Read Spectra")
             this_elapsed = (datetime.now() - this_start).total_seconds()
 
             mean = np.mean(spectrum)
-
-            if self.args.outfile:
-                with open(self.args.outfile, "a") as f:
-                    f.write(", ".join([str(x) for x in spectrum]) + "\n")
-
             self.detail_report += f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec with mean {mean:0.2f} at {self.args.integration_time_ms}ms\n"
         all_elapsed = (datetime.now() - all_start).total_seconds()
 
@@ -145,11 +147,7 @@ class Fixture:
             if check != ms:
                 return f"ERROR: wrote integration time {ms} but read {check}"
                             
-            start = datetime.now()    
-            spectrum = self.get_averaged_spectrum(ms=ms)
-            elapsed = (datetime.now() - start).total_seconds()
-
-            mean = np.mean(spectrum)
+            spectrum, mean, elapsed = self.get_averaged_spectrum(ms=ms, label="Integration Time")
             self.detail_report += f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
 
         # reset for subsequent tests
@@ -166,14 +164,39 @@ class Fixture:
             if abs(check - dB) > epsilon:
                 return f"ERROR: wrote gain {dB} but read {check}"
 
-            start = datetime.now()    
-            spectrum = self.get_averaged_spectrum()
-            elapsed = (datetime.now() - start).total_seconds()
-
-            mean = np.mean(spectrum)
+            spectrum, mean, elapsed = self.get_averaged_spectrum(label="Gain")
             self.detail_report += f"  set/get gain {dB:0.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
 
+        # reset for subsequent tests
+        self.set_detector_gain(self.args.detector_gain)
         return f"collected {self.args.spectra} spectra at each of {values}dB"
+
+    def test_vertical_roi(self):
+        self.detail_report += "\nVertical ROI:\n"
+        tuples = []
+        for start_line in range(100, 1000, 100):
+            stop_line = start_line + 100
+            tuples.append( (start_line, stop_line) )
+
+            self.set_start_line(start_line)
+            if False:
+                check = self.get_start_line()
+                if check != start_line:
+                    return f"ERROR: wrote start line {start_line} but read {check}"
+
+            self.set_stop_line(stop_line)
+            if False:
+                check = self.get_stop_line()
+                if check != stop_line:
+                    return f"ERROR: wrote start line {stop_line} but read {check}"
+
+            spectrum, mean, elapsed = self.get_averaged_spectrum(label="Vertical ROI")
+            self.detail_report += f"  set/get vertical roi ({start_line}, {stop_line}) then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
+
+        # reset for subsequent tests
+        self.set_start_line(100)
+        self.set_stop_line(900)
+        return f"collected {self.args.spectra} spectra at each Vertical ROI {tuples}"
 
     ############################################################################
     #                                                                          #
@@ -205,6 +228,22 @@ class Fixture:
         lsb = result[0] 
         msb = result[1]
         return msb + lsb / 256.0
+
+    ############################################################################
+    # Vertical ROI
+    ############################################################################
+
+    def set_start_line(self, n):
+        self.send_cmd(0xff, 0x21, n)
+
+    def get_start_line(self):
+        return self.get_cmd(0xff, 0x22, lsb_len=2)
+
+    def set_stop_line(self, n):
+        self.send_cmd(0xff, 0x23, n)
+
+    def get_stop_line(self):
+        return self.get_cmd(0xff, 0x24, lsb_len=2)
 
     ############################################################################
     # Laser TEC Setpoint
@@ -311,22 +350,26 @@ class Fixture:
         else:
             return self.eeprom.get("active_pixels_horizontal", 1952)
 
-    def get_averaged_spectrum(self, ms=None, count=None):
+    def get_averaged_spectrum(self, ms=None, count=None, label=None):
         if ms is None:
             ms = self.args.integration_time_ms
         if count is None:
             count = self.args.spectra
 
-        summed = self.get_spectrum(ms=ms)
+        start = datetime.now()    
+        summed = self.get_spectrum(ms=ms, label=label)
         for i in range(1, count):
-            spectrum = self.get_spectrum(ms=ms)
+            spectrum = self.get_spectrum(ms=ms, label=label)
             for px in range(len(summed)):
                 summed[px] += spectrum[px]
         for px in range(len(summed)):
             summed[px] /= count
-        return summed
 
-    def get_spectrum(self, ms=None):
+        elapsed = (datetime.now() - start).total_seconds()
+        mean = np.mean(spectrum)
+        return summed, mean, elapsed
+
+    def get_spectrum(self, ms=None, label=None):
         if ms is None:
             ms = self.args.integration_time_ms
         pixels = self.get_pixels()
@@ -360,6 +403,11 @@ class Fixture:
 
         if len(spectrum) != pixels:
             print(f"ERROR: incomplete spectrum (received {len(spectrum)}, expected {pixels})")
+
+        mean = np.mean(spectrum)
+        if self.args.outfile:
+            with open(self.args.outfile, "a") as f:
+                f.write(", ".join([label, str(mean)] + [str(x) for x in spectrum]) + "\n")
 
         return spectrum
 
