@@ -54,6 +54,7 @@ class Fixture(object):
         parser.add_argument("--model",               type=str,            help="desired model")
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
+        parser.add_argument("--dump",                action="store_true", help="dump basic getters")
         parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
         self.args = parser.parse_args()
 
@@ -133,6 +134,9 @@ class Fixture(object):
         if self.args.list:
             self.list()
 
+        if self.args.dump:
+            self.dump()
+
         if self.args.set_dfu:
             for dev in self.devices:
                 self.set_dfu(dev)
@@ -185,6 +189,18 @@ class Fixture(object):
                 dev.fw_version,
                 dev.fpga_version))
 
+    def dump(self):
+        # consider adding more later...will need more logic regarding msb, datatype etc
+        getters = {
+            "GET_INTEGRATION_TIME_MS": { "opcode": 0xbf, "lsb_len": 3 }
+        }
+
+        for dev in self.devices:
+            print(f"{dev.eeprom['model']} {dev.eeprom['serial_number']}")
+            for name in getters:
+                value = self.get_cmd(dev, getters[name]["opcode"], lsb_len=getters[name]["lsb_len"], label=name)
+                print(f"  {name:32s} 0x{value:04x} {value}")
+                
     ############################################################################
     # opcodes
     ############################################################################
