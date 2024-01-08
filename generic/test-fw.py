@@ -68,11 +68,13 @@ class Fixture:
                       "test-integration-time",
                       "test-detector-gain",
                       "test-vertical-roi",
+                      "test-laser-enable",
                       "test-battery" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
 
         # these tests are off by default
-        parser.add_argument(f"--test-dfu", action="store_true")
+        parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
+        parser.add_argument("--test-dfu", action="store_true")
 
         self.args = parser.parse_args()
 
@@ -99,6 +101,9 @@ class Fixture:
 
         if self.args.test_vertical_roi:
             self.report("Vertical ROI", self.test_vertical_roi())
+
+        if self.args.test_laser_enable:
+            self.report("Laser Enable", self.test_laser_enable())
 
         if self.args.test_battery:
             self.report("Battery", self.test_battery())
@@ -216,7 +221,20 @@ class Fixture:
         return f"collected {self.args.spectra} spectra at each Vertical ROI {tuples}"
 
     def test_laser_enable(self):
-        pass
+        self.set_laser_enable(False)
+        dark_spectrum, dark_mean = self.get_averaged_spectrum()
+
+        self.set_laser_enable(True)
+        raman_spectrum, raman_mean = self.get_averaged_spectrum()
+
+        self.set_laser_enable(False)
+
+        # confirm mean intensity rose by at least 200 counts or 20%
+        delta = raman_mean - dark_mean
+        if delta >= 200 or delta > dark_mean * 0.2:
+            return f"Success (intensity rose by {round(delta)} counts)"
+        else:
+            return f"FAILED (intensity changed by {round(delta)} counts against a baseline of {round(dark_mean)})"
 
     def test_laser_pwm(self):
         pass
@@ -310,6 +328,20 @@ class Fixture:
 
     def get_stop_line(self):
         return self.get_cmd(0xff, 0x24, lsb_len=2)
+
+    ############################################################################
+    # Laser Enable
+    ############################################################################
+
+    def set_laser_enable(self, flag):
+        if not self.args.laser_enable:
+            print("WARNING: declining to enable laser without --laser-enable")
+            flag = False
+
+        self.send_cmd(0xbe, 1 if flag else 0)
+
+    def get_laser_enable(self):
+        return 0 != self.get_cmd(0xe2, lsb_len=1)
 
     ############################################################################
     # Laser TEC Setpoint
