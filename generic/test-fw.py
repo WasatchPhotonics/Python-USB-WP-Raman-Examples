@@ -224,10 +224,17 @@ class Fixture:
         self.set_laser_enable(False)
         dark_spectrum, dark_mean = self.get_averaged_spectrum()
 
+        dark_check = self.get_laser_enable()
+        if dark_check:
+            return "FAILED (unable to confirm disabled laser)"
+
         self.set_laser_enable(True)
         raman_spectrum, raman_mean = self.get_averaged_spectrum()
 
+        raman_check = self.get_laser_enable()
         self.set_laser_enable(False)
+        if not raman_check:
+            return "FAILED (unable to confirm enabled laser)"
 
         # confirm mean intensity rose by at least 200 counts or 20%
         delta = raman_mean - dark_mean
