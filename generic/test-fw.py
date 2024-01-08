@@ -50,6 +50,7 @@ class Fixture:
                       "test-detector-gain",
                       "test-vertical-roi" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
+        parser.add_argument(f"--test-dfu", action="store_true")
         self.args = parser.parse_args()
 
         self.pid = int(self.args.pid, 16)
@@ -88,6 +89,9 @@ class Fixture:
         if self.args.test_vertical_roi:
             self.report("Vertical ROI", self.test_vertical_roi())
 
+        if self.args.test_dfu: # this must be last
+            self.report("DFU Mode", self.test_dfu_mode())
+
         if self.args.outfile:
             print(f"Spectra saved to {self.args.outfile}")
 
@@ -115,7 +119,7 @@ class Fixture:
             field = self.eeprom_fields[name]
             self.eeprom[name] = self.unpack(field.pos, field.data_type, name)
 
-        self.log("\nEEPROM:")
+        self.log("EEPROM", header=True)
         for name in self.eeprom:
             self.log(f"  {name + ':':30s} {self.eeprom[name]}")
 
@@ -124,7 +128,7 @@ class Fixture:
     def read_spectra(self):
         self.set_integration_time_ms(self.args.integration_time_ms)
 
-        self.log("\nRead Spectra:")
+        self.log("Read Spectra", header=True)
         all_start = datetime.now()    
         for i in range(self.args.spectra):
             this_start = datetime.now()    
@@ -138,7 +142,7 @@ class Fixture:
         return f"{self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
 
     def test_integration_time(self):
-        self.log("\nIntegration Time:")
+        self.log("Integration Time", header=True)
         values = [10, 100, 400]
         for ms in values:
             self.set_integration_time_ms(ms)
@@ -154,7 +158,7 @@ class Fixture:
         return f"collected {self.args.spectra} spectra at each of {values}ms"
 
     def test_detector_gain(self):
-        self.log("\nDetector Gain:")
+        self.log("Detector Gain", header=True)
         values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 8, 16, 24, 31]
         for dB in values:
             self.set_detector_gain(dB)
@@ -171,7 +175,7 @@ class Fixture:
         return f"collected {self.args.spectra} spectra at each of {values}dB"
 
     def test_vertical_roi(self):
-        self.log("\nVertical ROI:")
+        self.log("Vertical ROI")
         tuples = []
         for start_line in range(100, 1000, 100):
             stop_line = start_line + 100
@@ -196,6 +200,30 @@ class Fixture:
         self.set_start_line(100)
         self.set_stop_line(900)
         return f"collected {self.args.spectra} spectra at each Vertical ROI {tuples}"
+
+    def test_laser_enable(self):
+        pass
+
+    def test_laser_pwm(self):
+        pass
+
+    def test_laser_watchdog(self):
+        pass
+
+    def test_laser_interlock(self):
+        pass
+
+    def test_battery_control(self):
+        pass
+
+    def test_dfu_mode(self):
+        """
+        Note that this should be the last test run, as the unit will no longer
+        be reachable through libusb through the Wasatch VID/PID.
+        """
+        self.log("Enabling DFU mode")
+        self.send_cmd(0xfe)
+        return "Manual verification required"
 
     ############################################################################
     #                                                                          #
@@ -265,10 +293,12 @@ class Fixture:
 
     def debug(self, msg):
         if self.args.debug:
-            print(f"DEBUG: {msg}")
+            print(f"{datetime.now()} DEBUG: {msg}")
 
-    def log(self, msg):
-        self.logfile.write(msg + "\n")
+    def log(self, msg, header=False):
+        if header:
+            self.logfile.write("\n") # get fancy later
+        self.logfile.write(f"{datetime.now()} {msg}\n")
         self.logfile.flush()
 
     def float_to_uint16(self, gain):
