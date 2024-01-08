@@ -29,12 +29,9 @@ class Fixture:
         self.eeprom_pages = None
         self.eeprom = {}
 
-        self.detail_report = ""
-
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--pid", type=str, default="4000")
         parser.add_argument("--debug", action="store_true")
-        parser.add_argument("--verbose", action="store_true", help="append detail report")
 
         # for reading spectra
         parser.add_argument("--pixels", type=int, help="override EEPROM active_pixels_horizontal")
@@ -66,7 +63,9 @@ class Fixture:
             self.device.set_configuration(1)
             usb.util.claim_interface(self.device, 0)
 
+
     def run(self):
+        self.logfile = open("test-fw.log", "w")
 
         if self.args.read_firmware_rev:
             self.report("Firmware Revision", self.get_firmware_version())
@@ -89,13 +88,10 @@ class Fixture:
         if self.args.test_vertical_roi:
             self.report("Vertical ROI", self.test_vertical_roi())
 
-        if self.args.verbose:
-            print("\nVerbose report:")
-            print("---------------------------------------------------------")
-            print(self.detail_report)
-
         if self.args.outfile:
             print(f"Spectra saved to {self.args.outfile}")
+
+        self.logfile.close()
 
     ############################################################################
     # tests
@@ -119,16 +115,16 @@ class Fixture:
             field = self.eeprom_fields[name]
             self.eeprom[name] = self.unpack(field.pos, field.data_type, name)
 
-        self.detail_report += "\nEEPROM:\n"
+        self.log("\nEEPROM:")
         for name in self.eeprom:
-            self.detail_report += f"  {name + ':':30s} {self.eeprom[name]}\n"
+            self.log(f"  {name + ':':30s} {self.eeprom[name]}")
 
         return f"{len(self.eeprom_pages)} pages read"
 
     def read_spectra(self):
         self.set_integration_time_ms(self.args.integration_time_ms)
 
-        self.detail_report += "\nRead Spectra:\n"
+        self.log("\nRead Spectra:")
         all_start = datetime.now()    
         for i in range(self.args.spectra):
             this_start = datetime.now()    
@@ -136,13 +132,13 @@ class Fixture:
             this_elapsed = (datetime.now() - this_start).total_seconds()
 
             mean = np.mean(spectrum)
-            self.detail_report += f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec with mean {mean:0.2f} at {self.args.integration_time_ms}ms\n"
+            self.log(f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec with mean {mean:0.2f} at {self.args.integration_time_ms}ms")
         all_elapsed = (datetime.now() - all_start).total_seconds()
 
         return f"{self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
 
     def test_integration_time(self):
-        self.detail_report += "\nIntegration Time:\n"
+        self.log("\nIntegration Time:")
         values = [10, 100, 400]
         for ms in values:
             self.set_integration_time_ms(ms)
@@ -151,14 +147,14 @@ class Fixture:
                 return f"ERROR: wrote integration time {ms} but read {check}"
                             
             spectrum, mean, elapsed = self.get_averaged_spectrum(ms=ms, label=f"Integration Time ({ms}ms)")
-            self.detail_report += f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
+            self.log(f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
 
         # reset for subsequent tests
         self.set_integration_time_ms(self.args.integration_time_ms)
         return f"collected {self.args.spectra} spectra at each of {values}ms"
 
     def test_detector_gain(self):
-        self.detail_report += "\nDetector Gain:\n"
+        self.log("\nDetector Gain:")
         values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 8, 16, 24, 31]
         for dB in values:
             self.set_detector_gain(dB)
@@ -168,14 +164,14 @@ class Fixture:
                 return f"ERROR: wrote gain {dB} but read {check}"
 
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Gain ({dB}dB)")
-            self.detail_report += f"  set/get gain {dB:0.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
+            self.log(f"  set/get gain {dB:4.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
 
         # reset for subsequent tests
         self.set_detector_gain(self.args.detector_gain)
         return f"collected {self.args.spectra} spectra at each of {values}dB"
 
     def test_vertical_roi(self):
-        self.detail_report += "\nVertical ROI:\n"
+        self.log("\nVertical ROI:")
         tuples = []
         for start_line in range(100, 1000, 100):
             stop_line = start_line + 100
@@ -194,7 +190,7 @@ class Fixture:
                     return f"ERROR: wrote start line {stop_line} but read {check}"
 
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Vertical ROI ({start_line}-{stop_line})")
-            self.detail_report += f"  set/get vertical roi ({start_line}, {stop_line}) then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec\n"
+            self.log(f"  set/get vertical roi ({start_line:4d}, {stop_line:4d}) then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
 
         # reset for subsequent tests
         self.set_start_line(100)
@@ -270,6 +266,10 @@ class Fixture:
     def debug(self, msg):
         if self.args.debug:
             print(f"DEBUG: {msg}")
+
+    def log(self, msg):
+        self.logfile.write(msg + "\n")
+        self.logfile.flush()
 
     def float_to_uint16(self, gain):
         msb = int(round(gain, 5)) & 0xff
