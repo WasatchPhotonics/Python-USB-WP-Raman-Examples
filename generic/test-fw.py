@@ -29,29 +29,7 @@ class Fixture:
         self.eeprom_pages = None
         self.eeprom = {}
 
-        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        parser.add_argument("--pid", type=str, default="4000")
-        parser.add_argument("--debug", action="store_true")
-
-        # for reading spectra
-        parser.add_argument("--pixels", type=int, help="override EEPROM active_pixels_horizontal")
-        parser.add_argument("--spectra", type=int, default=10, help="how many spectra to read")
-        parser.add_argument("--outfile", type=str, help="if provided, will receive row-ordered spectra in CSV")
-
-        # for resetting after tests (could use EEPROM start fields...)
-        parser.add_argument("--integration-time-ms", type=int, default=100)
-        parser.add_argument("--detector-gain", type=float, default=1.9)
-
-        for name in [ "read-firmware-rev", 
-                      "read-fpga-rev", 
-                      "read-eeprom", 
-                      "read-spectra",
-                      "test-integration-time",
-                      "test-detector-gain",
-                      "test-vertical-roi" ]:
-            parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
-        parser.add_argument(f"--test-dfu", action="store_true")
-        self.args = parser.parse_args()
+        self.parse_args()
 
         self.pid = int(self.args.pid, 16)
         self.device = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
@@ -59,11 +37,44 @@ class Fixture:
             print("No spectrometer found with PID 0x%04x" % self.pid)
             sys.exit(1)
 
+        # default gain varies by detector type
+        if self.args.detector_gain is None:
+            self.args.detector_gain = 8 if self.pid == 0x4000 else 1.9
+
         if os.name == "posix":
             self.debug("claiming interface")
             self.device.set_configuration(1)
             usb.util.claim_interface(self.device, 0)
 
+    def parse_args(self):
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser.add_argument("--pid", type=str, default="4000")
+        parser.add_argument("--debug", action="store_true")
+
+        # for reading spectra
+        parser.add_argument("--pixels", type=int, help="override EEPROM active_pixels_horizontal")
+        parser.add_argument("--spectra", type=int, default=10, help="how many spectra to read")
+        parser.add_argument("--outfile", type=str, help="all spectra will be be saved in row-ordered CSV")
+
+        # for resetting after tests (could use EEPROM start fields...)
+        parser.add_argument("--integration-time-ms", type=int, default=100)
+        parser.add_argument("--detector-gain", type=float)
+
+        # these tests default on, disable with --no-{name}
+        for name in [ "read-firmware-rev", 
+                      "read-fpga-rev", 
+                      "read-eeprom", 
+                      "read-spectra",
+                      "test-integration-time",
+                      "test-detector-gain",
+                      "test-vertical-roi",
+                      "test-battery" ]:
+            parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
+
+        # these tests are off by default
+        parser.add_argument(f"--test-dfu", action="store_true")
+
+        self.args = parser.parse_args()
 
     def run(self):
         self.logfile = open("test-fw.log", "w")
@@ -88,6 +99,9 @@ class Fixture:
 
         if self.args.test_vertical_roi:
             self.report("Vertical ROI", self.test_vertical_roi())
+
+        if self.args.test_battery:
+            self.report("Battery", self.test_battery())
 
         if self.args.test_dfu: # this must be last
             self.report("DFU Mode", self.test_dfu_mode())
@@ -119,7 +133,7 @@ class Fixture:
             field = self.eeprom_fields[name]
             self.eeprom[name] = self.unpack(field.pos, field.data_type, name)
 
-        self.log("EEPROM", header=True)
+        self.log_header("EEPROM")
         for name in self.eeprom:
             self.log(f"  {name + ':':30s} {self.eeprom[name]}")
 
@@ -128,7 +142,7 @@ class Fixture:
     def read_spectra(self):
         self.set_integration_time_ms(self.args.integration_time_ms)
 
-        self.log("Read Spectra", header=True)
+        self.log_header("Read Spectra")
         all_start = datetime.now()    
         for i in range(self.args.spectra):
             this_start = datetime.now()    
@@ -142,7 +156,7 @@ class Fixture:
         return f"{self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
 
     def test_integration_time(self):
-        self.log("Integration Time", header=True)
+        self.log_header("Integration Time")
         values = [10, 100, 400]
         for ms in values:
             self.set_integration_time_ms(ms)
@@ -158,7 +172,7 @@ class Fixture:
         return f"collected {self.args.spectra} spectra at each of {values}ms"
 
     def test_detector_gain(self):
-        self.log("Detector Gain", header=True)
+        self.log_header("Detector Gain")
         values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 8, 16, 24, 31]
         for dB in values:
             self.set_detector_gain(dB)
@@ -213,8 +227,33 @@ class Fixture:
     def test_laser_interlock(self):
         pass
 
-    def test_battery_control(self):
-        pass
+    def test_battery(self):
+        self.log_header("Battery")
+        MAX_SEC = 10 # monitor battery over 10sec
+
+        first = None
+        last = None
+        static = True
+        ever_charged = False
+
+        start = datetime.now()
+        while (datetime.now() - start).total_seconds() < MAX_SEC:
+            perc, state = self.get_battery_state()
+            self.log(f"  charge {perc:6.2f}%, state {state}")
+            if first is None:
+                first = perc
+            if perc != first:
+                static = False
+            if state == "charging":
+                ever_charged = True
+            last = perc
+
+        if static:
+            return f"FAILED: battery charge is static ({first:6.2f}%)"
+        elif first < last and ever_charged:
+            return f"Success (charged from {first:6.2f}% to {last:6.2f}%)"
+        else:
+            return f"FAILED (first {first:6.2f}%, last {last:6.2f}%, ever_charged {ever_charged})"
 
     def test_dfu_mode(self):
         """
@@ -284,7 +323,23 @@ class Fixture:
         return result
 
     ############################################################################
-    # Utility Methods
+    # Battery
+    ############################################################################
+
+    def get_battery_state(self):
+        word = self.get_cmd(0xff, 0x13, msb_len=3) # uint24
+
+        lsb = (word >> 16) & 0xff
+        msb = (word >>  8) & 0xff
+        perc = msb + (1.0 * lsb / 256.0)
+        is_charging = "charging" if word & 0xff else "discharging"
+
+        return perc, is_charging
+
+    ############################################################################
+    #                                                                          #
+    #                              Utility Methods                             #
+    #                                                                          #
     ############################################################################
 
     def report(self, name, summary):
@@ -295,11 +350,16 @@ class Fixture:
         if self.args.debug:
             print(f"{datetime.now()} DEBUG: {msg}")
 
-    def log(self, msg, header=False):
-        if header:
-            self.logfile.write("\n") # get fancy later
+    def log(self, msg):
         self.logfile.write(f"{datetime.now()} {msg}\n")
         self.logfile.flush()
+
+    def log_header(self, msg):
+        self.log("")
+        self.log("=" * 40)
+        self.log(msg)
+        self.log("=" * 40)
+        self.log("")
 
     def float_to_uint16(self, gain):
         msb = int(round(gain, 5)) & 0xff
