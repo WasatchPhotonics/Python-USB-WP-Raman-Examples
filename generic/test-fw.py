@@ -73,13 +73,17 @@ class Fixture:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
 
         # these tests are off by default
-        parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
         parser.add_argument("--test-dfu", action="store_true")
+        parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
+
+        # miscellaneous options
+        parser.add_argument("--ignore-getter-failures", action="store_true", help="ignore failures by a getter to match settor value")
 
         self.args = parser.parse_args()
 
     def run(self):
-        self.logfile = open("test-fw.log", "w")
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.logfile = open(f"test-fw-{ts}.log", "w")
 
         if self.args.read_firmware_rev:
             self.report("Firmware Revision", self.get_firmware_version())
@@ -167,7 +171,10 @@ class Fixture:
             self.set_integration_time_ms(ms)
             check = self.get_integration_time_ms()
             if check != ms:
-                return f"ERROR: wrote integration time {ms} but read {check}"
+                msg = f"ERROR: wrote integration time {ms} but read {check}"
+                self.log(msg)
+                if not self.args.ignore_getter_failures:
+                    return msg
                             
             spectrum, mean, elapsed = self.get_averaged_spectrum(ms=ms, label=f"Integration Time ({ms}ms)")
             self.log(f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
@@ -184,7 +191,10 @@ class Fixture:
             check = self.get_detector_gain()
             epsilon = 0.1 if self.pid == 0x4000 else 0.001
             if abs(check - dB) > epsilon:
-                return f"ERROR: wrote gain {dB} but read {check}"
+                msg = f"ERROR: wrote gain {dB} but read {check}"
+                self.log(msg)
+                if not self.args.ignore_getter_failures:
+                    return msg
 
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Gain ({dB}dB)")
             self.log(f"  set/get gain {dB:4.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
@@ -201,16 +211,20 @@ class Fixture:
             tuples.append( (start_line, stop_line) )
 
             self.set_start_line(start_line)
-            if False:
-                check = self.get_start_line()
-                if check != start_line:
-                    return f"ERROR: wrote start line {start_line} but read {check}"
+            check = self.get_start_line()
+            if check != start_line:
+                msg = f"ERROR: wrote start line {start_line} but read {check}"
+                self.log(msg)
+                if not self.args.ignore_getter_failures:
+                    return msg
 
             self.set_stop_line(stop_line)
-            if False:
-                check = self.get_stop_line()
-                if check != stop_line:
-                    return f"ERROR: wrote start line {stop_line} but read {check}"
+            check = self.get_stop_line()
+            if check != stop_line:
+                msg = f"ERROR: wrote start line {stop_line} but read {check}"
+                self.log(msg)
+                if not self.args.ignore_getter_failures:
+                    return msg
 
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Vertical ROI ({start_line}-{stop_line})")
             self.log(f"  set/get vertical roi ({start_line:4d}, {stop_line:4d}) then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
@@ -222,24 +236,30 @@ class Fixture:
 
     def test_laser_enable(self):
         self.set_laser_enable(False)
-        dark_spectrum, dark_mean = self.get_averaged_spectrum()
+        dark_spectrum, dark_mean, dark_elapsed = self.get_averaged_spectrum(label="Laser Enable dark")
 
         dark_check = self.get_laser_enable()
         if dark_check:
-            return "FAILED (unable to confirm disabled laser)"
+            msg = "FAILED (unable to confirm disabled laser for dark)"
+            self.log(msg)
+            if not self.args.ignore_getter_failures:
+                return msg
 
         self.set_laser_enable(True)
-        raman_spectrum, raman_mean = self.get_averaged_spectrum()
+        sample_spectrum, sample_mean, sample_elapsed = self.get_averaged_spectrum(label="Laser Enable sample")
 
-        raman_check = self.get_laser_enable()
+        sample_check = self.get_laser_enable()
         self.set_laser_enable(False)
-        if not raman_check:
-            return "FAILED (unable to confirm enabled laser)"
+        if not sample_check:
+            msg = "FAILED (unable to confirm enabled laser for sample)"
+            self.log(msg)
+            if not self.args.ignore_getter_failures:
+                return msg
 
         # confirm mean intensity rose by at least 200 counts or 20%
-        delta = raman_mean - dark_mean
+        delta = sample_mean - dark_mean
         if delta >= 200 or delta > dark_mean * 0.2:
-            return f"Success (intensity rose by {round(delta)} counts)"
+            return f"Success (intensity rose by {round(delta)} counts, {round(100 * delta / dark_mean)}%)"
         else:
             return f"FAILED (intensity changed by {round(delta)} counts against a baseline of {round(dark_mean)})"
 
@@ -272,6 +292,8 @@ class Fixture:
             if state == "charging":
                 ever_charged = True
             last = perc
+
+            sleep(1)
 
         if static:
             return f"FAILED: battery charge is static ({first:6.2f}%)"
