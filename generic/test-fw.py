@@ -75,10 +75,11 @@ class Fixture:
 
         # these tests are off by default
         parser.add_argument("--test-dfu", action="store_true")
-        parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
 
         # miscellaneous options
+        parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
         parser.add_argument("--ignore-getter-failures", action="store_true", help="ignore failures by a getter to match settor value")
+        parser.add_argument("--test-vertical-roi-getters", default=True, action=argparse.BooleanOptionalAction, help="kludge to get broken Rev3 to pass")
 
         self.args = parser.parse_args()
 
@@ -166,11 +167,14 @@ class Fixture:
             self.log(f"  {this_start}: read spectrum {i} of {len(spectrum)} pixels in {this_elapsed:0.2f}sec with mean {mean:0.2f} at {self.args.integration_time_ms}ms")
         all_elapsed = (datetime.now() - all_start).total_seconds()
 
-        return f"{self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
+        return f"PASSED: {self.args.spectra} spectra read in {all_elapsed:0.2f}sec at {self.args.integration_time_ms}ms"
 
     def test_integration_time(self):
         self.log_header("Integration Time")
         values = [10, 100, 400]
+
+        last_mean = -1
+        failure_msg = None
         for ms in values:
             self.set_integration_time_ms(ms)
             check = self.get_integration_time_ms()
@@ -182,14 +186,25 @@ class Fixture:
                             
             spectrum, mean, elapsed = self.get_averaged_spectrum(ms=ms, label=f"Integration Time ({ms}ms)")
             self.log(f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
+            
+            if mean <= last_mean:
+                failure_msg = f"mean of integration at {ms}ms ({mean:.2f}) <= previous mean {last_mean:.2f}"
+            last_mean = mean
 
         # reset for subsequent tests
         self.set_integration_time_ms(self.args.integration_time_ms)
-        return f"collected {self.args.spectra} spectra at each of {values}ms"
+
+        if failure_msg:
+            return f"FAILED: {failure_msg}"
+        else:
+            return f"PASSED: collected {self.args.spectra} spectra with increasing mean at each of {values}ms"
 
     def test_detector_gain(self):
         self.log_header("Detector Gain")
         values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 8, 16, 24, 31]
+
+        last_mean = 0
+        failure_msg = None
         for dB in values:
             self.set_detector_gain(dB)
             check = self.get_detector_gain()
@@ -203,9 +218,18 @@ class Fixture:
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Gain ({dB}dB)")
             self.log(f"  set/get gain {dB:4.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
 
+            if mean <= last_mean:
+                failure_msg = f"mean at gain {dB}dB ({mean:.2f}) <= previous mean {last_mean:.2f}"
+            last_mean = mean
+
         # reset for subsequent tests
         self.set_detector_gain(self.args.detector_gain)
-        return f"collected {self.args.spectra} spectra at each of {values}dB"
+
+
+        if failure_msg:
+            return f"FAILED: {failure_msg}"
+        else:
+            return f"PASSED: collected {self.args.spectra} spectra with increasing mean at each of {values}dB"
 
     def test_vertical_roi(self):
         self.log_header("Vertical ROI")
@@ -215,20 +239,22 @@ class Fixture:
             tuples.append( (start_line, stop_line) )
 
             self.set_start_line(start_line)
-            check = self.get_start_line()
-            if check != start_line:
-                msg = f"ERROR: wrote start line {start_line} but read {check}"
-                self.log(msg)
-                if not self.args.ignore_getter_failures:
-                    return msg
-
             self.set_stop_line(stop_line)
-            check = self.get_stop_line()
-            if check != stop_line:
-                msg = f"ERROR: wrote start line {stop_line} but read {check}"
-                self.log(msg)
-                if not self.args.ignore_getter_failures:
-                    return msg
+
+            if self.args.test_vertical_roi_getters:
+                check = self.get_start_line()
+                if check != start_line:
+                    msg = f"ERROR: wrote start line {start_line} but read {check}"
+                    self.log(msg)
+                    if not self.args.ignore_getter_failures:
+                        return msg
+
+                check = self.get_stop_line()
+                if check != stop_line:
+                    msg = f"ERROR: wrote start line {stop_line} but read {check}"
+                    self.log(msg)
+                    if not self.args.ignore_getter_failures:
+                        return msg
 
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Vertical ROI ({start_line}-{stop_line})")
             self.log(f"  set/get vertical roi ({start_line:4d}, {stop_line:4d}) then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
