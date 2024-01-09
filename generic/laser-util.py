@@ -39,6 +39,7 @@ class Fixture(object):
         parser.add_argument("--mod-enable",             action="store_true", help="enable modulation")
         parser.add_argument("--mod-period-us",          type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
         parser.add_argument("--mod-width-us",           type=int,            help="laser modulation pulse width (us) (default 100)", default=100)
+        parser.add_argument("--ramp",                   action="store_true", help="ramp PWM up and down")
 
         self.args = parser.parse_args()
 
@@ -69,6 +70,9 @@ class Fixture(object):
 
         self.set_enable(True)
 
+        if self.args.ramp:
+            self.do_ramp()
+
         if self.args.max_ms > 0:
             self.sleep_ms(self.args.max_ms)
         elif self.args.max_ms == 0:
@@ -89,6 +93,14 @@ class Fixture(object):
                 sleep(1)
         else:
             sleep(ms/1000.0)
+
+    def do_ramp(self):
+        for width_us in [ 900, 500, 200, 500, 900 ]:
+            self.set_modulation_params(period_us=1000, width_us=width_us)
+            if self.args.max_ms > 0:
+                self.sleep_ms(self.args.max_ms)
+            else:
+                input("Press return to advance ramp")
 
     ############################################################################
     # opcodes
@@ -112,23 +124,27 @@ class Fixture(object):
         print("setting LASER_MOD_ENABLE %s" % ("on" if flag else "off"))
         self.send_cmd(0xbd, 1 if flag else 0)
 
-    def set_modulation_params(self):
-        if self.args.mod_period_us > 0xffff or \
-           self.args.mod_width_us > 0xffff:
+    def set_modulation_params(self, period_us=None, width_us=None):
+        if period_us is None:
+            period_us = self.args.mod_period_us
+        if width_us is None:
+            width_us = self.args.mod_width_us
+
+        if period_us > 0xffff or width_us > 0xffff:
             print("error: lame script doesn't support full 40-bit 5-byte args")
             return
 
         # should we modulate after all?
-        if self.args.mod_period_us <= self.args.mod_width_us:
-            print("disabling modulation because period %d <= width %d" % (self.args.mod_period_us, self.args.mod_width_us))
+        if period_us <= width_us:
+            print("disabling modulation because period %d <= width %d" % (period_us, width_us))
             self.set_modulation_enable(False)
             return
 
-        print("setting LASER_MOD_PULSE_PERIOD %d" % self.args.mod_period_us)
-        self.send_cmd(0xc7, self.args.mod_period_us, buf=[0]*8)
+        print(f"setting LASER_MOD_PULSE_PERIOD {period_us}")
+        self.send_cmd(0xc7, period_us, buf=[0]*8)
 
-        print("setting LASER_MOD_PULSE_WIDTH %d" % self.args.mod_width_us)
-        self.send_cmd(0xdb, self.args.mod_width_us, buf=[0]*8)
+        print(f"setting LASER_MOD_PULSE_WIDTH {width_us}")
+        self.send_cmd(0xdb, width_us, buf=[0]*8)
 
         self.set_modulation_enable(True)
 

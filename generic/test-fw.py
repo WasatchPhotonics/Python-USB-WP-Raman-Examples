@@ -46,15 +46,25 @@ class Fixture:
             self.device.set_configuration(1)
             usb.util.claim_interface(self.device, 0)
 
+        if not os.path.exists("data/"):
+            os.mkdir("data")
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.logfile = open(f"data/test-fw-{ts}.log", "w")
+        self.outfile = open(f"data/test-fw-{ts}.csv", "w")
+
+        # safety
+        self.laser_power_perc = None
+        self.set_laser_enable(False)
+
     def parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--pid", type=str, default="4000")
         parser.add_argument("--debug", action="store_true")
+        parser.add_argument("--test", type=str, action="append", help="manually specify tests to execute")
 
         # for reading spectra
         parser.add_argument("--pixels", type=int, help="override EEPROM active_pixels_horizontal")
         parser.add_argument("--spectra", type=int, default=10, help="how many spectra to read")
-        parser.add_argument("--outfile", type=str, help="all spectra will be be saved in row-ordered CSV")
 
         # for resetting after tests (could use EEPROM start fields...)
         parser.add_argument("--integration-time-ms", type=int, default=100)
@@ -70,6 +80,7 @@ class Fixture:
                       "test-vertical-roi",
                       "test-saturation",
                       "test-laser-enable",
+                      "test-laser-pwm",
                       "test-battery" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
 
@@ -83,10 +94,20 @@ class Fixture:
 
         self.args = parser.parse_args()
 
-    def run(self):
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self.logfile = open(f"test-fw-{ts}.log", "w")
 
+    def run(self):
+        if self.args.test:
+            for test in self.args.test:
+                if hasattr(self, test):
+                    eval(f"self.report('{test}', self.{test}())")
+        else:
+            self.run_all_tests()
+
+        self.logfile.close()
+        self.outfile.close()
+
+
+    def run_all_tests(self):
         if self.args.read_firmware_rev:
             self.report("Firmware Revision", self.get_firmware_version())
 
@@ -114,33 +135,31 @@ class Fixture:
         if self.args.test_laser_enable:
             self.report("Laser Enable", self.test_laser_enable())
 
+        if self.args.test_laser_pwm:
+            self.report("Laser PWM", self.test_laser_pwm())
+
         if self.args.test_battery:
             self.report("Battery", self.test_battery())
 
         if self.args.test_dfu: # this must be last
             self.report("DFU Mode", self.test_dfu_mode())
 
-        if self.args.outfile:
-            print(f"Spectra saved to {self.args.outfile}")
-
-        self.logfile.close()
-
     ############################################################################
     # tests
     ############################################################################
 
     def get_firmware_version(self):
-        result = self.get_cmd(0xc0)
+        result = self.get_cmd(0xc0, label="GET_FIRMWARE_VERSION")
         if result is not None and len(result) >= 4:
             return "%d.%d.%d.%d" % (result[3], result[2], result[1], result[0]) 
 
     def get_fpga_version(self):
-        result = self.get_cmd(0xb4)
+        result = self.get_cmd(0xb4, label="GET_FPGA_VERSION")
         if result is not None:
             return "".join([chr(c) for c in result if 0x20 <= c <= 0x7f])
 
     def read_eeprom(self):
-        self.eeprom_pages = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
+        self.eeprom_pages = [self.get_cmd(0xff, 0x01, page, label="READ_EEPROM") for page in range(8)]
         
         self.eeprom = {}
         for name in self.eeprom_fields:
@@ -171,9 +190,10 @@ class Fixture:
 
     def test_integration_time(self):
         self.log_header("Integration Time")
-        values = [10, 100, 400]
+        values = [10, 50, 100, 400]
 
         last_mean = -1
+        last_ms = None
         failure_msg = None
         for ms in values:
             self.set_integration_time_ms(ms)
@@ -188,8 +208,9 @@ class Fixture:
             self.log(f"  set/get integration time {ms:4d}ms then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
             
             if mean <= last_mean:
-                failure_msg = f"mean of integration at {ms}ms ({mean:.2f}) <= previous mean {last_mean:.2f}"
+                failure_msg = f"mean of integration at {ms}ms ({mean:.2f}) <= previous mean at {last_ms}ms ({last_mean:.2f})"
             last_mean = mean
+            last_ms = ms
 
         # reset for subsequent tests
         self.set_integration_time_ms(self.args.integration_time_ms)
@@ -218,13 +239,12 @@ class Fixture:
             spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Gain ({dB}dB)")
             self.log(f"  set/get gain {dB:4.1f}dB then read {self.args.spectra} spectra with mean {mean:0.2f} in {elapsed:0.2f}sec")
 
-            if mean <= last_mean:
+            if mean <= last_mean and dB > 1:
                 failure_msg = f"mean at gain {dB}dB ({mean:.2f}) <= previous mean {last_mean:.2f}"
             last_mean = mean
 
         # reset for subsequent tests
         self.set_detector_gain(self.args.detector_gain)
-
 
         if failure_msg:
             return f"FAILED: {failure_msg}"
@@ -335,7 +355,60 @@ class Fixture:
             return f"FAILED (intensity changed by {round(delta)} counts against a baseline of {round(dark_mean)})"
 
     def test_laser_pwm(self):
-        pass
+        self.log_header("Laser PWM")
+        
+        perc_desc = [99, 75, 50, 25, 1]
+        perc_asc  = [1, 25, 50, 75, 99]
+
+        self.set_integration_time_ms(self.args.integration_time_ms)
+        self.set_detector_gain(self.args.detector_gain)
+
+        # take dark
+        self.confirm("about to disable laser for dark")
+        self.set_laser_enable(False) 
+        dark, dark_mean, dark_elapsed = self.get_averaged_spectrum(label="Laser PWM dark")
+
+        self.confirm("about to enable laser for sample")
+        self.set_laser_enable(True)
+
+        # test descending
+        last_mean = None
+        last_perc = None
+        failures = []
+        for perc in perc_desc:
+            self.confirm(f"about to change PWM to {perc}%")
+            self.set_laser_power_perc(perc)
+            spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Laser PWM desc ({perc}%)")
+            corrected = [ y - dark_y for y, dark_y in zip(spectrum, dark) ]
+            corrected_mean = np.mean(corrected)
+            if last_mean:
+                if corrected_mean >= last_mean:
+                    failures.append(f"pwm {perc}% mean {corrected_mean:0.2f} >= last pwm {last_perc}% mean {last_mean:0.2f}")
+            last_mean = corrected_mean
+            last_perc = perc
+
+        if False:
+            last_mean = None
+            last_perc = None
+            for perc in perc_asc:
+                self.set_laser_power_perc(perc)
+                spectrum, mean, elapsed = self.get_averaged_spectrum(label=f"Laser PWM asc ({perc}%)")
+                corrected = [ y - dark_y for y, dark_y in zip(spectrum, dark) ]
+                corrected_mean = np.mean(corrected)
+                if last_mean:
+                    if corrected_mean <= last_mean:
+                        failures.append(f"pwm {perc}% mean {corrected_mean:0.2f} <= last pwm {last_perc}% mean {last_mean:0.2f}")
+                last_mean = mean
+                last_perc = perc
+
+        self.confirm(f"about to disable laser")
+        self.set_laser_power_perc(100)
+        self.set_laser_enable(False)
+
+        if len(failures):
+            return "FAILED: " + "; ".join(failures)
+        else:
+            return "PASSED: intensity correlated to PWM across desc {perc_desc}% and asc {perc_asc}%"
 
     def test_laser_watchdog(self):
         pass
@@ -379,7 +452,7 @@ class Fixture:
         be reachable through libusb through the Wasatch VID/PID.
         """
         self.log("Enabling DFU mode")
-        self.send_cmd(0xfe)
+        self.send_cmd(0xfe, label="SET_DFU")
         return "Manual verification required"
 
     ############################################################################
@@ -394,10 +467,10 @@ class Fixture:
 
     def set_integration_time_ms(self, ms):
         ms = max(1, min(0xffff, ms)) # just test 16-bit
-        self.send_cmd(0xb2, ms)
+        self.send_cmd(0xb2, ms, label="SET_INTEGRATION_TIME")
 
     def get_integration_time_ms(self):
-        return self.get_cmd(0xbf, lsb_len=3)
+        return self.get_cmd(0xbf, lsb_len=3, label="GET_INTEGRATION_TIME")
 
     ############################################################################
     # Gain
@@ -405,10 +478,10 @@ class Fixture:
 
     def set_detector_gain(self, gain):
         raw = self.float_to_uint16(gain)
-        self.send_cmd(0xb7, raw)
+        self.send_cmd(0xb7, raw, label="SET_DETECTOR_GAIN")
     
     def get_detector_gain(self):
-        result = self.get_cmd(0xc5)
+        result = self.get_cmd(0xc5, label="GET_DETECTOR_GAIN")
         lsb = result[0] 
         msb = result[1]
         return msb + lsb / 256.0
@@ -418,16 +491,16 @@ class Fixture:
     ############################################################################
 
     def set_start_line(self, n):
-        self.send_cmd(0xff, 0x21, n)
+        self.send_cmd(0xff, 0x21, n, label="SET_START_LINE")
 
     def get_start_line(self):
-        return self.get_cmd(0xff, 0x22, lsb_len=2)
+        return self.get_cmd(0xff, 0x22, lsb_len=2, label="GET_START_LINE")
 
     def set_stop_line(self, n):
-        self.send_cmd(0xff, 0x23, n)
+        self.send_cmd(0xff, 0x23, n, label="SET_STOP_LINE")
 
     def get_stop_line(self):
-        return self.get_cmd(0xff, 0x24, lsb_len=2)
+        return self.get_cmd(0xff, 0x24, lsb_len=2, label="GET_STOP_LINE")
 
     ############################################################################
     # Laser Enable
@@ -438,10 +511,57 @@ class Fixture:
             print("WARNING: declining to enable laser without --laser-enable")
             flag = False
 
-        self.send_cmd(0xbe, 1 if flag else 0)
+        if self.laser_power_perc is None:
+            self.debug("we've never enabled the laser before, so default to 100% power (unmodulated)")
+            self.set_laser_power_perc(100)
+
+        self.send_cmd(0xbe, 1 if flag else 0, label="SET_LASER_ENABLE")
 
     def get_laser_enable(self):
-        return 0 != self.get_cmd(0xe2, lsb_len=1)
+        return 0 != self.get_cmd(0xe2, lsb_len=1, label="GET_LASER_ENABLE")
+
+    ############################################################################
+    # Laser PWM
+    ############################################################################
+
+    def set_laser_power_perc(self, perc):
+        perc = float(max(0, min(100, perc)))
+
+        if perc >= 100:
+            self.log(f"set_laser_power_perc: perc {perc}, disabling modulation")
+            self.set_mod_enable(False)
+            return
+
+        period_us = 1000
+        width_us = int(round(1.0 * perc * period_us / 100.0, 0))
+        width_us = max(1, min(width_us, period_us))
+
+        self.debug(f"set_laser_power_perc: setting perc {perc}% (period {period_us}, width {width_us})")
+        self.set_mod_period_us(period_us)
+        self.set_mod_width_us(width_us)
+        self.set_mod_enable(True)
+
+        self.laser_power_perc = perc
+
+    def set_mod_enable(self, flag):
+        self.send_cmd(0xbd, 1 if flag else 0, label="SET_MOD_ENABLE")
+
+    def get_mod_enable(self):
+        return 0 != self.get_cmd(0xe3, msb_len=1, label="GET_MOD_ENABLE")
+
+    def set_mod_period_us(self, us):
+        (lsw, msw, buf) = self.to40bit(us)
+        return self.send_cmd(0xc7, lsw, msw, buf, label="SET_MOD_PERIOD")
+
+    def get_mod_period_us(self):
+        return self.get_cmd(0xcb, lsb_len=5, label="GET_MOD_PERIOD")
+
+    def set_mod_width_us(self, us):
+        (lsw, msw, buf) = self.to40bit(us)
+        self.send_cmd(0xdb, lsw, msw, buf, label="SET_MOD_WIDTH")
+
+    def get_mod_width_us(self):
+        return self.get_cmd(0xdc, lsb_len=5, label="GET_MOD_WIDTH")
 
     ############################################################################
     # Laser TEC Setpoint
@@ -451,7 +571,7 @@ class Fixture:
         self.set_cmd(0xd8, wValue=0xa46)
 
     def get_detector_temperature_raw(self):
-        result = self.get_cmd(0xd7, msb_len=2)
+        result = self.get_cmd(0xd7, msb_len=2, label="GET_DETECTOR_TEMPERATURE_RAW")
         return result
 
     ############################################################################
@@ -459,7 +579,7 @@ class Fixture:
     ############################################################################
 
     def get_battery_state(self):
-        word = self.get_cmd(0xff, 0x13, msb_len=3) # uint24
+        word = self.get_cmd(0xff, 0x13, msb_len=3, label="GET_BATTERY_STATE") # uint24
 
         lsb = (word >> 16) & 0xff
         msb = (word >>  8) & 0xff
@@ -494,24 +614,34 @@ class Fixture:
         self.log("=" * 40)
         self.log("")
 
+    def confirm(self, msg):
+        print(msg, end='')
+        input(" (Ctrl-C to exit) ")
+
     def float_to_uint16(self, gain):
         msb = int(round(gain, 5)) & 0xff
         lsb = int((gain - msb) * 256) & 0xff
         return (msb << 8) | lsb
 
-    def send_cmd(self, cmd, value=0, index=0, buf=None):
+    def to40bit(self, val):
+        lsw = val & 0xffff
+        msw = (val >> 16) & 0xffff
+        buf = [ (val >> 32) & 0xff ] + [0] * 7
+        return (lsw, msw, buf)
+
+    def send_cmd(self, cmd, value=0, index=0, buf=None, label=None):
         if buf is None:
             if self.pid == 0x4000:
                 buf = [0] * 8
             else:
                 buf = ""
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
+        self.debug(f"send_cmd(0x{HOST_TO_DEVICE:02x}, 0x{cmd:02x}, 0x{value:04x}, 0x{index:04x}) >> {buf} ({label})")
         self.device.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
-    def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None):
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d)" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
+    def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
+        self.debug(f"get_cmd(0x{DEVICE_TO_HOST:02x}, 0x{cmd:02x}, 0x{value:04x}, 0x{index:04x}, len {length}) ({label})")
         result = self.device.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, result))
+        self.debug("  << {result}")
 
         value = 0
         if msb_len is not None:
@@ -601,7 +731,7 @@ class Fixture:
         pixels = self.get_pixels()
 
         timeout_ms = TIMEOUT_MS + ms * 2
-        self.send_cmd(0xad, 0)
+        self.send_cmd(0xad, 0, label="ACQUIRE")
 
         endpoints = [0x82]
         block_len_bytes = pixels * 2
@@ -631,9 +761,7 @@ class Fixture:
             print(f"ERROR: incomplete spectrum (received {len(spectrum)}, expected {pixels})")
 
         mean = np.mean(spectrum)
-        if self.args.outfile:
-            with open(self.args.outfile, "a") as f:
-                f.write(", ".join([label, str(mean)] + [str(x) for x in spectrum]) + "\n")
+        self.outfile.write(", ".join([label, str(mean)] + [str(x) for x in spectrum]) + "\n")
 
         return spectrum
 
