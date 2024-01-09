@@ -68,6 +68,7 @@ class Fixture:
                       "test-integration-time",
                       "test-detector-gain",
                       "test-vertical-roi",
+                      "test-saturation",
                       "test-laser-enable",
                       "test-battery" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
@@ -105,6 +106,9 @@ class Fixture:
 
         if self.args.test_vertical_roi:
             self.report("Vertical ROI", self.test_vertical_roi())
+
+        if self.args.test_saturation:
+            self.report("Saturation", self.test_saturation())
 
         if self.args.test_laser_enable:
             self.report("Laser Enable", self.test_laser_enable())
@@ -204,7 +208,7 @@ class Fixture:
         return f"collected {self.args.spectra} spectra at each of {values}dB"
 
     def test_vertical_roi(self):
-        self.log("Vertical ROI")
+        self.log_header("Vertical ROI")
         tuples = []
         for start_line in range(100, 1000, 100):
             stop_line = start_line + 100
@@ -234,7 +238,47 @@ class Fixture:
         self.set_stop_line(900)
         return f"collected {self.args.spectra} spectra at each Vertical ROI {tuples}"
 
+    def test_saturation(self):
+        self.log_header("Saturation")
+
+        self.set_integration_time_ms(1000)
+        self.set_detector_gain(50)
+
+        # take a throwaway, just to be sure
+        self.get_spectrum(label="Saturation (throwaway)")
+
+        # take the (ideally) saturated spectrum
+        spectrum = self.get_spectrum(label="Saturation")
+
+        # look for runs of 0xffff
+        px = 0
+        longest = -1
+        while px < self.get_pixels():
+            run = 0
+            if spectrum[px] >= 0xfffe:
+                start = px
+                run = 1
+                while px < self.get_pixels() and spectrum[px] >= 0xfffe:
+                    px += 1
+                    run += 1
+                self.log(f"found saturated run of {run} pixels starting at px {start}")
+                longest = max(longest, run)
+            else:
+                px += 1
+
+        # reset for subsequent tests
+        self.set_integration_time_ms(self.args.integration_time_ms)
+        self.set_detector_gain(self.args.detector_gain)
+
+        # saturated runs contra-indicate arithmetic rollover
+        if longest > 4:
+            return f"Passed (found saturated run of {longest} pixels)"
+        else:
+            return "FAILED (no saturated runs found)"
+
     def test_laser_enable(self):
+        self.log_header("Laser Enable")
+
         self.set_laser_enable(False)
         dark_spectrum, dark_mean, dark_elapsed = self.get_averaged_spectrum(label="Laser Enable dark")
 
@@ -258,6 +302,7 @@ class Fixture:
 
         # confirm mean intensity rose by at least 200 counts or 20%
         delta = sample_mean - dark_mean
+        self.log(f"dark mean {dark_mean}, sample mean {sample_mean}, delta {delta}")
         if delta >= 200 or delta > dark_mean * 0.2:
             return f"Success (intensity rose by {round(delta)} counts, {round(100 * delta / dark_mean)}%)"
         else:
@@ -406,6 +451,7 @@ class Fixture:
     def report(self, name, summary):
         name += ":"
         print(f"{name:30s} {summary}")
+        self.log(f"REPORT *** {name}: {summary}")
 
     def debug(self, msg):
         if self.args.debug:
