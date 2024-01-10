@@ -91,6 +91,7 @@ class Fixture:
         parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
         parser.add_argument("--ignore-getter-failures", action="store_true", help="ignore failures by a getter to match settor value")
         parser.add_argument("--test-vertical-roi-getters", default=True, action=argparse.BooleanOptionalAction, help="kludge to get broken Rev3 to pass")
+        parser.add_argument("--confirm", action="store_true", help="allow tests to prompt user to confirm individual steps")
 
         self.args = parser.parse_args()
 
@@ -615,8 +616,9 @@ class Fixture:
         self.log("")
 
     def confirm(self, msg):
-        print(msg, end='')
-        input(" (Ctrl-C to exit) ")
+        if self.args.confirm:
+            print(msg, end='')
+            input(" (Ctrl-C to exit) ")
 
     def float_to_uint16(self, gain):
         msb = int(round(gain, 5)) & 0xff
