@@ -287,6 +287,11 @@ class Fixture(object):
             if name in self.eeprom_fields:
                 field = self.eeprom_fields[name]
                 self.pack(field.pos, field.data_type, value)
+
+                # handle any special cases / internally-connected fields
+                if name == 'model' and len(value) > 16:
+                    field = self.eeprom_fields['product_configuration']
+                    self.pack(field.pos, field.data_type, value[16:])
             else:
                 print(f"unsupported EEPROM field name: {name} ({value})")
         
