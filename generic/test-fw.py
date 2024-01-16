@@ -24,6 +24,8 @@ EEPROM_FORMAT = 8
 
 class Fixture:
 
+    VERSION = "1.0.0"
+
     def __init__(self):
         self.eeprom_fields = EEPROMFields.get_eeprom_fields()
         self.eeprom_pages = None
@@ -57,7 +59,10 @@ class Fixture:
         self.set_laser_enable(False)
 
     def parse_args(self):
-        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser = argparse.ArgumentParser(
+            prog=f"test-fw.py {self.VERSION}", 
+            description="Simple command-line script to quickly verify a number of key firmware functionality points over USB.",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--pid", type=str, default="4000")
         parser.add_argument("--debug", action="store_true")
         parser.add_argument("--test", type=str, action="append", help="manually specify tests to execute")
@@ -84,9 +89,6 @@ class Fixture:
                       "test-battery" ]:
             parser.add_argument(f"--{name}", default=True, action=argparse.BooleanOptionalAction)
 
-        # these tests are off by default
-        parser.add_argument("--test-dfu", action="store_true")
-
         # miscellaneous options
         parser.add_argument("--laser-enable", action="store_true", help="must be specified to allow laser to fire")
         parser.add_argument("--ignore-getter-failures", action="store_true", help="ignore failures by a getter to match settor value")
@@ -95,8 +97,9 @@ class Fixture:
 
         self.args = parser.parse_args()
 
-
     def run(self):
+        self.report("test-fw.py", self.VERSION)
+
         if self.args.test:
             for test in self.args.test:
                 if hasattr(self, test):
@@ -106,7 +109,6 @@ class Fixture:
 
         self.logfile.close()
         self.outfile.close()
-
 
     def run_all_tests(self):
         if self.args.read_firmware_rev:
@@ -142,9 +144,6 @@ class Fixture:
         if self.args.test_battery:
             self.report("Battery", self.test_battery())
 
-        if self.args.test_dfu: # this must be last
-            self.report("DFU Mode", self.test_dfu_mode())
-
     ############################################################################
     # tests
     ############################################################################
@@ -160,6 +159,7 @@ class Fixture:
             return "".join([chr(c) for c in result if 0x20 <= c <= 0x7f])
 
     def read_eeprom(self):
+        self.log_header("Read EEPROM")
         self.eeprom_pages = [self.get_cmd(0xff, 0x01, page, label="READ_EEPROM") for page in range(8)]
         
         self.eeprom = {}
@@ -167,11 +167,47 @@ class Fixture:
             field = self.eeprom_fields[name]
             self.eeprom[name] = self.unpack(field.pos, field.data_type, name)
 
-        self.log_header("EEPROM")
         for name in self.eeprom:
             self.log(f"  {name + ':':30s} {self.eeprom[name]}")
 
-        return f"{len(self.eeprom_pages)} pages read"
+        label = self.eeprom['model'] + self.eeprom['product_configuration'] + " " + self.eeprom['serial_number']
+        return f"read {len(self.eeprom_pages)} pages ({label})"
+
+    def write_eeprom(self):
+        self.log_header("Write EEPROM")
+
+        # cache old value
+        if "user_data" not in self.eeprom:
+            return "ERROR: please run read_eeprom first"
+        old_value = self.eeprom["user_data"]
+
+        # create new value
+        unique_id = f"test-fw.py write_eeprom test at {datetime.now()}"
+
+        # pack new value into local buffers
+        field = self.eeprom_fields["user_data"]
+        self.log("replacing EEPROM user_data '{old_value}' with '{unique_id}'")
+        self.pack(field.pos, field.data_type, unique_id)
+
+        # write page 
+        buf = self.eeprom_pages[field.page]
+        self.log(f"writing page {field.page}: {buf}")
+        if self.pid == 0x4000:
+            self.send_cmd(cmd=0xff, value=0x02, index=field.page, buf=buf)
+        else:
+            DATA_START = 0x3c00
+            offset = DATA_START + field.page * 64 
+            self.send_cmd(cmd=0xa2, value=offset, buf=buf)
+        sleep(0.2) # seems to help
+                
+        # re-read EEPROM
+        self.read_eeprom()
+
+        # verify unique id was read-back from hardware
+        if unique_id == self.eeprom["user_data"]:
+            return f"PASSED: successfully wrote '{unique_id}' to page {field.page}"
+        else:
+            return f"FAILED: tried to write '{unique_id}' to page {field.page}, but read back '{self.eeprom['user_data']}'"
 
     def read_spectra(self):
         self.set_integration_time_ms(self.args.integration_time_ms)
@@ -407,9 +443,9 @@ class Fixture:
         self.set_laser_enable(False)
 
         if len(failures):
-            return "FAILED: " + "; ".join(failures)
+            return f"FAILED: {'; '.join(failures)}"
         else:
-            return "PASSED: intensity correlated to PWM across desc {perc_desc}% and asc {perc_asc}%"
+            return f"PASSED: intensity correlated to PWM across desc {perc_desc}% and asc {perc_asc}%"
 
     def test_laser_watchdog(self):
         pass
@@ -447,10 +483,12 @@ class Fixture:
         else:
             return f"FAILED (first {first:6.2f}%, last {last:6.2f}%, ever_charged {ever_charged})"
 
-    def test_dfu_mode(self):
+    def set_dfu_mode(self):
         """
         Note that this should be the last test run, as the unit will no longer
         be reachable through libusb through the Wasatch VID/PID.
+
+        This test is not enabled by default, and must be manually run via "--test set_dfu_mode"
         """
         self.log("Enabling DFU mode")
         self.send_cmd(0xfe, label="SET_DFU")
@@ -508,7 +546,7 @@ class Fixture:
     ############################################################################
 
     def set_laser_enable(self, flag):
-        if not self.args.laser_enable:
+        if flag and not self.args.laser_enable:
             print("WARNING: declining to enable laser without --laser-enable")
             flag = False
 
@@ -657,7 +695,7 @@ class Fixture:
         else:
             return result
 
-    def unpack(self, pos, data_type, field):
+    def unpack(self, pos, data_type, label):
         """
         Unpack a single field at a given buffer offset of the given datatype.
           
@@ -672,13 +710,13 @@ class Fixture:
 
         if page > len(self.eeprom_pages):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
-                page, offset, length, data_type, field))
+                page, offset, length, data_type, label))
             return
 
         buf = self.eeprom_pages[page]
         if buf is None or end_byte > len(buf):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
-                page, offset, length, data_type, buf, field))
+                page, offset, length, data_type, buf, label))
             return
 
         if data_type == "s":
@@ -697,10 +735,45 @@ class Fixture:
                 print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, offset, length, data_type))
                 return
 
-        extra = "" if field is None else f"({field})"
+        extra = "" if label is None else f"({label})"
         self.debug(f"Unpacked page {page:02d}, offset {offset:02d}, len {length:02d}, datatype {data_type}: {unpack_result} {extra}")
 
         return unpack_result
+
+    def pack(self, pos, data_type, value, label=None):
+        page       = pos[0]
+        start_byte = pos[1]
+        length     = pos[2]
+        end_byte   = start_byte + length
+
+        if page > len(self.eeprom_pages):
+            raise Exception("error packing EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
+                page, start_byte, length, data_type, label))
+
+        if data_type.lower() in ["h", "i", "b", "l", "q"]:
+            value = int(value)
+        elif data_type.lower() in ["f", "d"]:
+            value = float(value)
+
+        # don't try to write negatives to unsigned types
+        if data_type in ["H", "I"] and value < 0:
+            self.debug("rounding negative to zero when writing to unsigned field (pos %s, data_type %s, value %s)" % (pos, data_type, value))
+            value = 0
+
+        buf = self.eeprom_pages[page]
+        if buf is None or end_byte > 64: # byte [63] for revision
+            raise Exception("error packing EEPROM page %d, offset %2d, len %2d as %s: buf is %s" % (
+                page, start_byte, length, data_type, buf))
+
+        if data_type == "s":
+            for i in range(length):
+                if i < len(value):
+                    buf[start_byte + i] = ord(value[i])
+                else:
+                    buf[start_byte + i] = 0
+        else:
+            struct.pack_into(data_type, buf, start_byte, value)
+        self.debug("Packed (%d, %2d, %2d) '%s' value %s -> %s" % (page, start_byte, length, data_type, value, buf[start_byte:end_byte]))
 
     def get_pixels(self):
         if self.args.pixels is not None:
