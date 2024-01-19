@@ -206,7 +206,7 @@ class Fixture(object):
             print("==================================")
             print(f"Raw hex temp = {value}")
             print("==================================")
-        return self.get_cmd(0xd5, lsb_len=2) & 0xfff
+        return value
     
     def set_power_attenuator(self, value):
         value &= 0xff
