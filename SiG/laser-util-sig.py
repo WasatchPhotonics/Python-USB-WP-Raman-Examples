@@ -31,6 +31,7 @@ class Fixture(object):
         self.selected_adc = None
         self.tec_enabled = True
 
+
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--acquire-after",       action="store_true", help="acquire after")
         parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
@@ -44,6 +45,7 @@ class Fixture(object):
         parser.add_argument("--raman-delay-ms",      type=int,            help="set laser warm-up delay in Raman Mode (~ms)")
         parser.add_argument("--raman-mode",          type=str,            help="dis/enable raman mode (links firing to integration) (bool)")
         parser.add_argument("--selected-adc",        type=int,            help="set selected adc")
+        parser.add_argument("--adc-raw",         type=int,            help="get raw ADC values")
         parser.add_argument("--startline",           type=int,            help="set startline for binning (not laser but hey)")
         parser.add_argument("--stopline",            type=int,            help="set stopline for binning (not laser)")
         parser.add_argument("--optimize-roi",        action="store_true", help="optimize vertical ROI")
@@ -113,6 +115,9 @@ class Fixture(object):
 
         if self.args.selected_adc is not None:
             self.set_selected_adc(self.args.selected_adc)
+
+        if self.args.adc_raw is not None:
+            self.get_adc_raw(self.args.adc_raw)
 
         if self.args.raman_delay_ms is not None:
             self.set_raman_delay_ms(self.args.raman_delay_ms)
@@ -194,6 +199,15 @@ class Fixture(object):
         print(f"laser power attenuator is 0x{value:02x}")
         return value
 
+    def get_adc_raw(self, n):
+        if n is not None:
+            self.set_selected_adc(n)
+            value = self.get_cmd(0xd5, lsb_len=2) & 0xfff
+            print("==================================")
+            print(f"Raw hex temp = {value}")
+            print("==================================")
+        return self.get_cmd(0xd5, lsb_len=2) & 0xfff
+    
     def set_power_attenuator(self, value):
         value &= 0xff
         print(f"setting laser power attenuator to 0x{value:02x}")
