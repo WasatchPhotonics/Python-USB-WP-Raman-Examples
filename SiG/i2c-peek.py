@@ -28,7 +28,7 @@ class Fixture():
     def run(self):
         data = self.get_cmd(0x91, self.address, length=self.length)
         data_hex = " ".join( [ f"{v:02x}" for v in data ] )
-        print(f"0x{self.address:02x} << {data_hex} ({len(data)} bytes)")
+        print(f"0x{self.address:02x} << 0x{data_hex} ({len(data)} bytes)")
         
     def send_cmd(self, cmd, value=0, index=0, buf=None):
         if buf is None:
