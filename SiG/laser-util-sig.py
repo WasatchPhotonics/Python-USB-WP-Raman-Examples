@@ -29,7 +29,7 @@ class Fixture(object):
         self.subformat = None
         self.dev = None
         self.selected_adc = None
-        self.tec_enabled = True
+        self.tec_mode = None
 
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--acquire-after",       action="store_true", help="acquire after")
@@ -54,8 +54,7 @@ class Fixture(object):
         parser.add_argument("--scans-to-average",    type=int,            help="scans to average", default=10)
         parser.add_argument("--ramp-power-attenuator", action="store_true", help="ramp laser power attenuator (0 to 255 and back by 10 with 5sec soak)")
         parser.add_argument("--tec-setpoint",        type=int,            help="set the laser TEC setpoint (12-bit range)", default=0x318)
-        parser.add_argument("--tec-disable",         action="store_true", help="disable TEC (rare)")
-        parser.add_argument("--tec-enable",          action="store_true", help="forcibly enable TEC (rare)")
+        parser.add_argument("--tec-mode",            type=str,            help="set TEC running mode", choices=['off', 'on', 'auto', 'auto-on'])
         parser.add_argument("--ramp-tec",            action="store_true", help="ramp TEC setpoint min->max->min")
         parser.add_argument("--ramp-tec-step",       type=int,            help="ramp increment", default=200)
         parser.add_argument("--ramp-tec-max",        type=int,            help="ramp max", default=4095)
@@ -80,13 +79,9 @@ class Fixture(object):
         if self.args.acquire_before:
             self.take_averaged_measurement()
 
-        # by default, the TEC *should* already be on, and current FW will 
-        # forcibly enable it whenever you set the TEC setpoint, but these can be 
-        # used to test corner-cases
-        if self.args.tec_disable:
-            self.set_tec_enable(False)
-        elif self.args.tec_enable:
-            self.set_tec_enable(True)
+        # by default, the TEC *should* already be auto
+        if self.args.tec_mode is not None:
+            self.set_tec_mode(self.args.tec_mode)
 
         if self.args.tec_setpoint:
             self.set_tec_setpoint(self.args.tec_setpoint)
@@ -211,16 +206,16 @@ class Fixture(object):
 
     ### Laser TEC #############################################################
 
-    def set_tec_enable(self, flag):
-        print(f"setting TEC enable {flag}")
-        self.send_cmd(0x84, 1 if flag else 0)
-        self.tec_enabled = flag
+    def set_tec_mode(self, mode):
+        mode = mode.lower()
+        choices = ['off', 'on', 'auto', 'auto-on']
+        value = choices.index(mode)
+            
+        print(f"setting TEC mode {mode} (value 0x{value:02x})")
+        self.send_cmd(0x84, value)
+        self.tec_mode = mode
 
     def do_ramp_tec(self):
-        if not self.tec_enabled:
-            print("can't set TEC setpoint because TEC disabled")
-            return
-
         lo = self.args.ramp_tec_min
         hi = self.args.ramp_tec_max
         step = self.args.ramp_tec_step
@@ -238,14 +233,9 @@ class Fixture(object):
         sys.exit(0)
             
     def set_tec_setpoint(self, dac):
-        if not self.tec_enabled:
-            print("can't set TEC setpoint because TEC disabled")
-            return
-
         dac = min(0xfff, max(0, int(round(dac))))
         print(f"setting LASER_TEC_SETPOINT 0x{dac:02x}")
         self.send_cmd(0xe7, dac)
-
 
     ### ADC ###################################################################
 
