@@ -45,7 +45,7 @@ class Fixture(object):
         parser.add_argument("--raman-delay-ms",      type=int,            help="set laser warm-up delay in Raman Mode (~ms)")
         parser.add_argument("--raman-mode",          type=str,            help="dis/enable raman mode (links firing to integration) (bool)")
         parser.add_argument("--selected-adc",        type=int,            help="set selected adc")
-        parser.add_argument("--adc-raw",         type=int,            help="get raw ADC values")
+        parser.add_argument("--adc-raw",             type=int,            help="get raw ADC values")
         parser.add_argument("--startline",           type=int,            help="set startline for binning (not laser but hey)")
         parser.add_argument("--stopline",            type=int,            help="set stopline for binning (not laser)")
         parser.add_argument("--optimize-roi",        action="store_true", help="optimize vertical ROI")
@@ -150,7 +150,9 @@ class Fixture(object):
     ############################################################################
     # opcodes
     ############################################################################
-
+    def get_firmware_partnumbers(self):
+        return  "".join(chr(x) for x in self.get_cmd(0x89))
+    
     def get_firmware_version(self):
         return ".".join(reversed([str(x) for x in self.get_cmd(0xc0)]))
 
@@ -557,7 +559,12 @@ class Fixture(object):
         return "%.2f%% (%s)" % (perc, "charging" if charging else "discharging")
 
     def dump(self, label):
+        pns = self.get_firmware_partnumbers()
+        arm_pn = pns[:6]
+        fpga_pn = pns[6:]
         print("%s:" % label)
+        print("    ARM repo:            %s" % arm_pn)
+        print("    FPGA Repo:           %s" % fpga_pn)
         print("    Firmware:            %s" % self.get_firmware_version())
         print("    FPGA:                %s" % self.get_fpga_version())
         print("    Battery State:       %s" % self.get_battery_state())
