@@ -159,6 +159,10 @@ class Fixture(object):
     def get_fpga_version(self):
         return "".join([chr(x) for x in self.get_cmd(0xb4)])
 
+    def get_interlock(self):
+        var = self.get_cmd(0xef)[0]
+        retStr = "OPEN" if var == 0 else "CLOSED"
+        return retStr
     ### Acquire ###############################################################
 
     def stomp_first(self, a, count):
@@ -568,6 +572,7 @@ class Fixture(object):
         print("    Firmware:            %s" % self.get_firmware_version())
         print("    FPGA:                %s" % self.get_fpga_version())
         print("    Battery State:       %s" % self.get_battery_state())
+        print("    Interlock            %s" % self.get_interlock())
         print("    Laser enabled:       %s" % self.get_enable())
         print("    Selected ADC:        %s" % self.get_selected_adc())
         print("    Integration Time ms: %s" % self.get_integration_time_ms())
