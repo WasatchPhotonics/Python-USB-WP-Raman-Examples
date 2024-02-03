@@ -5,7 +5,7 @@ import sys
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x1000)
 if dev is None:
-    print "No spectrometer found"
+    print("No spectrometer found")
     sys.exit()
 print dev
 
