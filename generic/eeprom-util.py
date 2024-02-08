@@ -34,7 +34,6 @@ class Fixture(object):
         parser.add_argument("--dump",           action="store_true",    help="just dump and exit (default)")
         parser.add_argument("--erase",          action="store_true",    help="erase (pages filled per --pattern)")
         parser.add_argument("--noparse",        action="store_true",    help="don't parse EEPROM fields")
-        parser.add_argument("--pid",            default="1000",         help="USB PID in hex (default 1000)", choices=["1000", "2000", "4000"])
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--set",            action="append",        help="set a name=value pair")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
@@ -52,11 +51,15 @@ class Fixture(object):
                 self.args.restore):
             self.args.dump = True
 
-        self.pid = int(self.args.pid, 16)
-
-        self.dev = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
-        if not self.dev:
-            print("No spectrometers found with PID 0x%04x" % self.pid)
+        for pid in [0x1000, 0x2000, 0x4000]:
+            self.dev = usb.core.find(idVendor=0x24aa, idProduct=pid)
+            if self.dev:
+                self.pid = pid
+                break
+        if self.dev:
+            print(f"Found spectrometer with PID 0x{self.pid:04x}")
+        else:
+            print("No spectrometers found")
 
     def run(self):
         self.read_revs()
