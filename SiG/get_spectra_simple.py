@@ -10,7 +10,7 @@ DEVICE_TO_HOST  = 0xC0
 BUF             = [0] * 8
 TIMEOUT_MS      = 1000
 
-PIXELS = 1920
+PIXELS = 1952
 COUNT  = 10
 
 print("searching for spectrometer with VID 0x%04x, PID 0x%04x" % (VID, PID))
