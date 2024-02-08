@@ -179,7 +179,7 @@ class Fixture(object):
         return 0 != self.get_cmd(0xe2)[0]
 
     def set_enable(self, flag):
-        print("setting laserEnable to %s" % ("on" if flag else "off"))
+        print(f"{datetime.now()} setting laserEnable {'ON' if flag else 'OFF'}")
         self.send_cmd(0xbe, 1 if flag else 0)
 
     ### Laser Power Attenuator ################################################
@@ -602,8 +602,8 @@ class Fixture(object):
             therm = self.get_laser_thermistor_raw()
             degC = self.get_laser_thermistor_degC(therm)
             vitec = self.get_laser_vitec_raw()
-            print(f"Battery: battery {bat}, viTEC 0x{vitec:03x}, therm 0x{therm:03x} ({degC:.2f}C), {round(remaining)}sec remaining")
-            sleep(min(2, remaining))
+            print(f"{datetime.now()} battery {bat}, viTEC 0x{vitec:03x}, therm 0x{therm:03x} ({degC:.2f}C), {round(remaining)}sec remaining")
+            sleep(min(1, remaining))
             elapsed_sec = (datetime.now() - start).total_seconds()
 
 fixture = Fixture()
