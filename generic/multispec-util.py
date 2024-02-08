@@ -410,8 +410,8 @@ class Fixture(object):
                     if outfile is not None:
                         outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
 
-                    if self.args.laser_enable:
-                        self.get_laser_temperature(dev)
+                    #if self.args.laser_enable:
+                    #    self.get_laser_temperature(dev)
 
                     if self.args.frame_id:
                         self.get_frame_count(dev)
