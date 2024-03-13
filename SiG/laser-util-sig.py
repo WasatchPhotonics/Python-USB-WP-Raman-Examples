@@ -36,6 +36,7 @@ class Fixture(object):
         parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              action="store_true", help="enable laser")
+        parser.add_argument("--verify",              action="store_true", help="verify setters with getter")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time", default=100)
         parser.add_argument("--mod-enable",          action="store_true", help="enable laser modulation")
         parser.add_argument("--mod-period-us",       type=int,            help="laser modulation pulse period (µs)", default=1000)
@@ -181,6 +182,10 @@ class Fixture(object):
     def set_enable(self, flag):
         print(f"{datetime.now()} setting laserEnable {'ON' if flag else 'OFF'}")
         self.send_cmd(0xbe, 1 if flag else 0)
+        if self.args.verify:
+            check = self.get_enable()
+            if check != flag:
+                print(f"ERROR *** set_enable sent {flag}, get_enable read {check}")
 
     ### Laser Power Attenuator ################################################
 

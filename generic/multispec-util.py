@@ -55,6 +55,7 @@ class Fixture(object):
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
         parser.add_argument("--dump",                action="store_true", help="dump basic getters")
+        parser.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
         parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
         self.args = parser.parse_args()
 
@@ -136,6 +137,10 @@ class Fixture(object):
 
         if self.args.dump:
             self.dump()
+
+        if self.args.fpga_options:
+            for dev in self.devices:
+                self.dump_fpga_options(dev)
 
         if self.args.set_dfu:
             for dev in self.devices:
@@ -316,6 +321,23 @@ class Fixture(object):
     def get_frame_count(self, dev):
         count = self.get_cmd(dev, 0xe4, lsb_len=2)
         print(f"frame count = {count} (0x{count:04x})")
+
+    def dump_fpga_options(self, dev):
+        word = self.get_cmd(dev, 0xff, 0x04, label="READ_COMPILATION_OPTIONS", lsb_len=2)
+
+        opts = {}
+        opts["integration_time_resolution"] = (word & 0x0007)
+        opts["data_header"]                 = (word & 0x0038) >> 3
+        opts["has_cf_select"]               = (word & 0x0040) != 0
+        opts["laser_type"]                  = (word & 0x0180) >> 7
+        opts["laser_control"]               = (word & 0x0e00) >> 9
+        opts["has_area_scan"]               = (word & 0x1000) != 0
+        opts["has_actual_integ_time"]       = (word & 0x2000) != 0
+        opts["has_horiz_binning"]           = (word & 0x4000) != 0
+
+        print("FPGA Compilation Options:")
+        for k, v in opts.items():
+            print(f"  {k} = {v}")
 
     def do_eeprom_load_test(self):
         """
