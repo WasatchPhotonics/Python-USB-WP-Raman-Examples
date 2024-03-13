@@ -335,7 +335,7 @@ class Fixture(object):
         opts["has_actual_integ_time"]       = (word & 0x2000) != 0
         opts["has_horiz_binning"]           = (word & 0x4000) != 0
 
-        print("FPGA Compilation Options:")
+        print(f"FPGA Compilation Options: 0x{word:04x}")
         for k, v in opts.items():
             print(f"  {k} = {v}")
 
