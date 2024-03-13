@@ -41,7 +41,10 @@ class Fixture:
 
         # default gain varies by detector type
         if self.args.detector_gain is None:
-            self.args.detector_gain = 8 if self.pid == 0x4000 else 1.9
+            if self.pid == 0x4000:
+                self.args.detector_gain = 8
+            else:
+                self.args.detector_gain = 1.9
 
         if os.name == "posix":
             self.debug("claiming interface")
