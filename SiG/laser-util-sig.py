@@ -60,6 +60,8 @@ class Fixture(object):
         parser.add_argument("--ramp-tec-step",       type=int,            help="ramp increment", default=200)
         parser.add_argument("--ramp-tec-max",        type=int,            help="ramp max", default=4095)
         parser.add_argument("--ramp-tec-min",        type=int,            help="ramp min", default=0)
+        parser.add_argument("--continuous-on-sec",   type=int,            help="while taking spectra continuously, fire the laser with an on-time of X seconds")
+        parser.add_argument("--continuous-off-sec",  type=int,            help="while taking spectra continuously, fire the laser with an off-time of X seconds")
 
         self.args = parser.parse_args()
 
@@ -117,7 +119,10 @@ class Fixture(object):
             self.set_raman_mode(self.str2bool(self.args.raman_mode))
             
         if self.args.enable:
-            self.set_enable(True)
+            if self.args.continuous_on_sec and self.args.continuous_off_sec:
+                self.perform_continuous_measurements()
+            else:
+                self.set_enable(True)
 
         if self.args.startline is not None:
             self.set_startline(self.args.startline)
@@ -173,6 +178,42 @@ class Fixture(object):
         self.stomp_last(spectrum, 1)
 
         return spectrum
+
+    def perform_continuous_measurements(self):
+        # loop until user hits ctrl-C
+        try:
+            time_start = datetime.now()
+            time_last_on = None
+            time_last_off = None
+            firing = False
+            frame = 0
+            while True:
+                now = datetime.now()
+                if time_last_on is None or (not firing and (now - time_last_off).total_seconds() >= self.args.continuous_off_sec):
+                    print(f"{now} turning laser ON")
+                    firing = True
+                    time_last_on = now
+                    self.set_enable(1)
+                elif firing and (now - time_last_on).total_seconds() >= self.args.continuous_on_sec:
+                    print(f"{now} turning laser OFF")
+                    firing = False
+                    time_last_off = now
+                    self.set_enable(0)
+                else:
+                    if firing:
+                        elapsed = (now - time_last_on).total_seconds()
+                        msg = f"laser has been ON for {elapsed:.2f} sec"
+                    else:
+                        elapsed = (now - time_last_off).total_seconds()
+                        msg = f"laser has been OFF for {elapsed:.2f} sec"
+                    battery = self.get_battery_state()
+                    print(f"{now} reading frame {frame} ({msg}, {battery})")
+                    spectrum = self.acquire()
+                    frame += 1
+        except Exception as ex:
+            print(f"Some exception happened somewhere? {ex}")
+        self.set_enable(0)
+        print(f"Test completed after {(datetime.now() - time_start).total_seconds()} sec")
 
     ### Enabled ###############################################################
         
