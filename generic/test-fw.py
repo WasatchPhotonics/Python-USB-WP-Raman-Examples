@@ -83,6 +83,8 @@ class Fixture:
                       "read-fpga-rev", 
                       "read-eeprom", 
                       "read-spectra",
+                      "read-laser-temp",
+                      "read-ambient-temp",
                       "test-integration-time",
                       "test-detector-gain",
                       "test-vertical-roi",
@@ -119,6 +121,12 @@ class Fixture:
 
         if self.args.read_fpga_rev:
             self.report("FPGA Revision", self.get_fpga_version())
+
+        if self.args.read_laser_temp:
+            self.report("Read Laser Temp", self.read_laser_temp())
+
+        if self.args.read_ambient_temp:
+            self.report("Read Ambient Temp", self.read_ambient_temp())
 
         if self.args.read_eeprom:
             self.report("EEPROM Read", self.read_eeprom())
@@ -160,6 +168,16 @@ class Fixture:
         result = self.get_cmd(0xb4, label="GET_FPGA_VERSION")
         if result is not None:
             return "".join([chr(c) for c in result if 0x20 <= c <= 0x7f])
+
+    def read_laser_temp(self):
+        result = self.get_cmd(0xd5, lsb_len=2, label="GET_ADC (GET_LASER_TEMPERATURE)")
+        if result is not None:
+            return f"0x{result:04x}"
+
+    def read_ambient_temp(self):
+        result = self.get_cmd(0x2a, lsb_len=1, label="GET_AMBIENT_TEMPERATURE")
+        if result is not None:
+            return f"0x{result:02x}"
 
     def read_eeprom(self):
         self.log_header("Read EEPROM")
