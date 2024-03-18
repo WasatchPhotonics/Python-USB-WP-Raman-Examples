@@ -175,7 +175,7 @@ class Fixture:
             return f"0x{result:04x}"
 
     def read_ambient_temp(self):
-        result = self.get_cmd(0x2a, lsb_len=1, label="GET_AMBIENT_TEMPERATURE")
+        result = self.get_cmd(0xff, 0x2a, lsb_len=1, label="GET_AMBIENT_TEMPERATURE")
         if result is not None:
             return f"0x{result:02x}"
 
