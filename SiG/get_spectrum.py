@@ -26,7 +26,7 @@ parser.add_argument("--gain-db",             type=int, default=8, help="default 
 parser.add_argument("--delay-ms",            type=int, default=10, help="how long to delay between spectra (default 10)")
 parser.add_argument("--count",               type=int, default=1, help="how many spectra to take")
 parser.add_argument("--throwaways",          type=int, default=2, help="how many throwaways to take (default 2)")
-parser.add_argument("--pixels",              type=int, default=1920, help="default 1920")
+parser.add_argument("--pixels",              type=int, default=1952, help="default 1952")
 parser.add_argument("--plot",                action="store_true", help="display graph")
 parser.add_argument("--debug",               action="store_true", help="debug output")
 parser.add_argument("--outfile",             type=str, help="save spectra")

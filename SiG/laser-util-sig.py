@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import re
 import sys
 import math
@@ -13,11 +14,10 @@ import argparse
 import struct
 import sys
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
-TIMEOUT_MS = 3000
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
@@ -62,6 +62,7 @@ class Fixture(object):
         parser.add_argument("--ramp-tec-min",        type=int,            help="ramp min", default=0)
         parser.add_argument("--continuous-on-sec",   type=int,            help="while taking spectra continuously, fire the laser with an on-time of X seconds")
         parser.add_argument("--continuous-off-sec",  type=int,            help="while taking spectra continuously, fire the laser with an off-time of X seconds")
+        parser.add_argument("--timeout-ms",          type=int,            help="default timeout", default=3000)
 
         self.args = parser.parse_args()
 
@@ -73,10 +74,16 @@ class Fixture(object):
         if not self.dev:
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
-    def run(self):
-        plt.ion()
+        if os.name == "posix":
+            self.debug("claiming interface")
+            self.device.set_configuration(1)
+            usb.util.claim_interface(self.device, 0)
 
-        self.set_enable(False)
+    def run(self):
+        # plt.ion()
+
+        if False: 
+            self.set_enable(False)
 
         self.dump("before")
         if self.args.acquire_before:
@@ -164,7 +171,7 @@ class Fixture(object):
             a[-(i+1)] = a[-(count+1)]
 
     def acquire(self):
-        timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+        timeout_ms = self.args.timeout_ms + self.args.integration_time_ms * 2
         print("sending acquire")
         self.send_cmd(0xad)
         bytes_to_read = self.args.pixels * 2
@@ -181,37 +188,40 @@ class Fixture(object):
 
     def perform_continuous_measurements(self):
         # loop until user hits ctrl-C
-        try:
+        exceptions = 0
+        while exceptions < 5:
             time_start = datetime.now()
             time_last_on = None
             time_last_off = None
             firing = False
             frame = 0
             while True:
-                now = datetime.now()
-                if time_last_on is None or (not firing and (now - time_last_off).total_seconds() >= self.args.continuous_off_sec):
-                    print(f"{now} turning laser ON")
-                    firing = True
-                    time_last_on = now
-                    self.set_enable(1)
-                elif firing and (now - time_last_on).total_seconds() >= self.args.continuous_on_sec:
-                    print(f"{now} turning laser OFF")
-                    firing = False
-                    time_last_off = now
-                    self.set_enable(0)
-                else:
-                    if firing:
-                        elapsed = (now - time_last_on).total_seconds()
-                        msg = f"laser has been ON for {elapsed:.2f} sec"
+                try:
+                    now = datetime.now()
+                    if time_last_on is None or (not firing and (now - time_last_off).total_seconds() >= self.args.continuous_off_sec):
+                        print(f"{now} turning laser ON")
+                        firing = True
+                        time_last_on = now
+                        self.set_enable(1)
+                    elif firing and (now - time_last_on).total_seconds() >= self.args.continuous_on_sec:
+                        print(f"{now} turning laser OFF")
+                        firing = False
+                        time_last_off = now
+                        self.set_enable(0)
                     else:
-                        elapsed = (now - time_last_off).total_seconds()
-                        msg = f"laser has been OFF for {elapsed:.2f} sec"
-                    battery = self.get_battery_state()
-                    print(f"{now} reading frame {frame} ({msg}, {battery})")
-                    spectrum = self.acquire()
-                    frame += 1
-        except Exception as ex:
-            print(f"Some exception happened somewhere? {ex}")
+                        if firing:
+                            elapsed = (now - time_last_on).total_seconds()
+                            msg = f"laser has been ON for {elapsed:.2f} sec"
+                        else:
+                            elapsed = (now - time_last_off).total_seconds()
+                            msg = f"laser has been OFF for {elapsed:.2f} sec"
+                        battery = self.get_battery_state()
+                        print(f"{now} reading frame {frame} ({msg}, {battery})")
+                        spectrum = self.acquire()
+                        frame += 1
+                except Exception as ex0:
+                    exceptions += 1
+                    print(f"ignoring exception number {excxeptions}: {ex0}")
         self.set_enable(0)
         print(f"Test completed after {(datetime.now() - time_start).total_seconds()} sec")
 
@@ -492,10 +502,10 @@ class Fixture(object):
         for i in range(len(spectrum)):
             spectrum[i] /= self.args.scans_to_average
 
-        plt.plot(spectrum)
-        plt.draw()
-        plt.pause(0.0001)
-        plt.clf()
+        # plt.plot(spectrum)
+        # plt.draw()
+        # plt.pause(0.0001)
+        # plt.clf()
 
         return spectrum
 
@@ -617,10 +627,10 @@ class Fixture(object):
             else:
                 buf = ""
         self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
-        self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
+        self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, self.args.timeout_ms)
 
     def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None):
-        result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+        result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, self.args.timeout_ms)
 
         value = 0
         if msb_len is not None:

@@ -33,6 +33,7 @@ class Fixture(object):
         self.subformat = None
 
         self.spectrum_count = 0
+        self.timeouts = 0
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
@@ -52,34 +53,34 @@ class Fixture(object):
 
         if os.name == "posix":
             self.debug("claiming interface")
-            dev.set_configuration(1)
-            usb.util.claim_interface(dev, 0)
+            self.device.set_configuration(1)
+            usb.util.claim_interface(self.device, 0)
 
     def connect(self):
         print("starting ENLIGHTEN connection sequence")
 
         self.pixels = self.args.pixels
 
-        self.get_fpga_configuration_register("before 1")
-
-        # 1. read EEPROM
-        eeprom = self.read_eeprom()
-        print(f"eeprom <- {eeprom}")
-
-        self.get_fpga_configuration_register("after eeprom")
-
-        self.pixels = eeprom["pixels"]
-        print(f"pixels <- {self.pixels}")
-
-        # 2. read FPGA compilation options
-        fpga_options = self.read_fpga_compilation_options()
-        print(f"fpga_compilation_options <- {fpga_options}")
-
-        self.get_fpga_configuration_register("after fpga compilation options")
-
-        # 3. CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
-
         if False:
+            self.get_fpga_configuration_register("before 1")
+
+            # 1. read EEPROM
+            eeprom = self.read_eeprom()
+            print(f"eeprom <- {eeprom}")
+
+            self.get_fpga_configuration_register("after eeprom")
+
+            self.pixels = eeprom["pixels"]
+            print(f"pixels <- {self.pixels}")
+
+            # 2. read FPGA compilation options
+            fpga_options = self.read_fpga_compilation_options()
+            print(f"fpga_compilation_options <- {fpga_options}")
+
+            self.get_fpga_configuration_register("after fpga compilation options")
+
+            # 3. CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
+
             # 4. set trigger source
             print(f"trigger_source -> 0")
             self.set_trigger_source(0)
@@ -89,6 +90,8 @@ class Fixture(object):
         # 5. set integration time
         print(f"integration_time_ms -> {self.args.integration_time_ms}")
         self.set_integration_time_ms(self.args.integration_time_ms)
+
+        return
 
         self.get_fpga_configuration_register("after integration time")
 
@@ -220,7 +223,7 @@ class Fixture(object):
     def get_spectrum(self):
         self.get_fpga_configuration_register(f"before spectrum {self.spectrum_count}")
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
-        self.send_cmd(0xad, 1)
+        self.send_cmd(0xad, 0)
 
         endpoints = [0x82]
         block_len_bytes = self.pixels * 2
@@ -233,24 +236,31 @@ class Fixture(object):
             #
             # we have no idea if microRaman has to "wake up" the sensor, so wait
             # long enough for 6 throwaway frames if need be
-            timeout_ms = self.args.integration_time_ms * 8 + 500
+            timeout_ms = self.args.integration_time_ms * 8 + 5000
         else:
             timeout_ms = self.args.integration_time_ms * 2 + 1000 
 
         spectrum = []
-        for endpoint in endpoints:
-            self.debug(f"waiting for {block_len_bytes} bytes from endpoint 0x{endpoint:02x} (timeout {timeout_ms}ms)")
-            data = self.device.read(endpoint, block_len_bytes, timeout=timeout_ms)
-            log.debug("read %d bytes", len(data))
+        try:
+            for endpoint in endpoints:
+                self.debug(f"waiting for {block_len_bytes} bytes from endpoint 0x{endpoint:02x} (timeout {timeout_ms}ms)")
+                data = self.device.read(endpoint, block_len_bytes, timeout=timeout_ms)
+                print(f"read {len(data)} bytes")
 
-            subspectrum = [int(i | (j << 8)) for i, j in zip(data[::2], data[1::2])] # LSB-MSB
-            spectrum.extend(subspectrum)
+                subspectrum = [int(i | (j << 8)) for i, j in zip(data[::2], data[1::2])] # LSB-MSB
+                spectrum.extend(subspectrum)
 
-            # empirically determined need for 5ms delay when switching endpoints
-            # on 2048px detectors during area scan
-            if self.pixels == 2048 and self.pid != 0x4000: 
-                log.debug("sleeping 5ms between endpoints")
-                sleep(0.005)
+                # empirically determined need for 5ms delay when switching endpoints
+                # on 2048px detectors during area scan
+                if self.pixels == 2048 and self.pid != 0x4000: 
+                    print("sleeping 5ms between endpoints")
+                    sleep(0.005)
+        except usb.core.USBError as ute:
+            self.timeouts += 1
+            print(f"ignoring usb.core.USBError number {self.timeouts}")
+        except usb.core.USBTimeoutError as ute:
+            self.timeouts += 1
+            print(f"ignoring usb.core.USBTimeoutError number {self.timeouts}")
 
         if len(spectrum) != self.pixels:
             print(f"This is an obviously incomplete spectrum (received {len(spectrum)}, expected {self.pixels})")
