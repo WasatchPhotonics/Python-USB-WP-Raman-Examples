@@ -22,6 +22,7 @@ class Fixture(object):
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--count",               type=int,            help="read the given number of spectra", default=10)
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
+        parser.add_argument("--table",               action="store_true", help="output in CSV")
         self.args = parser.parse_args()
 
         self.device = None
@@ -89,14 +90,18 @@ class Fixture(object):
         comms_total_sec = elapsed_sec - integration_total_sec
         comms_average_ms = (comms_total_sec / self.args.count) * 1000.0
 
-        print("")
-        print("read %d spectra at %d ms in %.2f sec\n" % (self.args.count, self.args.integration_time_ms, elapsed_sec))
-        print("effective measurement rate = %6.2f ms/spectrum at %dms integration time" % (1000.0 / scan_rate, self.args.integration_time_ms))
-        print("effective scan rate        = %6.2f spectra/sec at %dms integration time" % (scan_rate, self.args.integration_time_ms))
-        print("")
-        print("cumulative integration     = %6.2f sec over %d measurements" % (integration_total_sec, self.args.count))
-        print("cumulative overhead        = %6.2f sec over %d measurements" % (comms_total_sec, self.args.count))
-        print("effective comms latency    = %6.2f ms/spectrum" % comms_average_ms)
+        if self.args.table:
+            print(f"Spectra,Integration Time (ms),Elapsed Sec,Effective Measurement Rate ms/spectrum,Effective Scan Rate spectra/sec,Cumulative Integration Sec,Cumulative Overhead Sec,Effective Comms Latency ms/spectrum")
+            print(f"{self.args.count},{self.args.integration_time_ms},{elapsed_sec},{1000.0/scan_rate},{scan_rate},{integration_total_sec},{comms_total_sec},{comms_average_ms}")
+        else:
+            print("")
+            print("read %d spectra at %d ms in %.2f sec\n" % (self.args.count, self.args.integration_time_ms, elapsed_sec))
+            print("effective measurement rate = %6.2f ms/spectrum at %dms integration time" % (1000.0 / scan_rate, self.args.integration_time_ms))
+            print("effective scan rate        = %6.2f spectra/sec at %dms integration time" % (scan_rate, self.args.integration_time_ms))
+            print("")
+            print("cumulative integration     = %6.2f sec over %d measurements" % (integration_total_sec, self.args.count))
+            print("cumulative overhead        = %6.2f sec over %d measurements" % (comms_total_sec, self.args.count))
+            print("effective comms latency    = %6.2f ms/spectrum" % comms_average_ms)
 
     def read_eeprom(self):
         self.buffers = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
