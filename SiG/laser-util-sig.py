@@ -14,7 +14,7 @@ import argparse
 import struct
 import sys
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -36,6 +36,7 @@ class Fixture(object):
         parser.add_argument("--acquire-before",      action="store_true", help="acquire before")
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--enable",              action="store_true", help="enable laser")
+        parser.add_argument("--disable-first",       type=bool,           help="automatically disable laser at start", default=True)
         parser.add_argument("--verify",              action="store_true", help="verify setters with getter")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time", default=100)
         parser.add_argument("--mod-enable",          action="store_true", help="enable laser modulation")
@@ -60,6 +61,7 @@ class Fixture(object):
         parser.add_argument("--ramp-tec-step",       type=int,            help="ramp increment", default=200)
         parser.add_argument("--ramp-tec-max",        type=int,            help="ramp max", default=4095)
         parser.add_argument("--ramp-tec-min",        type=int,            help="ramp min", default=0)
+        parser.add_argument("--continuous-on-readings", type=int,         help="while taking spectra continuously, fire the laser with an on-time of X measurements")
         parser.add_argument("--continuous-on-sec",   type=int,            help="while taking spectra continuously, fire the laser with an on-time of X seconds")
         parser.add_argument("--continuous-off-sec",  type=int,            help="while taking spectra continuously, fire the laser with an off-time of X seconds")
         parser.add_argument("--timeout-ms",          type=int,            help="default timeout", default=3000)
@@ -76,13 +78,14 @@ class Fixture(object):
 
         if os.name == "posix":
             self.debug("claiming interface")
-            self.device.set_configuration(1)
-            usb.util.claim_interface(self.device, 0)
+            self.dev.set_configuration(1)
+            usb.util.claim_interface(self.dev, 0)
 
     def run(self):
-        # plt.ion()
+        plt.ion()
 
-        if False: 
+        if self.args.disable_first: 
+            # made this optional, as it doesn't seem to play well with 1.0.2.9 FW?
             self.set_enable(False)
 
         self.dump("before")
@@ -126,7 +129,7 @@ class Fixture(object):
             self.set_raman_mode(self.str2bool(self.args.raman_mode))
             
         if self.args.enable:
-            if self.args.continuous_on_sec and self.args.continuous_off_sec:
+            if self.args.continuous_off_sec and (self.args.continuous_on_sec or self.args.continuous_on_readings):
                 self.perform_continuous_measurements()
             else:
                 self.set_enable(True)
@@ -193,6 +196,7 @@ class Fixture(object):
             time_start = datetime.now()
             time_last_on = None
             time_last_off = None
+            readings_on = 0
             firing = False
             frame = 0
             while True:
@@ -203,15 +207,19 @@ class Fixture(object):
                         firing = True
                         time_last_on = now
                         self.set_enable(1)
-                    elif firing and (now - time_last_on).total_seconds() >= self.args.continuous_on_sec:
+                    elif firing and ( 
+                            ( self.args.continuous_on_sec and (now - time_last_on).total_seconds() >= self.args.continuous_on_sec ) or
+                            ( self.args.continuous_on_readings and readings_on >= self.args.continuous_on_readings ) ):
                         print(f"{now} turning laser OFF")
                         firing = False
                         time_last_off = now
+                        readings_on = 0
                         self.set_enable(0)
                     else:
                         if firing:
                             elapsed = (now - time_last_on).total_seconds()
-                            msg = f"laser has been ON for {elapsed:.2f} sec"
+                            msg = f"laser has been ON for {readings_on} readings ({elapsed:.2f} sec)"
+                            readings_on += 1
                         else:
                             elapsed = (now - time_last_off).total_seconds()
                             msg = f"laser has been OFF for {elapsed:.2f} sec"
@@ -219,9 +227,9 @@ class Fixture(object):
                         print(f"{now} reading frame {frame} ({msg}, {battery})")
                         spectrum = self.acquire()
                         frame += 1
-                except Exception as ex0:
+                except Exception as ex:
                     exceptions += 1
-                    print(f"ignoring exception number {excxeptions}: {ex0}")
+                    print(f"ignoring exception number {exceptions}: {ex}")
         self.set_enable(0)
         print(f"Test completed after {(datetime.now() - time_start).total_seconds()} sec")
 
@@ -502,10 +510,10 @@ class Fixture(object):
         for i in range(len(spectrum)):
             spectrum[i] /= self.args.scans_to_average
 
-        # plt.plot(spectrum)
-        # plt.draw()
-        # plt.pause(0.0001)
-        # plt.clf()
+        plt.plot(spectrum)
+        plt.draw()
+        plt.pause(0.0001)
+        plt.clf()
 
         return spectrum
 
