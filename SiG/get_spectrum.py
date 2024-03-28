@@ -58,6 +58,10 @@ if args.outfile is not None:
 # configure
 ################################################################################
 
+result = dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 4, TIMEOUT_MS)
+if result is not None and len(result) >= 4:
+    print("Firmware version: %d.%d.%d.%d" % (result[3], result[2], result[1], result[0]))
+
 if args.integration_time_ms is not None:
     print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
