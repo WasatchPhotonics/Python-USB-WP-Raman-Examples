@@ -10,12 +10,40 @@ import matplotlib.pyplot as plt
 from time import sleep
 from datetime import datetime
 
+VERSION         = "1.1"
+
 VID             = 0x24aa
 PID             = 0x4000
 HOST_TO_DEVICE  = 0x40
 DEVICE_TO_HOST  = 0xC0
 BUF             = [0] * 8
 TIMEOUT_MS      = 1000
+dev             = None
+
+################################################################################
+# function definitions
+################################################################################
+
+def wait_for_stability():
+    print("waiting for stability...", end='')
+    count = 0
+    while True:
+        status = get_poll_status()
+        if 0 == status: # IDLE
+            print("stable!")
+            return True
+        else:
+            print(".", end='')
+            if count > 30:
+                print("giving up")
+                return False
+            count += 1
+            sleep(1)
+
+def get_poll_status():
+    result = dev.ctrl_transfer(DEVICE_TO_HOST, 0xd4, 0, 0, 1, TIMEOUT_MS)
+    if result is not None:
+        return result[0]
 
 ################################################################################
 # parse command-line arguments
@@ -36,7 +64,8 @@ args = parser.parse_args()
 # connect
 ################################################################################
 
-print("searching for spectrometer with VID 0x%04x, PID 0x%04x" % (VID, PID))
+print(f"SiG/get_spectrum.py {VERSION}")
+print("get_spectrum searching for spectrometer with VID 0x%04x, PID 0x%04x" % (VID, PID))
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if dev is None:
     print("No matching spectrometer found")
@@ -62,15 +91,6 @@ result = dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 4, TIMEOUT_MS)
 if result is not None and len(result) >= 4:
     print("Firmware version: %d.%d.%d.%d" % (result[3], result[2], result[1], result[0]))
 
-if args.integration_time_ms is not None:
-    print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
-    dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
-
-if args.gain_db is not None:
-    gainDB = args.gain_db << 8 
-    print("sending GAIN_DB -> 0x%04x (FunkyFloat)" % gainDB)
-    dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gainDB, 0, BUF, TIMEOUT_MS) 
-
 ################################################################################
 # collect
 ################################################################################
@@ -80,6 +100,18 @@ MAX_ERROR = 10
 last_was_success = True
 
 while True:
+    if args.integration_time_ms is not None:
+        print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
+        dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
+
+        if not wait_for_stability():
+            sys.exit(1)
+
+    # if args.gain_db is not None:
+    #     gainDB = args.gain_db << 8 
+    #     print("sending GAIN_DB -> 0x%04x (FunkyFloat)" % gainDB)
+    #     dev.ctrl_transfer(HOST_TO_DEVICE, 0xb7, gainDB, 0, BUF, TIMEOUT_MS) 
+
     spectra = []
     errors = 0
     for i in range(args.count):
@@ -96,8 +128,8 @@ while True:
         except:
             errors += 1
             last_was_success = False
-            print(f"ERROR {errors}: waiting 1sec...")
-            sleep(1)
+            print(f"ERROR {errors}: waiting 5sec...")
+            sleep(5)
             continue
 
         print(f"read {len(data)} bytes...", end='')
