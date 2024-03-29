@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from time import sleep
 from datetime import datetime
 
-VERSION         = "1.2"
+VERSION         = "1.3"
 
 VID             = 0x24aa
 PID             = 0x4000
@@ -28,18 +28,32 @@ def poke(addr, values):
     buf = [ x for x in values ]
     while len(buf) < 8:
         buf.append(0)
-    print(f"poking addr 0x{addr:02x} <- {buf}")
+    # print(f"poking addr 0x{addr:02x} <- {buf}")
     dev.ctrl_transfer(HOST_TO_DEVICE, 0x90, addr, len(buf), buf, TIMEOUT_MS)
 
 def peek(addr, length):
     data = dev.ctrl_transfer(DEVICE_TO_HOST, 0x91, addr, 0, length, TIMEOUT_MS)
-    print(f"peeking addr 0x{addr:02x} -> {data}")
-    return data
+    value = 0
+    for i in range(len(data)): # demarshal in big-endian network order
+        value = (value << 8) | data[i]
+    # print(f"peeking addr 0x{addr:02x} -> {value} ({data})")
+    return value
 
 def set_sensor_enable(flag):
-    old = peek(0x20, 1)[0] # bit 0 enable, bit 1 reghold
+    old = peek(0x20, 1) # bit 0 enable, bit 1 reghold
     new = (old | 0x01) if flag else (old & 0xfe)
     poke(0x20, [new])
+
+def is_sensor_sleeping():
+    return peek(0x04, 1) & 0x08
+
+def bounce_sensor():
+    print("disabling sensor...", end='')
+    set_sensor_enable(False)
+    print("sleeping 5sec...", end='', flush=True)
+    sleep(5)
+    print("enabling sensor...", end='')
+    set_sensor_enable(True)
 
 def wait_for_stability():
     print("waiting for stability...", end='')
@@ -50,7 +64,7 @@ def wait_for_stability():
             print("stable!")
             return True
         else:
-            print(".", end='')
+            print(".", end='', flush=True)
             if count > 30:
                 print("giving up")
                 return False
@@ -58,9 +72,16 @@ def wait_for_stability():
             sleep(1)
 
 def get_poll_status():
-    result = dev.ctrl_transfer(DEVICE_TO_HOST, 0xd4, 0, 0, 1, TIMEOUT_MS)
-    if result is not None:
-        return result[0]
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xd4, 0, 0, 1, TIMEOUT_MS)
+    return data[0]
+
+def get_firmware_version():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 4, TIMEOUT_MS)
+    return ".".join([str(d) for d in reversed(data)])
+
+def get_fpga_version():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xb4, 0, 0, 7, TIMEOUT_MS)
+    return "".join([chr(c) for c in data])
 
 ################################################################################
 # parse command-line arguments
@@ -69,7 +90,7 @@ def get_poll_status():
 parser = argparse.ArgumentParser()
 parser.add_argument("--integration-time-ms", type=int)
 parser.add_argument("--gain-db",             type=int)
-parser.add_argument("--delay-ms",            type=int, default=10, help="how long to delay between spectra (default 10)")
+parser.add_argument("--delay-ms",            type=int, default=0, help="how long to delay between spectra")
 parser.add_argument("--count",               type=int, default=1, help="how many spectra to take")
 parser.add_argument("--pixels",              type=int, default=1952, help="default 1952")
 parser.add_argument("--plot",                action="store_true", help="display graph")
@@ -81,7 +102,7 @@ args = parser.parse_args()
 # connect
 ################################################################################
 
-print(f"SiG/get_spectrum.py {VERSION}")
+print(f"{sys.argv[0]} {VERSION}")
 print("get_spectrum searching for spectrometer with VID 0x%04x, PID 0x%04x" % (VID, PID))
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if dev is None:
@@ -100,13 +121,8 @@ if args.outfile is not None:
     with open(args.outfile, "w") as outfile:
         outfile.write("timestamp, delay_sec, int_time_ms, gain_db, avg, spectrum")
 
-################################################################################
-# configure
-################################################################################
-
-result = dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 4, TIMEOUT_MS)
-if result is not None and len(result) >= 4:
-    print("Firmware version: %d.%d.%d.%d" % (result[3], result[2], result[1], result[0]))
+print("Firmware version: " + get_firmware_version())
+print("FPGA version: " + get_fpga_version())
 
 ################################################################################
 # collect
@@ -117,11 +133,17 @@ MAX_ERROR = 10
 last_was_success = True
 
 while True:
-    set_sensor_enable(False) # toggle, per Vic
-    set_sensor_enable(True)
+    # if is_sensor_sleeping():
+    #     print("sensor sleeping, so enabling")
+    #     set_sensor_enable(True)
+    # else:
+    #     print("sensor already enabled")
+
+    print(f"{datetime.now()}: pre-emptively bouncing sensor...", end='')
+    bounce_sensor()
 
     if args.integration_time_ms is not None:
-        print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
+        print(f"\n{datetime.now()}: sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
         dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
 
         if not wait_for_stability():
@@ -135,8 +157,12 @@ while True:
     spectra = []
     errors = 0
     for i in range(args.count):
-        print(f"{datetime.now()} sleeping {args.delay_ms}ms...", end='')
-        sleep(args.delay_ms / 1000.0)
+        start = datetime.now()
+        print(f"{start}: ", end='')
+
+        if args.delay_ms:
+            print(f"sleeping {args.delay_ms}ms...", end='')
+            sleep(args.delay_ms / 1000.0)
 
         print("sending ACQUIRE...", end='')
         dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
@@ -148,8 +174,8 @@ while True:
         except:
             errors += 1
             last_was_success = False
-            print(f"ERROR {errors}: waiting 5sec...", end='')
-            sleep(5)
+            print(f"ERROR {errors}! ", end='')
+            bounce_sensor()
             if wait_for_stability():
                 continue
             raise
@@ -164,7 +190,10 @@ while True:
             spectrum.append(data[px*2] | (data[px*2 + 1] << 8)) # demarshal LSB-MSB to uint16
 
         avg = sum(spectrum)/len(spectrum)
-        print(f"avg {avg:8.2f}")
+        print(f"avg {avg:8.2f}...", end='')
+
+        elapsed_ms = round((datetime.now() - start).total_seconds() * 1000)
+        print(f"{elapsed_ms}ms elapsed")
 
         spectra.append(spectrum)
 
@@ -178,7 +207,7 @@ while True:
         break
 
     delay_sec += 5
-    print(f"sleeping {delay_sec}sec...")
+    print(f"{datetime.now()}: sleeping {delay_sec}sec...\n")
     sleep(delay_sec)
 
 ################################################################################
