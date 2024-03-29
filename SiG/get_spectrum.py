@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from time import sleep
 from datetime import datetime
 
-VERSION         = "1.1"
+VERSION         = "1.2"
 
 VID             = 0x24aa
 PID             = 0x4000
@@ -23,6 +23,23 @@ dev             = None
 ################################################################################
 # function definitions
 ################################################################################
+
+def poke(addr, values):
+    buf = [ x for x in values ]
+    while len(buf) < 8:
+        buf.append(0)
+    print(f"poking addr 0x{addr:02x} <- {buf}")
+    dev.ctrl_transfer(HOST_TO_DEVICE, 0x90, addr, len(buf), buf, TIMEOUT_MS)
+
+def peek(addr, length):
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0x91, addr, 0, length, TIMEOUT_MS)
+    print(f"peeking addr 0x{addr:02x} -> {data}")
+    return data
+
+def set_sensor_enable(flag):
+    old = peek(0x20, 1)[0] # bit 0 enable, bit 1 reghold
+    new = (old | 0x01) if flag else (old & 0xfe)
+    poke(0x20, [new])
 
 def wait_for_stability():
     print("waiting for stability...", end='')
@@ -100,6 +117,9 @@ MAX_ERROR = 10
 last_was_success = True
 
 while True:
+    set_sensor_enable(False) # toggle, per Vic
+    set_sensor_enable(True)
+
     if args.integration_time_ms is not None:
         print("sending SET_INTEGRATION_TIME_MS -> %d ms" % args.integration_time_ms)
         dev.ctrl_transfer(HOST_TO_DEVICE, 0xb2, args.integration_time_ms, 0, BUF, TIMEOUT_MS)
@@ -128,9 +148,11 @@ while True:
         except:
             errors += 1
             last_was_success = False
-            print(f"ERROR {errors}: waiting 5sec...")
+            print(f"ERROR {errors}: waiting 5sec...", end='')
             sleep(5)
-            continue
+            if wait_for_stability():
+                continue
+            raise
 
         print(f"read {len(data)} bytes...", end='')
         if len(data) != args.pixels * 2:
