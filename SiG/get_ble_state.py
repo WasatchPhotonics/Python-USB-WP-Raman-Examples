@@ -15,14 +15,21 @@ BUFFER_SIZE = 8
 Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
 
-def get_value(bRequest, wValue, wIndex=0, lsb_len=2):
-    print(f">> ControlPacket(0x{DEVICE_TO_HOST:02x}, bRequest 0x{bRequest:02x}, wValue 0x{wValue:04x}, wIndex 0x{wIndex:04x}, len {lsb_len})")
+def get_value(bRequest, wValue, wIndex=0, lsb_len=4):
+    # print(f">> ControlPacket(0x{DEVICE_TO_HOST:02x}, bRequest 0x{bRequest:02x}, wValue 0x{wValue:04x}, wIndex 0x{wIndex:04x}, len {lsb_len})")
     data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, lsb_len, TIMEOUT_MS)
-    print(f"<< {data}")
+    # print(f"<< {data}")
     value = 0
     for i in range(lsb_len):
         value |= (data[i] << i)
-    print(f"returning 0x{value:04x} ({value})")
+    # print(f"returning 0x{value:04x} ({value})")
+    return value
+
+def get_battery():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x13, 0, 3, TIMEOUT_MS)
+    perc = data[1] + (1.0 * data[0] / 256.0)
+    charging = 'charging' if data[2] else 'not charging'
+    return f"{perc:5.2f}% ({charging})"
 
 # Per Ram:
 # 0xff, 0x40 gives you count of keep alive requests sent by STM32 to BLE
@@ -30,15 +37,8 @@ def get_value(bRequest, wValue, wIndex=0, lsb_len=2):
 # 0xff, 0x38 gives total cnt of messages received by STM32 over the UART link with BLE
 # 0xff, 0x39 gives total cnt of messages transmitted by STM32 over the UART link with BLE
 
-battery_state = get_value(0xff, 0x13, lsb_len=3)
-print(f"Battery State: {battery_state}")
-
-stm_to_ble_keepalive_cnt = get_value(0xff, 0x40)
-ble_to_stm_keepalive_cnt = get_value(0xff, 0x41)
-stm_uart_msg_rx_cnt      = get_value(0xff, 0x38)
-stm_uart_msg_tx_cnt      = get_value(0xff, 0x39)
-
-print(f"STM-to-BLE Keepalive Count: {stm_to_ble_keepalive_cnt}")
-print(f"BLE-to-STM Keepalive Count: {ble_to_stm_keepalive_cnt}")
-print(f"STM Rx UART Msg Count:      {stm_uart_msg_rx_cnt}")
-print(f"STM Tx UART Msg Count:      {stm_uart_msg_rx_cnt}")
+print("Battery State:              %s" % get_battery())
+print("STM-to-BLE Keepalive Count: %d" % get_value(0xff, 0x40))
+print("BLE-to-STM Keepalive Count: %d" % get_value(0xff, 0x41))
+print("STM Rx UART Msg Count:      %d" % get_value(0xff, 0x38))
+print("STM Tx UART Msg Count:      %d" % get_value(0xff, 0x39))
