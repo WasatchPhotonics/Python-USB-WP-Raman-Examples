@@ -32,16 +32,23 @@ def get_battery():
     charging = 'charging' if data[2] else 'not charging'
     return f"{perc:5.2f}% ({charging})"
 
-# Per Ram:
-# 0xff, 0x40 gives you count of keep alive requests sent by STM32 to BLE
-# 0xff, 0x41 gives you count of keep alive responses received by STM32 from BLE
-# 0xff, 0x38 gives total cnt of messages received by STM32 over the UART link with BLE
-# 0xff, 0x39 gives total cnt of messages transmitted by STM32 over the UART link with BLE
+opcodes = { "SC_GET_BLE_INTF_MSG_RX_CNT"                : 0x38,
+            "SC_GET_BLE_INTF_MSG_TX_CNT"                : 0x39,
+            "SC_GET_BLE_INTF_KA_REQ_TX_CNT"             : 0x40,
+            "SC_GET_BLE_INTF_KA_RESP_RX_CNT"            : 0x41,
+            "SC_GET_BLE_INTF_BATT_INFO_REQ_RX_CNT"      : 0x42,
+            "SC_GET_BLE_INTF_BATT_INFO_TX_CNT"          : 0x43,
+            "SC_GET_BLE_INTF_UART_RESET_CNT"            : 0x44,
+            "SC_GET_BLE_INTF_TOTAL_KEEP_ALIVE_TMO_CNT"  : 0x45,
+            "SC_GET_BLE_INTF_B2B_KEEP_ALIVE_TMO_CNT"    : 0x46,
+            "SC_GET_BLE_INTF_FPGA_REG_RD_REQ_RX_CNT"    : 0x47,
+            "SC_GET_BLE_INTF_FPGA_REG_WR_REQ_RX_CNT"    : 0x48,
+            "SC_GET_BLE_INTF_FPGA_REG_DATA_TX_CNT"      : 0x49,
+            "SC_GET_BLE_INTF_EEPROM_PAGE_RD_REQ_RX_CNT" : 0x4a,
+            "SC_GET_BLE_INTF_EEPROM_PAGE_DATA_TX_CNT"   : 0x4b }
 
-print("Timestamp:                  %s" % datetime.now())
-print("Battery State:              %s" % get_battery())
-print("STM-to-BLE Keepalive Count: %d" % get_value(0xff, 0x40))
-print("BLE-to-STM Keepalive Count: %d" % get_value(0xff, 0x41))
-print("STM Rx UART Msg Count:      %d" % get_value(0xff, 0x38))
-print("STM Tx UART Msg Count:      %d" % get_value(0xff, 0x39))
+print("%-45s: %s" % ("Timestamp", datetime.now()))
+print("%-45s: %s" % ("Battery State", get_battery()))
+for label, opcode in opcodes.items():
+    print("%-45s: %d" % (label, get_value(0xff, opcode)))
 print()
