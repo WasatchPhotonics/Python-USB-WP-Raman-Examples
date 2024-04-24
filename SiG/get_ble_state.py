@@ -2,6 +2,7 @@
 
 import sys
 import usb.core
+from datetime import datetime
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
@@ -37,8 +38,10 @@ def get_battery():
 # 0xff, 0x38 gives total cnt of messages received by STM32 over the UART link with BLE
 # 0xff, 0x39 gives total cnt of messages transmitted by STM32 over the UART link with BLE
 
+print("Timestamp:                  %s" % datetime.now())
 print("Battery State:              %s" % get_battery())
 print("STM-to-BLE Keepalive Count: %d" % get_value(0xff, 0x40))
 print("BLE-to-STM Keepalive Count: %d" % get_value(0xff, 0x41))
 print("STM Rx UART Msg Count:      %d" % get_value(0xff, 0x38))
 print("STM Tx UART Msg Count:      %d" % get_value(0xff, 0x39))
+print()
