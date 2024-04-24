@@ -16,7 +16,6 @@ EEPROM_FIELDS = [
     ((0, 37,  1), "?", "has_battery"),
     ((0, 38,  1), "?", "has_laser"),
     ((0, 39,  2), "H", "feature_mask"),
-    ((0, 39,  2), "H", "excitation_nm"),
     ((0, 41,  2), "H", "slit_um"),
     ((0, 43,  2), "H", "start_integ"),
     ((0, 45,  2), "h", "start_temp"),
