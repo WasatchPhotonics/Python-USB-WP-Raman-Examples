@@ -13,15 +13,15 @@ Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
 
 def process_cmd_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read (default 20)", default=20)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read", default=20)
     parser.add_argument("--debug",               action="store_true", help="verbose output")
-    parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms) (default 10)", default=10)
-    parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
-    parser.add_argument("--pixels",              type=int,            help="expected pixels (default 1952)", default=1952)
-    parser.add_argument("--lines",               type=int,            help="max lines (default 1080)", default=1080)
-    parser.add_argument("--start-line",          type=int,            help="vertical binning start line")
-    parser.add_argument("--stop-line",           type=int,            help="vertical binning stop line")
+    parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=10)
+    parser.add_argument("--pid",                 type=str,            help="USB PID in hex", default="4000", choices=["1000", "2000", "4000"])
+    parser.add_argument("--pixels",              type=int,            help="expected pixels", default=1952)
+    parser.add_argument("--lines",               type=int,            help="max lines", default=1080)
+    parser.add_argument("--start-line",          type=int,            help="vertical binning start line", default=0)
+    parser.add_argument("--stop-line",           type=int,            help="vertical binning stop line", default=1079)
     parser.add_argument("--csvfile",             type=str,            help="optional file to save row-ordered CSV")
     parser.add_argument("--pngfile",             type=str,            help="optional file to save PNG images")
     return parser.parse_args()
