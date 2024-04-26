@@ -14,8 +14,8 @@ TIMEOUT_MS = 1000
 
 def process_cmd_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read", default=20)
     parser.add_argument("--debug",               action="store_true", help="verbose output")
+    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read", default=20)
     parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=10)
     parser.add_argument("--pid",                 type=str,            help="USB PID in hex", default="4000", choices=["1000", "2000", "4000"])
     parser.add_argument("--pixels",              type=int,            help="expected pixels", default=1952)
@@ -65,6 +65,7 @@ send_code(0xeb, 1)
 
 # initialize CSV
 if args.csvfile:
+    print(f"Recording to {args.csvfile}")
     if os.path.exists(args.csvfile):
         os.remove(args.csvfile)
 
@@ -87,14 +88,28 @@ for linenum in range(args.count):
         with open(args.csvfile, "a") as csvfile:
             csvfile.write(", ".join([f"{pixel}" for pixel in spectrum]) + "\n")
 
+    # stomp endpoints so they don't skew image intensity range
+    line_num = spectrum[0] # capture this before stomping
+    for i in range(3):
+        spectrum[i] = spectrum[3]
+    spectrum[-1] = spectrum[-2]
+
     if args.pngfile:
-        line = spectrum[0]
-        image[line] = spectrum
+        image[line_num] = spectrum
 
 print("Exiting area scan")
 send_code(0xeb, 0)
 
 if args.pngfile:
+    # normalize to 9-bit, then clamp to 8-bit (brightens image)
+    # (probably some clever Numpy way to do this)
+    hi = max([max(line) for line in image])
+    for y in range(args.lines):
+        for x in range(args.pixels):
+            image[y][x] = min(255, int((512.0 * image[y][x] / hi)))
+
+    # save PNG file
+    print(f"Saving {args.pngfile}")
     with open(args.pngfile, 'wb') as pngfile:
         png_writer = png.Writer(width=args.pixels, height=args.lines)
         png_writer.write(pngfile, image)

@@ -41,7 +41,7 @@ def get_spectrum():
     # stomp endpoints
     for i in range(3):
         spectrum[i] = spectrum[3]
-    spectrum[1951] = spectrum[1950]
+    spectrum[-1] = spectrum[-2]
 
     sleep(0.2)
 
