@@ -11,8 +11,19 @@ from time import sleep
 # https://infocenter.nordicsemi.com/topic/sdk_nrf5_v16.0.0/lib_dfu_transport_serial.html
 
 # We are only upgrading the application. 
-# Assuming we have create an DFU update package with two files (init file and binary file)
+# Use nrfutil command to generate a DFU update package with two files (init file and binary file)
 # The init file is the ".dat" file and it is around 72 bytes long.
+#
+# Example: 
+# nrfutil pkg generate \
+#          --application 170086_sig_ble_nrf_v4.3.1.hex \
+#          --application-version-string "4.3.1" \
+#          --hw-version 1  \
+#          --app-boot-validation  VALIDATE_GENERATED_CRC  \
+#          --sd-req 0xCB \
+#          ble_dfu_image_v4.3.1.zip
+#
+#
 # > The DFU controller sends the init packet and waits for the confirmation from the DFU 
 #   target. 
 # > DFU target validates the init packet and responds with the result. 
@@ -72,6 +83,11 @@ BLE_DFU_OBJ_TYPE_COMMAND   = 0x1   # Command object.
 BLE_DFU_OBJ_TYPE_DATA      = 0x2   # Data object.
 
 
+BLE_DFU_RESP_RESULT_CODE_FIELD_SZ = 1
+
+# MTU is uint16 sent in little endian order
+BLE_DFU_MTU_FIELD_SZ = 2
+BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
 
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
@@ -89,12 +105,7 @@ TIMEOUT_MS = 1000
 BLE_DFU_TX_MSG_TO_TGT=0x8c
 BLE_DFU_POLL_TGT=0x8d
 
-BLE_DFU_RESP_RESULT_CODE_FIELD_SZ = 1
-
-# MTU is uint16 sent in little endian order
-BLE_DFU_MTU_FIELD_SZ = 2
-BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
-
+# Variables
 BLE_DFU_tgtMTU = -1
 
 def ble_dfu_send_msg(txMsgBuff):
