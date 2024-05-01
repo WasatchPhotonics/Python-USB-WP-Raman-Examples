@@ -82,13 +82,24 @@ BLE_DFU_OBJ_TYPE_INVALID   = 0x0   # Invalid object type.
 BLE_DFU_OBJ_TYPE_COMMAND   = 0x1   # Command object.
 BLE_DFU_OBJ_TYPE_DATA      = 0x2   # Data object.
 
+BLE_DFU_MSG_TYPE_FIELD_SZ  = 1
 
 BLE_DFU_RESP_RESULT_CODE_FIELD_SZ = 1
 
 # MTU is uint16 sent in little endian order
 BLE_DFU_MTU_FIELD_SZ = 2
+
+BLE_DFU_MAX_SIZE_FIELD_SZ = 4
+BLE_DFU_OFFSET_FIELD_SZ = 4
+BLE_DFU_CRC32_FIELD_SZ = 4
+
 BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
 
+
+BLE_DFU_OBJ_SEL_RESP_PYLD_LEN_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
+                                   + BLE_DFU_MAX_SIZE_FIELD_SZ \
+                                   + BLE_DFU_OFFSET_FIELD_SZ \
+                                   + BLE_DFU_CRC32_FIELD_SZ 
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
@@ -102,11 +113,50 @@ BUFFER_SIZE = 8
 Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
 
-BLE_DFU_TX_MSG_TO_TGT=0x8c
-BLE_DFU_POLL_TGT=0x8d
+BLE_DFU_TX_MSG_TO_TGT = 0x8c
+BLE_DFU_POLL_TGT = 0x8d
 
 # Variables
 BLE_DFU_tgtMTU = -1
+BLE_DFU_maxSize = -1
+BLE_DFU_offset = -1
+BLE_DFU_crc32 = 0
+
+dfuCmdGetMTU = [2,  BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
+dfuCmdObjSel = [3,  BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
+
+def __dump(buff):
+    print("\n------------------------------------------------------------------")
+    print("Dumping buffer of len", len(buff))
+    print("------------------------------------------------------------------")
+    str = ""
+    cnt = 0
+    totCnt = 0
+    for byte in buff:
+        if cnt == 0:
+            str += f"[{totCnt:#0{4}}]" + "  "
+        str += f"{byte:#0{4}x}"
+        str += "   "
+        cnt += 1
+        totCnt += 1
+        if cnt == 8:
+            print(str)
+            str = ""
+            cnt = 0
+    print("\n------------------------------------------------------------------")
+
+def __leTo32(inBuff):
+    #print("leTo32 inbuff {}".format(inBuff))
+    u32 = 0
+    u32 = inBuff[3]
+    u32 <<= 8
+    u32 += inBuff[2]
+    u32 <<= 8
+    u32 += inBuff[1]
+    u32 <<= 8
+    u32 += inBuff[0]
+    #print("leTo32 inbuff {}, u32 0x{:02x}".format(inBuff, u32))
+    return u32
 
 def ble_dfu_send_msg(txMsgBuff):
     print("Txing ble dfu msg of len {} ".format(len(txMsgBuff)))
@@ -129,13 +179,25 @@ def ble_dfu_parse_resp(respMsg):
        origReqType = respMsg[0]
        print("Orig Request Type : 0x{:02x}".format(origReqType))
        
-       if origReqType == BLE_DFU_OP_MTU_GET:
+       respLen -= BLE_DFU_MSG_TYPE_FIELD_SZ
+       if origReqType == BLE_DFU_OP_OBJECT_SELECT:
           print("Rcvd response to OBJ SEL Request")
-         
+          if respLen >= BLE_DFU_OBJ_SEL_RESP_PYLD_LEN_SZ:
+             rc = respMsg[1] 
+             print("Result Code 0x{:02x}".format(rc))
+             if rc == BLE_DFU_RES_CODE_SUCCESS:
+                BLE_DFU_maxSize = __leTo32(respMsg[2:6])
+                BLE_DFU_offset = __leTo32(respMsg[6:10])
+                BLE_DFU_crc32 = __leTo32(respMsg[10:14])
+                print("Max Sz {}, offset {}, CRC32 0x{:08x}".format(BLE_DFU_maxSize, BLE_DFU_offset, BLE_DFU_crc32))
+             else:
+                print("Response indicates error !! ")
+          else:
+             print("Response length < {}!!".format(BLE_DFU_OBJ_SEL_RESP_PYLD_LEN_SZ))
+
 
        if origReqType == BLE_DFU_OP_MTU_GET:
           print("Rcvd response to MTU GET Request")
-          respLen -= 1
           if respLen >= BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
@@ -152,6 +214,7 @@ def ble_dfu_parse_resp(respMsg):
     else:
        print("Response too short !!")
 
+
 def ble_dfu_parse_tgt_msg(msg):
     msgType = msg[0]
     print("\nParsing rcvd msg .. type 0x{:02x}".format(msgType))
@@ -160,9 +223,6 @@ def ble_dfu_parse_tgt_msg(msg):
     else:
        print("Dropping msg !!")
     
-
-dfuCmdGetMTU = [2,  BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
-dfuCmdObjSel = [3,  BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
 
 def ble_dfu_get_resp():
   while (1):
@@ -179,6 +239,14 @@ def ble_dfu_get_resp():
        ble_dfu_parse_tgt_msg(msg)
        break
 
+# Read in the init file
+BLE_DFU_initFileName = "170086_sig_ble_nrf_v4.3.1.dat"
+with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is important -> binary
+    BLE_DFU_initFileData = list(BLE_DFU_initFileObj.read())
+
+    __dump(BLE_DFU_initFileData)
+
+quit()
     
 print('-------------------------------------------------------')
 ble_dfu_send_msg(dfuCmdGetMTU)
@@ -187,3 +255,4 @@ ble_dfu_get_resp()
 print('-------------------------------------------------------')
 ble_dfu_send_msg(dfuCmdObjSel)
 ble_dfu_get_resp()
+
