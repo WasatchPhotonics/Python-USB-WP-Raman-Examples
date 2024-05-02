@@ -39,14 +39,12 @@ from time import sleep
 # init packet.
 
 
-
 BLE_DFU_OP_PROTOCOL_VERSION     = 0x00     # Retrieve protocol version.
 BLE_DFU_OP_OBJECT_CREATE        = 0x01     # Create selected object.
 BLE_DFU_OP_RECEIPT_NOTIF_SET    = 0x02     # Set receipt notification.
 BLE_DFU_OP_CRC_GET              = 0x03     # Request CRC of selected object.
 BLE_DFU_OP_OBJECT_EXECUTE       = 0x04     # Execute selected object.
 BLE_DFU_OP_OBJECT_SELECT        = 0x06     # Select object.
-
 BLE_DFU_OP_MTU_GET              = 0x07     # Retrieve MTU size.
 BLE_DFU_OP_OBJECT_WRITE         = 0x08     # Write selected object.
 BLE_DFU_OP_PING                 = 0x09     # Ping.
@@ -60,6 +58,7 @@ SLIP_BYTE_END = 0xC0    # Indicates end of packet
 SLIP_BYTE_ESC = 0xDB    # Indicates byte stuffing 
 SLIP_BYTE_ESC_END = 0xDC    # ESC ESC_END means END data byte
 SLIP_BYTE_ESC_ESC = 0xDD    # ESC ESC_ESC means ESC data byte 
+
 
 BLE_DFU_RES_CODE_INVALID                 = 0x00    # Invalid opcode.
 BLE_DFU_RES_CODE_SUCCESS                 = 0x01    # Operation successful.
@@ -96,10 +95,12 @@ BLE_DFU_CRC32_FIELD_SZ = 4
 BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
 
 
-BLE_DFU_OBJ_SEL_RESP_PYLD_LEN_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
-                                   + BLE_DFU_MAX_SIZE_FIELD_SZ \
-                                   + BLE_DFU_OFFSET_FIELD_SZ \
-                                   + BLE_DFU_CRC32_FIELD_SZ 
+BLE_DFU_OBJ_SEL_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
+                               + BLE_DFU_MAX_SIZE_FIELD_SZ \
+                               + BLE_DFU_OFFSET_FIELD_SZ \
+                               + BLE_DFU_CRC32_FIELD_SZ 
+
+BLE_DFU_OBJ_CREATE_RESP_PYLD_LEN_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -121,12 +122,16 @@ BLE_DFU_RC_TIMED_OUT = 3
 BLE_DFU_RC_RCVD_MSG_TOO_SHORT = 4
 BLE_DFU_RC_TGT_RESP_ERROR_BASE = 128
 
-dfuCmdGetMTU = [2,  BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
-dfuCmdObjSel = [3,  BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
+BLE_DFU_getMTUMsg = [2,  BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
+BLE_DFU_objSelMsg = [3,  BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
+BLE_DFU_createDateObjMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, BLE_DFU_OBJ_TYPE_COMMAND, 0, 0, 0, 0, SLIP_BYTE_END]
+BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET, SLIP_BYTE_END] 
 
+
+BLE_DFU_MAX_SLIP_PDU_LEN = 64 - 1
 
 def __dump(buff):
-    print("\n------------------------------------------------------------------")
+    print("------------------------------------------------------------------")
     print("Dumping buffer of len", len(buff))
     print("------------------------------------------------------------------")
     str = ""
@@ -147,6 +152,7 @@ def __dump(buff):
        print(str)
     print("------------------------------------------------------------------")
 
+
 def __leTo32(inBuff):
     #print("leTo32 inbuff {}".format(inBuff))
     u32 = 0
@@ -160,19 +166,70 @@ def __leTo32(inBuff):
     #print("leTo32 inbuff {}, u32 0x{:02x}".format(inBuff, u32))
     return u32
 
+
 def ble_dfu_send_msg(txMsgBuff):
     print("Txing ble dfu msg of len {} ".format(len(txMsgBuff)))
-    for byte in txMsgBuff:
-        print("0x{:02x}".format(byte))
+    __dump(txMsgBuff)
     dev.ctrl_transfer(HOST_TO_DEVICE, BLE_DFU_TX_MSG_TO_TGT, 0x0, 0x0, txMsgBuff) 
     print("Txd ...")
+
 
 def ble_dfu_get_tgt_msg():
     print("Sending poll request to tgt ...")
     raw = dev.ctrl_transfer(DEVICE_TO_HOST, BLE_DFU_POLL_TGT, 0x0, 0, 64, TIMEOUT_MS)
     msg = raw[1:].tolist()
     return msg
+
+
+def SLIP_encodeChunk(msgType, inBuff, maxEncSz):
+
+    outBuff = [msgType]
+    inOffset = 0
+    spaceLeft = maxEncSz - 1 - 1  # for the message type byte and the terminating byte
+
+    print("\nIn Buffer max enc sz {} bytes".format(maxEncSz))
+    # __dump(inBuff)
+
+    bytesAddedCnt = 0
+    for inByte in inBuff:
+        # print("in-off {}, byte 0x{:02x}, added {}, space left {}".format(inOffset, inByte, bytesAddedCnt, spaceLeft))
+
+        if inByte == SLIP_BYTE_END:
+           if spaceLeft < 2:
+              print("No space left ... ")
+              break
+
+           outBuff += [SLIP_BYTE_ESC]
+           outBuff += [SLIP_BYTE_ESC_END]
+           spaceLeft -= 2
+           bytesAddedCnt += 2
+        
+        else:
+           if inByte == SLIP_BYTE_ESC:
+              if spaceLeft < 2:
+                 print("No space left ... ")
+                 break
+
+              outBuff += [SLIP_BYTE_ESC]
+              outBuff += [SLIP_BYTE_ESC_ESC]
+              spaceLeft -= 2
+              bytesAddedCnt += 2
+           else:
+              if spaceLeft < 1:
+                 print("No space left ... ")
+                 break
+
+              outBuff += [inByte]
+              spaceLeft -= 1
+              bytesAddedCnt += 1
+
+        inOffset += 1
        
+    outBuff += [SLIP_BYTE_END]
+
+    return outBuff, inOffset
+        
+    
 
 def ble_dfu_parse_resp(respMsg):
     retList = [BLE_DFU_RC_FAILURE, 0, 0, 0]
@@ -183,9 +240,41 @@ def ble_dfu_parse_resp(respMsg):
        print("Orig Request Type : 0x{:02x}".format(origReqType))
        
        respLen -= BLE_DFU_MSG_TYPE_FIELD_SZ
+
+       if origReqType == BLE_DFU_OP_CRC_GET:
+          print("Rcvd response to GET CRC Request")
+          if respLen >= BLE_DFU_GET_CRC_RESP_PYLD_LEN_SZ:
+             rc = respMsg[1] 
+             print("Result Code 0x{:02x}".format(rc))
+             if rc == BLE_DFU_RES_CODE_SUCCESS:
+                retList[0] = BLE_DFU_RC_SUCCESS
+                retList[1] = __leTo32(respMsg[2:6])
+                retList[2] = __leTo32(respMsg[6:10])
+             else:
+                print("Response indicates error !! ")
+                retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
+          else:
+             print("Response length < {}!!".format(BLE_DFU_GET_CRC_RESP_PYLD_LEN_SZ))
+             retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
+
+       if origReqType == BLE_DFU_OP_OBJECT_CREATE:
+          print("Rcvd response to OBJ CREATE Request")
+          if respLen >= BLE_DFU_OBJ_CREATE_RESP_PYLD_LEN_SZ:
+             rc = respMsg[1] 
+             print("Result Code 0x{:02x}".format(rc))
+             if rc == BLE_DFU_RES_CODE_SUCCESS:
+                retList[0] = BLE_DFU_RC_SUCCESS
+             else:
+                print("Response indicates error !! ")
+                retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
+          else:
+             print("Response length < {}!!".format(BLE_DFU_OBJ_CREATE_RESP_PYLD_LEN_SZ))
+             retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
+
+           
        if origReqType == BLE_DFU_OP_OBJECT_SELECT:
           print("Rcvd response to OBJ SEL Request")
-          if respLen >= BLE_DFU_OBJ_SEL_RESP_PYLD_LEN_SZ:
+          if respLen >= BLE_DFU_OBJ_SEL_RESP_PYLD_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
              if rc == BLE_DFU_RES_CODE_SUCCESS:
@@ -197,8 +286,9 @@ def ble_dfu_parse_resp(respMsg):
                 print("Response indicates error !! ")
                 retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
           else:
-             print("Response length < {}!!".format(BLE_DFU_OBJ_SEL_RESP_PYLD_LEN_SZ))
+             print("Response length < {}!!".format(BLE_DFU_OBJ_SEL_RESP_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
+
 
        if origReqType == BLE_DFU_OP_MTU_GET:
           print("Rcvd response to MTU GET Request")
@@ -254,12 +344,79 @@ def ble_dfu_get_resp():
 
 
 def ble_dfu_getMTU():
-    ble_dfu_send_msg(dfuCmdGetMTU)
+    ble_dfu_send_msg(BLE_DFU_getMTUMsg)
     return ble_dfu_get_resp()
 
+
 def ble_dfu_getInitPktInfo():
-    ble_dfu_send_msg(dfuCmdObjSel)
+    ble_dfu_send_msg(BLE_DFU_objSelMsg)
     return ble_dfu_get_resp()
+   
+
+def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
+    # The DFU controller sends a Create command to create a new data 
+    # object and then transfers the init packet.
+
+    initPktLen = len(initPktDataBuff)
+
+    print("Init pkt len is {} bytes, mtu is {} bytes".format(initPktLen, mtu))
+   
+    BLE_DFU_createDateObjMsg[3] = initPktLen
+
+    ble_dfu_send_msg(BLE_DFU_createDateObjMsg)
+    retList = ble_dfu_get_resp()
+    rc = retList[0]
+    print("ret code", rc)
+    if rc != BLE_DFU_RC_SUCCESS:
+       print("Could not get object created on target !!! ")
+       return
+
+    print("Object created :-) ")
+
+    # Now we send the init packet
+
+    chunkSize = BLE_DFU_MAX_SLIP_PDU_LEN
+
+    print("Sending init file in chunks of {} bytes ".format(chunkSize))
+             
+    chunkTxCnt = 0
+    totBytesCons = 0
+    while [ 1 ]:
+       encTxBuff, bytesCons = SLIP_encodeChunk(BLE_DFU_OP_OBJECT_WRITE,
+                                               BLE_DFU_initFileData[totBytesCons:], 
+                                               BLE_DFU_MAX_SLIP_PDU_LEN)
+       chunkTxCnt += 1
+       totBytesCons += bytesCons
+       print("Init File Chunk # {}, Out Buff len {}, tot bytes consumed {}".format(chunkTxCnt, len(encTxBuff), totBytesCons))
+       __dump(encTxBuff)
+      
+       txMsgBuff = [len(encTxBuff)]
+       txMsgBuff += encTxBuff
+
+       ble_dfu_send_msg(txMsgBuff)
+
+       if totBytesCons >= BLE_DFU_initPktLen:
+          break
+       
+       print("sleeping for 5 secs .... ")
+       sleep(5)
+       print("woke up after sleeping for 5 secs .... ")
+
+    print("Init file sent .... ")
+
+    # Get CRC32
+
+    print("Getting init file CRC32 from target .... ")
+    ble_dfu_send_msg(BLE_DFU_getCRCReqMsg)
+    retList = ble_dfu_get_resp()
+    rc = retList[0]
+    print("ret code", rc)
+    if rc != BLE_DFU_RC_SUCCESS:
+       print("Could not get response to CRC command !!! ")
+       return
+
+    print("Rcvd response to Calc CRC command ... crc32 0x{:08x}, offset {}".format(retList[2], retList[1]))
+      
 
 # -------------------------------------------------------------------------------
 
@@ -271,11 +428,12 @@ if not dev:
 
 
 # Read in the init file
-#BLE_DFU_initFileName = "170086_sig_ble_nrf_v4.3.1.dat"
-#with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is important -> binary
-#    BLE_DFU_initFileData = list(BLE_DFU_initFileObj.read())
-#    __dump(BLE_DFU_initFileData)
-#    BLE_DFU_initPktLen = len(BLE_DFU_initFileData)
+BLE_DFU_initFileName = "170086_sig_ble_nrf_v4.3.1.dat"
+with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is important -> binary
+    BLE_DFU_initFileData = list(BLE_DFU_initFileObj.read())
+    __dump(BLE_DFU_initFileData)
+    BLE_DFU_initPktLen = len(BLE_DFU_initFileData)
+
 
 print('-------------------------------------------------------')
 respList = ble_dfu_getMTU()
@@ -308,7 +466,7 @@ if tgtInitPktMaxSz == -1 or tgtInitPktCRC32 == -1:
 
 # If there is no init packet or the init packet is invalid, create a new object
 if BLE_DFU_tgtInitPktValid == False:
-   BLE_DFU_sendInitPktToTgt()
+   BLE_DFU_sendInitPktToTgt(BLE_DFU_initFileData, tgtMTU) 
 else:
    print("Target has received valid init packet .... ")
 
