@@ -91,12 +91,14 @@ BLE_DFU_MTU_FIELD_SZ = 2
 BLE_DFU_MAX_SIZE_FIELD_SZ = 4
 BLE_DFU_OFFSET_FIELD_SZ = 4
 BLE_DFU_CRC32_FIELD_SZ = 4
+          
+BLE_DFU_OBJ_EXEC_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ
 
 BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
 
-BLE_DFU_GET_CRC_RESP_PYLD_LEN_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
-                                   + BLE_DFU_OFFSET_FIELD_SZ \
-                                   + BLE_DFU_CRC32_FIELD_SZ
+BLE_DFU_GET_CRC_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
+                               + BLE_DFU_OFFSET_FIELD_SZ \
+                               + BLE_DFU_CRC32_FIELD_SZ
 
 BLE_DFU_OBJ_SEL_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
                                + BLE_DFU_MAX_SIZE_FIELD_SZ \
@@ -118,15 +120,22 @@ BLE_DFU_POLL_TGT = 0x8d
 BLE_DFU_initPktLen = -1
 BLE_DFU_tgtInitPktValid = False
 
+
+# Local error codes
 BLE_DFU_RC_SUCCESS = 0
 BLE_DFU_RC_FAILURE = 1
 BLE_DFU_RC_NO_RESPONSE = 2
 BLE_DFU_RC_TIMED_OUT = 3
 BLE_DFU_RC_RCVD_MSG_TOO_SHORT = 4
+BLE_DFU_RC_INIT_PACKET_TRANSFER_ERROR = 5
+BLE_DFU_RC_INIT_FILE_CRC32_MISMATCH = 6
 BLE_DFU_RC_TGT_RESP_ERROR_BASE = 128
 
-BLE_DFU_getMTUMsg = [2,  BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
-BLE_DFU_objSelMsg = [3,  BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
+BLE_DFU_RC_TGT_RESP_ERROR_BASE
+
+BLE_DFU_objExecCmdMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE, SLIP_BYTE_END]
+BLE_DFU_getMTUMsg =  [2, BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
+BLE_DFU_objSelMsg =  [3, BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
 BLE_DFU_createDateObjMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, BLE_DFU_OBJ_TYPE_COMMAND, 0, 0, 0, 0, SLIP_BYTE_END]
 BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET, SLIP_BYTE_END] 
 
@@ -247,10 +256,24 @@ def ble_dfu_parse_resp(respMsg):
        print("Orig Request Type : 0x{:02x}".format(origReqType))
        
        respLen -= BLE_DFU_MSG_TYPE_FIELD_SZ
+       
+       if origReqType == BLE_DFU_OP_OBJECT_EXECUTE:
+          print("Rcvd response to OBJ EXEC Request")
+          if respLen >= BLE_DFU_OBJ_EXEC_RESP_PYLD_SZ:
+             rc = respMsg[1] 
+             print("Result Code 0x{:02x}".format(rc))
+             if rc == BLE_DFU_RES_CODE_SUCCESS:
+                retList[0] = BLE_DFU_RC_SUCCESS
+             else:
+                print("Response indicates error !! ")
+                retList[0] = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
+          else:
+             print("Response length < {}!!".format(BLE_DFU_OBJ_EXEC_RESP_PYLD_SZ))
+             retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
 
        if origReqType == BLE_DFU_OP_CRC_GET:
           print("Rcvd response to GET CRC Request")
-          if respLen >= BLE_DFU_GET_CRC_RESP_PYLD_LEN_SZ:
+          if respLen >= BLE_DFU_GET_CRC_RESP_PYLD_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
              if rc == BLE_DFU_RES_CODE_SUCCESS:
@@ -259,9 +282,9 @@ def ble_dfu_parse_resp(respMsg):
                 retList[2] = __leTo32(respMsg[6:10])
              else:
                 print("Response indicates error !! ")
-                retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
+                retList[0] = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
           else:
-             print("Response length < {}!!".format(BLE_DFU_GET_CRC_RESP_PYLD_LEN_SZ))
+             print("Response length < {}!!".format(BLE_DFU_GET_CRC_RESP_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
 
        if origReqType == BLE_DFU_OP_OBJECT_CREATE:
@@ -273,7 +296,7 @@ def ble_dfu_parse_resp(respMsg):
                 retList[0] = BLE_DFU_RC_SUCCESS
              else:
                 print("Response indicates error !! ")
-                retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
+                retList[0] = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
           else:
              print("Response length < {}!!".format(BLE_DFU_OBJ_CREATE_RESP_PYLD_LEN_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
@@ -291,7 +314,7 @@ def ble_dfu_parse_resp(respMsg):
                 retList[0] = BLE_DFU_RC_SUCCESS
              else:
                 print("Response indicates error !! ")
-                retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
+                retList[0] = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
           else:
              print("Response length < {}!!".format(BLE_DFU_OBJ_SEL_RESP_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
@@ -310,7 +333,7 @@ def ble_dfu_parse_resp(respMsg):
                 retList[1] = val16
              else:
                 print("Response indicates error !! ")
-                retList[0] = BLE_DFU_RC_TGT_RETURNED_FLR + rc
+                retList[0] = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
           else:       
              print("Response length < {}!!".format(BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
@@ -345,9 +368,16 @@ def ble_dfu_get_resp():
        #for i in msg:
        #    print("[{}] 0x{:02x}".format(idx, i))
        #    idx += 1
+
+       # Decode SLIP packet here !! TODO
+
        retList = ble_dfu_parse_tgt_msg(msg)
        break
   return retList
+
+def ble_dfu_sendObjExecCmd():
+    ble_dfu_send_msg(BLE_DFU_objExecCmdMsg)
+    return ble_dfu_get_resp()
 
 
 def ble_dfu_getMTU():
@@ -365,8 +395,8 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     # object and then transfers the init packet.
 
     initPktLen = len(initPktDataBuff)
-
-    print("Init pkt len is {} bytes, mtu is {} bytes".format(initPktLen, mtu))
+    
+    print("Sending Init pkt To Tgt: len is {} bytes, mtu is {} bytes".format(initPktLen, mtu))
    
     BLE_DFU_createDateObjMsg[3] = initPktLen
 
@@ -422,9 +452,15 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
        print("Could not get response to CRC command !!! ")
        return rc
 
-    print("Rcvd response to Calc CRC command ... crc32 0x{:08x}, offset {}".format(retList[2], retList[1]))
-  
-    tgtCRC32 = retList[2]  
+    tgtCRC32 = retList[2] 
+    tgtOffset = retList[1]
+    
+    print("Rcvd response to Calc CRC command ... crc32 0x{:08x}, offset {}".format(tgtCRC32, tgtOffset))
+
+    if tgtOffset != initPktLen:
+       print("Target has not received the full Init Packet !! ")
+       return BLE_DFU_RC_INIT_PACKET_TRANSFER_ERROR
+        
     localCRC32 = __calcCRC32(bytes(BLE_DFU_initFileData))
     print("Calcd CRC32 0x{:08x}, Rcvd CRC32 0x{:08x}".format(localCRC32, tgtCRC32))
 
@@ -432,6 +468,8 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
        print("Init File CRC mismatch !! ")
        return BLE_DFU_RC_INIT_FILE_CRC32_MISMATCH
 
+    print("Target has received the init packet successfully !!")
+    
     return BLE_DFU_RC_SUCCESS
 
 # -------------------------------------------------------------------------------
@@ -477,12 +515,29 @@ print("Init pkt info from target: max Sz {}, off {}, crc32 0x{:02x}".format(tgtI
                                                                             tgtInitPktOffset,
                                                                             tgtInitPktCRC32))
 
-if tgtInitPktMaxSz == -1 or tgtInitPktCRC32 == -1:
-   quit()
+initFileCalcdCRC32 = __calcCRC32(bytes(BLE_DFU_initFileData))
+
+print("init packet calcd CRC32 is 0x{:08x}, size is {}".format(initFileCalcdCRC32, \
+                                                               len(BLE_DFU_initFileData)))
+
 
 # If there is no init packet or the init packet is invalid, create a new object
-if BLE_DFU_tgtInitPktValid == False:
-   BLE_DFU_sendInitPktToTgt(BLE_DFU_initFileData, tgtMTU) 
+if (tgtInitPktOffset != len(BLE_DFU_initFileData) \
+    or (tgtInitPktCRC32 != initFileCalcdCRC32)):
+   rc = BLE_DFU_sendInitPktToTgt(BLE_DFU_initFileData, tgtMTU) 
+   if rc != BLE_DFU_RC_SUCCESS:
+      quit()
 else:
    print("Target has received valid init packet .... ")
 
+# When the init packet is available on the target, the DFU controller issues 
+# an Execute command to initiate the validation of the init packet.
+
+respList = ble_dfu_sendObjExecCmd()
+rc = respList[0]
+print("ret code", rc)
+if rc != BLE_DFU_RC_SUCCESS:
+   print("Obj Exec did not succeed ... quitting !!! ")
+   quit()
+
+print("Target has successfully validated the init packet .... :-)  ")
