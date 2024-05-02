@@ -2,7 +2,7 @@
 
 import sys
 import usb.core
-
+import zlib
 import time
 import datetime
 from time import sleep
@@ -94,6 +94,9 @@ BLE_DFU_CRC32_FIELD_SZ = 4
 
 BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
 
+BLE_DFU_GET_CRC_RESP_PYLD_LEN_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
+                                   + BLE_DFU_OFFSET_FIELD_SZ \
+                                   + BLE_DFU_CRC32_FIELD_SZ
 
 BLE_DFU_OBJ_SEL_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
                                + BLE_DFU_MAX_SIZE_FIELD_SZ \
@@ -166,6 +169,10 @@ def __leTo32(inBuff):
     #print("leTo32 inbuff {}, u32 0x{:02x}".format(inBuff, u32))
     return u32
 
+def __calcCRC32(inBuff):
+    crc32 = zlib.crc32(inBuff)
+    print("Calc CRC32 is 0x{:08x}".format(crc32))
+    return crc32 
 
 def ble_dfu_send_msg(txMsgBuff):
     print("Txing ble dfu msg of len {} ".format(len(txMsgBuff)))
@@ -369,7 +376,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get object created on target !!! ")
-       return
+       return rc
 
     print("Object created :-) ")
 
@@ -398,8 +405,8 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
        if totBytesCons >= BLE_DFU_initPktLen:
           break
        
-       print("sleeping for 5 secs .... ")
-       sleep(5)
+       print("sleeping for 1 secs .... ")
+       sleep(1)
        print("woke up after sleeping for 5 secs .... ")
 
     print("Init file sent .... ")
@@ -413,10 +420,19 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get response to CRC command !!! ")
-       return
+       return rc
 
     print("Rcvd response to Calc CRC command ... crc32 0x{:08x}, offset {}".format(retList[2], retList[1]))
-      
+  
+    tgtCRC32 = retList[2]  
+    localCRC32 = __calcCRC32(bytes(BLE_DFU_initFileData))
+    print("Calcd CRC32 0x{:08x}, Rcvd CRC32 0x{:08x}".format(localCRC32, tgtCRC32))
+
+    if tgtCRC32 != localCRC32:
+       print("Init File CRC mismatch !! ")
+       return BLE_DFU_RC_INIT_FILE_CRC32_MISMATCH
+
+    return BLE_DFU_RC_SUCCESS
 
 # -------------------------------------------------------------------------------
 
