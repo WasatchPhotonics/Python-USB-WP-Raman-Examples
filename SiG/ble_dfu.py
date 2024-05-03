@@ -135,8 +135,8 @@ BLE_DFU_RC_TGT_RESP_ERROR_BASE
 
 BLE_DFU_objExecCmdMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE, SLIP_BYTE_END]
 BLE_DFU_getMTUMsg =  [2, BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
-BLE_DFU_objSelMsg =  [3, BLE_DFU_OP_OBJECT_SELECT, 0x1, SLIP_BYTE_END]
-BLE_DFU_createDateObjMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, BLE_DFU_OBJ_TYPE_COMMAND, 0, 0, 0, 0, SLIP_BYTE_END]
+BLE_DFU_objSelMsg =  [3, BLE_DFU_OP_OBJECT_SELECT, 0xff, SLIP_BYTE_END]
+BLE_DFU_createDateObjMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, 0xff, 0, 0, 0, 0, SLIP_BYTE_END]
 BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET, SLIP_BYTE_END] 
 
 
@@ -385,7 +385,13 @@ def ble_dfu_getMTU():
     return ble_dfu_get_resp()
 
 
+def ble_dfu_getAppFwInfo():
+    BLE_DFU_objSelMsg[2] = BLE_DFU_OBJ_TYPE_DATA
+    ble_dfu_send_msg(BLE_DFU_objSelMsg)
+    return ble_dfu_get_resp()
+
 def ble_dfu_getInitPktInfo():
+    BLE_DFU_objSelMsg[2] = BLE_DFU_OBJ_TYPE_COMMAND
     ble_dfu_send_msg(BLE_DFU_objSelMsg)
     return ble_dfu_get_resp()
    
@@ -398,6 +404,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     
     print("Sending Init pkt To Tgt: len is {} bytes, mtu is {} bytes".format(initPktLen, mtu))
    
+    BLE_DFU_createDateObjMsg[2] = BLE_DFU_OBJ_TYPE_COMMAND
     BLE_DFU_createDateObjMsg[3] = initPktLen
 
     ble_dfu_send_msg(BLE_DFU_createDateObjMsg)
@@ -541,3 +548,21 @@ if rc != BLE_DFU_RC_SUCCESS:
    quit()
 
 print("Target has successfully validated the init packet .... :-)  ")
+
+# Get info from the target on the application fw image
+
+print('-------------------------------------------------------')
+respList = ble_dfu_getAppFwInfo()
+rc = respList[0]
+print("ret code", rc)
+if rc != BLE_DFU_RC_SUCCESS:
+   print("Could not get app fw offset and/or CRC32 from target... quitting !!! ")
+   quit()
+
+tgtAppFwMaxSz = respList[1]
+tgtAppFwOffset = respList[2]
+tgtAppFwCRC32 = respList[3]
+
+print("App FW info from target: max Sz {}, off {}, crc32 0x{:02x}".format(tgtAppFwMaxSz,
+                                                                          tgtAppFwOffset,
+                                                                          tgtAppFwCRC32))
