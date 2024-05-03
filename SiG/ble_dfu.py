@@ -241,6 +241,12 @@ def SLIP_encodeChunk(msgType, inBuff, maxEncSz):
               bytesAddedCnt += 1
 
         inOffset += 1
+
+        # Looks like number of bytes to write to flash has to be a multiple of 4
+        # See nrf_fstorage_write() in nrf_fstorage.c
+        # TODO - Hack !!!!
+        if inOffset >= 48:
+           break
        
     outBuff += [SLIP_BYTE_END]
 
@@ -468,11 +474,11 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
        ble_dfu_send_msg(txMsgBuff)
 
        # TODO: Comment out
-       if chunkTxCnt >= 1:
-          break
+       # if chunkTxCnt >= 2:
+       #   break
 
-       print("sleeping for 0.5 secs .... ")
-       sleep(0.5)
+       print("sleeping for 1 secs .... ")
+       sleep(1)
        print("--------------------------------------------------------------------------")
 
     print("All chunks in the current data obj sent ... ")
