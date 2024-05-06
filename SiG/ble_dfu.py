@@ -139,6 +139,7 @@ BLE_DFU_getMTUMsg =  [2, BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
 BLE_DFU_objSelMsg =  [3, BLE_DFU_OP_OBJECT_SELECT, 0xff, SLIP_BYTE_END]
 BLE_DFU_createObjReqMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, 0xff, 0, 0, 0, 0, SLIP_BYTE_END]
 BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET, SLIP_BYTE_END] 
+BLE_DFU_execReqMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE, SLIP_BYTE_END]
 
 
 BLE_DFU_MAX_SLIP_PDU_LEN = 64 - 1
@@ -403,6 +404,16 @@ def ble_dfu_getInitPktInfo():
     ble_dfu_send_msg(BLE_DFU_objSelMsg)
     return ble_dfu_get_resp()
 
+def ble_dfu_sendExecObjMsg():
+    ble_dfu_send_msg(BLE_DFU_execReqMsg)
+    retList = ble_dfu_get_resp()
+    rc = retList[0]
+    print("ret code", rc)
+    if rc != BLE_DFU_RC_SUCCESS:
+       print("sCOM(): Object Exec request failed !!! ")
+    else:
+       print("sCOM(): Object Executed by Target :-) ")
+    return rc
 
 def ble_dfu_sendCreateObjMsg(objType, len):
     print("sCOM({}, {}) ....".format(objType, len))
@@ -426,6 +437,8 @@ def ble_dfu_sendCreateObjMsg(objType, len):
 def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     print("\n\n")
 
+    print("sendNextAppFwDataObject({}, {}) Entry ..... ".format(imageOffset, maxDataObjSz))
+
     # TODO - Uncomment !!
     # if maxDataObjSz > 512:
     #    maxDataObjSz = 512
@@ -443,14 +456,16 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     if rc != BLE_DFU_RC_SUCCESS:
        return rc
 
-    currDataObjCRC32 = __calcCRC32(bytes(imageBuff[imageOffset : imageOffset + currDataObjSz]))
+    print("sleeping for 5 sec for erase to happen ....")
+    sleep(5)
 
-    print("Sending obj of sz {} bytes at off {}, crc32 0x{:08x} ".format(currDataObjSz, 
-                                                                         imageOffset,
-                                                                         currDataObjCRC32))
+    print("Sending data obj of sz {} bytes at off {}".format(currDataObjSz,
+                                                             imageOffset))
     chunkSize = BLE_DFU_MAX_SLIP_PDU_LEN
     chunkTxCnt = 0
     totBytesCons = 0
+
+    currDataObjImageDataBuff = imageBuff[imageOffset : imageOffset + currDataObjSz]
 
     while 1:
 
@@ -461,7 +476,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
           break
 
        encTxBuff, bytesCons = SLIP_encodeChunk(BLE_DFU_OP_OBJECT_WRITE,
-                                               imageBuff[imageOffset + totBytesCons:], 
+                                               currDataObjImageDataBuff[totBytesCons:],
                                                BLE_DFU_MAX_SLIP_PDU_LEN)
        chunkTxCnt += 1
        totBytesCons += bytesCons
@@ -477,14 +492,14 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
        # if chunkTxCnt >= 2:
        #   break
 
-       print("sleeping for 1 secs .... ")
+       print("sleeping for 1 sec .... ")
        sleep(1)
        print("--------------------------------------------------------------------------")
 
-    print("All chunks in the current data obj sent ... ")
+    print("all chunks in the current data obj sent ... ")
 
     # Get CRC32
-    print("Getting current data object CRC32 from target .... ")
+    print("getting current data object crc32 from target .... ")
     ble_dfu_send_msg(BLE_DFU_getCRCReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
@@ -496,21 +511,31 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     tgtDataObjCRC32 = retList[2] 
     tgtDataObjOffset = retList[1]
 
-    print("Rcvd response to Calc CRC cmd ... crc32 0x{:08x}, offset {}".format(tgtDataObjCRC32, tgtDataObjOffset))
+    print("rcvd resp to calc crc cmd .... ")
 
-    if tgtDataObjOffset != currDataObjSz: 
+    print("Offset rcvd {}, expected {}".format(tgtDataObjOffset,
+                                               (imageOffset + currDataObjSz)))
+
+    if tgtDataObjOffset != (imageOffset + currDataObjSz): 
        print("Target has not received the current data object fully !! ")
        return BLE_DFU_RC_DATA_OBJ_TRANSFER_ERROR
 
-    print("Calcd data obj CRC32 0x{:08x}, Rcvd CRC32 0x{:08x}".format(currDataObjCRC32,
-                                                                      tgtDataObjCRC32))
+    # The CRC32 is calculated over all the bytes received by the target
+    currDataObjCRC32 = __calcCRC32(bytes(imageBuff[0: tgtDataObjOffset]))
+    print("crc32 rcvd 0x{:08x}, calcd 0x{:08x}".format(tgtDataObjCRC32, 
+                                                       currDataObjCRC32))
 
     if tgtDataObjCRC32 != currDataObjCRC32:
        print("Curr data object CRC mismatch !!")
        return BLE_DFU_RC_DATA_OBJ_CRC32_MISMATCH 
 
-    return BLE_DFU_RC_SUCCESS
+    rc = ble_dfu_sendExecObjMsg()
+    if rc != BLE_DFU_RC_SUCCESS:
+       return rc
 
+    print("Data Object written to flash by target :- )")
+
+    return BLE_DFU_RC_SUCCESS
 
 
 def ble_dfu_sendAppFwToTgt(fwImageBuff):
@@ -530,6 +555,8 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
     print("\n\n")
     print("sAFTT(): app fw sz {}".format(len(fwImageBuff)))
     rc = BLE_DFU_RC_SUCCESS
+
+    dataObjTxCnt = 0
 
     while 1:
        respList = ble_dfu_getAppFwInfo()
@@ -555,7 +582,14 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
        if rc != BLE_DFU_RC_SUCCESS:
           break
 
-       break
+       print("Sent data object # {} at offset {} :-) ".format(dataObjTxCnt, tgtAppFwOffset))
+
+       print("sleep for 5 secs before sending next data obj ...")
+       sleep(5)
+
+       dataObjTxCnt += 1
+       if dataObjTxCnt >= 1:
+          break
 
     return rc
 
@@ -565,9 +599,9 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     # object and then transfers the init packet.
 
     initPktLen = len(initPktDataBuff)
-    
+
     print("Sending Init pkt To Tgt: len is {} bytes, mtu is {} bytes".format(initPktLen, mtu))
-   
+
     BLE_DFU_createObjReqMsg[2] = BLE_DFU_OBJ_TYPE_COMMAND
     BLE_DFU_createObjReqMsg[3] = initPktLen
 
@@ -586,7 +620,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     chunkSize = BLE_DFU_MAX_SLIP_PDU_LEN
 
     print("Sending init file in chunks of {} bytes ".format(chunkSize))
-             
+
     chunkTxCnt = 0
     totBytesCons = 0
     while [ 1 ]:
@@ -597,7 +631,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
        totBytesCons += bytesCons
        print("Init File Chunk # {}, Out Buff len {}, tot bytes consumed {}".format(chunkTxCnt, len(encTxBuff), totBytesCons))
        __dump(encTxBuff)
-      
+
        txMsgBuff = [len(encTxBuff)]
        txMsgBuff += encTxBuff
 
@@ -605,7 +639,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
 
        if totBytesCons >= initPktLen:
           break
-       
+
        print("sleeping for 1 secs .... ")
        sleep(1)
        print("woke up after sleeping for 1 secs .... ")
@@ -624,13 +658,13 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
 
     tgtCRC32 = retList[2] 
     tgtOffset = retList[1]
-    
+
     print("Rcvd response to Calc CRC command ... crc32 0x{:08x}, offset {}".format(tgtCRC32, tgtOffset))
 
     if tgtOffset != initPktLen:
        print("Target has not received the full Init Packet !! ")
        return BLE_DFU_RC_INIT_PACKET_TRANSFER_ERROR
-        
+
     localCRC32 = __calcCRC32(bytes(BLE_DFU_initPacketData))
     print("Calcd CRC32 0x{:08x}, Rcvd CRC32 0x{:08x}".format(localCRC32, tgtCRC32))
 
@@ -639,7 +673,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
        return BLE_DFU_RC_INIT_FILE_CRC32_MISMATCH
 
     print("Target has received the init packet successfully !!")
-    
+
     return BLE_DFU_RC_SUCCESS
 
 # -------------------------------------------------------------------------------
@@ -668,6 +702,12 @@ with open(BLE_DFU_appFwFileName, mode='rb') as BLE_DFU_appFwFileObj: # b is impo
 print("\nRead app fw image of len {} bytes".format(len(BLE_DFU_appFwImage)))
 
 print("\n")
+
+
+#crcDataObj0 = __calcCRC32(bytes(BLE_DFU_appFwImage[0: 4096]))
+#crcDataObj1 = __calcCRC32(bytes(BLE_DFU_appFwImage[4096: 8192]))
+#crcDataObj2 = __calcCRC32(bytes(BLE_DFU_appFwImage[0: 8192]))
+#print(" crc 0x{:08x} 0x{:08x} 0x{:08x}", crcDataObj0, crcDataObj1, crcDataObj2)
 
 
 print('-------------------------------------------------------')
