@@ -77,6 +77,48 @@ BLE_DFU_RES_CODE_EXT_ERROR               = 0x0B    # Extended error. The next by
                                                    # (see @ref nrf_dfu_ext_error_code_t.
 
 
+
+###########################################################################################################################################
+# Extended Error Codes
+###########################################################################################################################################
+BLE_DFU_EXT_ERROR_NO_ERROR = 0x00              # No extended error code has been set. This error indicates an implementation problem. 
+
+BLE_DFU_EXT_ERROR_INVALID_ERROR_CODE = 0x01    # Invalid error code. This error code should never be used outside of development. 
+
+BLE_DFU_EXT_ERROR_WRONG_COMMAND_FORMAT = 0x02  # The format of the command was incorrect. This error code is not used in the
+                                               # current implementation, because @ref NRF_DFU_RES_CODE_OP_CODE_NOT_SUPPORTED
+                                               # and @ref NRF_DFU_RES_CODE_INVALID_PARAMETER cover all
+                                               # possible format errors.
+
+BLE_DFU_EXT_ERROR_UNKNOWN_COMMAND = 0x03       # The command was successfully parsed, but it is not supported or unknown. 
+
+BLE_DFU_EXT_ERROR_INIT_COMMAND_INVALID = 0x04  # The init command is invalid. The init packet either has
+                                               # an invalid update type or it is missing required fields for the update type
+                                               # (for example, the init packet for a SoftDevice update is missing the SoftDevice size field).
+
+BLE_DFU_EXT_ERROR_FW_VERSION_FAILURE = 0x05    # The firmware version is too low. For an application or SoftDevice, the version must be greater than
+                                               # or equal to the current version. For a bootloader, it must be greater than the current version.
+                                               # to the current version. This requirement prevents downgrade attacks.
+
+BLE_DFU_EXT_ERROR_HW_VERSION_FAILURE = 0x06    # The hardware version of the device does not match the required
+                                               # hardware version for the update.
+
+BLE_DFU_EXT_ERROR_SD_VERSION_FAILURE = 0x07    # The array of supported SoftDevices for the update does not contain
+                                               # the FWID of the current SoftDevice or the first FWID is '0' on a
+                                               # bootloader which requires the SoftDevice to be present.
+
+BLE_DFU_EXT_ERROR_SIGNATURE_MISSING = 0x08     # The init packet does not contain a signature. This error code is not used in the
+                                               # current implementation, because init packets without a signature
+                                               # are regarded as invalid.
+
+BLE_DFU_EXT_ERROR_WRONG_HASH_TYPE = 0x09      # The hash type that is specified by the init packet is not supported by the DFU bootloader.
+BLE_DFU_EXT_ERROR_HASH_FAILED = 0x0A          # The hash of the firmware image cannot be calculated. 
+BLE_DFU_EXT_ERROR_WRONG_SIGNATURE_TYPE = 0x0B # The type of the signature is unknown or not supported by the DFU bootloader.
+BLE_DFU_EXT_ERROR_VERIFICATION_FAILED = 0x0C  # The hash of the received firmware image does not match the hash in the init packet.
+BLE_DFU_EXT_ERROR_INSUFFICIENT_SPACE = 0x0D   # The available space on the device is insufficient to hold the firmware.
+###########################################################################################################################################
+
+
 BLE_DFU_OBJ_TYPE_INVALID   = 0x0   # Invalid object type.
 BLE_DFU_OBJ_TYPE_COMMAND   = 0x1   # Command object.
 BLE_DFU_OBJ_TYPE_DATA      = 0x2   # Data object.
@@ -536,7 +578,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     rc = ble_dfu_sendCreateObjMsg(BLE_DFU_OBJ_TYPE_DATA,
                                   currDataObjSz)
     if rc != BLE_DFU_RC_SUCCESS:
-       return rc
+       return rc, 0
 
     print("sleeping for 1 sec for erase to happen ....")
     sleep(1)
@@ -584,7 +626,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get response to CRC command !!! ")
-       return rc
+       return rc, 0
 
     tgtDataObjCRC32 = retList[2] 
     tgtDataObjOffset = retList[1]
@@ -603,21 +645,21 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
 
     if tgtDataObjOffset != (imageOffset + currDataObjSz): 
        print("Target has not received the current data object fully !! ")
-       return BLE_DFU_RC_DATA_OBJ_TRANSFER_ERROR
+       return BLE_DFU_RC_DATA_OBJ_TRANSFER_ERROR, 0
     else:
         print("Target has received the sent data object fully :-) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< ")
 
     if tgtDataObjCRC32 != currDataObjCRC32:
        print("Curr data object CRC mismatch !!")
-       return BLE_DFU_RC_DATA_OBJ_CRC32_MISMATCH 
+       return BLE_DFU_RC_DATA_OBJ_CRC32_MISMATCH, 0
 
     rc = ble_dfu_sendExecObjMsg()
     if rc != BLE_DFU_RC_SUCCESS:
-       return rc
+       return rc, 0
 
     print("Data Object written to flash by target :- )")
 
-    return BLE_DFU_RC_SUCCESS
+    return BLE_DFU_RC_SUCCESS, currDataObjSz
 
 
 def ble_dfu_sendAppFwToTgt(fwImageBuff):
@@ -657,7 +699,7 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
                                                                                  tgtAppFwCRC32))
 
        if tgtAppFwOffset == len(fwImageBuff):
-          print("Full app firmware image transferred ... :-) ")
+          print("Full app firmware image transferred [0]... :-) ")
           rc = BLE_DFU_RC_SUCCESS
           break
 
@@ -667,17 +709,23 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
           rc = BLE_DFU_RC_TGT_APP_FW_OFFSET_INVALID
           break
 
-       rc = ble_dfu_sendNextAppFwDataObject(fwImageBuff, tgtAppFwOffset, tgtAppMaxObjSz)
+       rc, currObjBytesTxd = ble_dfu_sendNextAppFwDataObject(fwImageBuff, tgtAppFwOffset, tgtAppMaxObjSz)
        if rc != BLE_DFU_RC_SUCCESS:
           break
 
-       print("Sent data object # {} at offset {} :-) ".format(dataObjTxCnt, tgtAppFwOffset))
+       print("Sent data object # {} of size {} at offset {} :-) ".format(dataObjTxCnt, currObjBytesTxd, tgtAppFwOffset))
+
+       print("Next data Obj offset {}, file sz {}".format(tgtAppFwOffset + currObjBytesTxd, len(fwImageBuff)))
+       if (tgtAppFwOffset + currObjBytesTxd) >= len(fwImageBuff):
+           print("Full app firmware image transferred [1]... :-) ")
+           rc = BLE_DFU_RC_SUCCESS
+           break
 
        print("sleep for 1 secs before sending next data obj ...")
        sleep(1)
 
        dataObjTxCnt += 1
-       if dataObjTxCnt >= 10:
+       if dataObjTxCnt >= 40:
           break
 
     return rc
@@ -791,10 +839,10 @@ if not dev:
 #sleep(1)
 #ble_dfu_displayAppFwInfo()
 
-quit()
+#quit()
 
 # Read in the init file
-BLE_DFU_initFileName = "170086_sig_ble_nrf_v4.3.1.dat"
+BLE_DFU_initFileName = "170086_sig_ble_nrf.dat"
 with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is important -> binary
     BLE_DFU_initPacketData = list(BLE_DFU_initFileObj.read())
     # __dump(BLE_DFU_initPacketData)
@@ -802,7 +850,7 @@ with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is import
 print("\nRead init packet data of len {} bytes".format(len(BLE_DFU_initPacketData)))
 
 # Read in the application firmware image file
-BLE_DFU_appFwFileName = "170086_sig_ble_nrf_v4.3.1.bin"
+BLE_DFU_appFwFileName = "170086_sig_ble_nrf.bin"
 with open(BLE_DFU_appFwFileName, mode='rb') as BLE_DFU_appFwFileObj: # b is important -> binary
     BLE_DFU_appFwImage = list(BLE_DFU_appFwFileObj.read())
     # __dump(BLE_DFU_appFwImage)
@@ -812,10 +860,10 @@ print("\nRead app fw image of len {} bytes".format(len(BLE_DFU_appFwImage)))
 print("\n")
 
 
-#crcDataObj0 = __calcCRC32(bytes(BLE_DFU_appFwImage[0: 49152-4096]))
+crcDataObj0 = __calcCRC32(bytes(BLE_DFU_appFwImage))
 #crcDataObj1 = __calcCRC32(bytes(BLE_DFU_appFwImage[4096: 8192]))
 #crcDataObj2 = __calcCRC32(bytes(BLE_DFU_appFwImage[0: 8192]))
-#print("crc 0x{:08x}".format(crcDataObj0))
+print("crc 0x{:08x}".format(crcDataObj0))
 #print(" crc 0x{:08x} 0x{:08x} 0x{:08x}", crcDataObj0, crcDataObj1, crcDataObj2)
 #quit()
 
@@ -846,6 +894,7 @@ print("Init pkt info from target: max Sz {}, off {}, crc32 0x{:02x}".format(tgtI
                                                                             tgtInitPktOffset,
                                                                             tgtInitPktCRC32))
 
+#quit()
 
 initFileCalcdCRC32 = __calcCRC32(bytes(BLE_DFU_initPacketData))
 
