@@ -450,7 +450,7 @@ def ble_dfu_get_resp():
     msg = ble_dfu_get_tgt_msg()
     if len(msg) == 0:
        print("No msg from tgt... ")
-       sleep(1)
+       sleep(0.3)
     else:
        print(datetime.datetime.now(), " : rcvd msg of len {} from tgt".format(len(msg)))
        __dump(msg)
@@ -724,9 +724,9 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
        print("sleep for 1 secs before sending next data obj ...")
        sleep(1)
 
-       dataObjTxCnt += 1
-       if dataObjTxCnt >= 40:
-          break
+       #dataObjTxCnt += 1
+       #if dataObjTxCnt >= 1:
+       #   break
 
     return rc
 
@@ -838,11 +838,11 @@ if not dev:
 #ble_dfu_sendAbortReqMsg()
 #sleep(1)
 #ble_dfu_displayAppFwInfo()
-
+#
 #quit()
 
 # Read in the init file
-BLE_DFU_initFileName = "170086_sig_ble_nrf.dat"
+BLE_DFU_initFileName = "170086_sig_ble_nrf_v9.8.1.dat"
 with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is important -> binary
     BLE_DFU_initPacketData = list(BLE_DFU_initFileObj.read())
     # __dump(BLE_DFU_initPacketData)
@@ -850,7 +850,7 @@ with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is import
 print("\nRead init packet data of len {} bytes".format(len(BLE_DFU_initPacketData)))
 
 # Read in the application firmware image file
-BLE_DFU_appFwFileName = "170086_sig_ble_nrf.bin"
+BLE_DFU_appFwFileName = "170086_sig_ble_nrf_v9.8.1.bin"
 with open(BLE_DFU_appFwFileName, mode='rb') as BLE_DFU_appFwFileObj: # b is important -> binary
     BLE_DFU_appFwImage = list(BLE_DFU_appFwFileObj.read())
     # __dump(BLE_DFU_appFwImage)
@@ -936,6 +936,17 @@ print('-------------------------------------------------------')
 print('-------------------------------------------------------')
 
 
-rc = ble_dfu_sendAppFwToTgt(BLE_DFU_appFwImage)
-if rc != BLE_DFU_RC_SUCCESS:
-   quit()
+ble_dfu_sendAppFwToTgt(BLE_DFU_appFwImage)
+
+try:
+  result = dev.ctrl_transfer(HOST_TO_DEVICE,
+                             0xff,
+                             0x32,
+                             0,
+                             64)
+except Exception as exc:
+  print("Failed to send UART reset command to SiG !!!")
+
+print("Sent UART reset command to SiG ....")
+print("Done ....")
+

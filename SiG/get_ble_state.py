@@ -48,7 +48,12 @@ opcodes = { "SC_GET_BLE_INTF_MSG_RX_CNT"                : 0x38,
             "SC_GET_BLE_INTF_EEPROM_PAGE_DATA_TX_CNT"   : 0x4b }
 
 print("%-45s: %s" % ("Timestamp", datetime.now()))
-print("%-45s: %s" % ("Battery State", get_battery()))
-for label, opcode in opcodes.items():
-    print("%-45s: %d" % (label, get_value(0xff, opcode)))
+#print("%-45s: %s" % ("Battery State", get_battery()))
+print("Tot ble msg tx cnt", get_value(0xff, 0x39))
+print("Tot ble msg rx cnt", get_value(0xff, 0x38))
+print("Tot KA req tx cnt", get_value(0xff, 0x40))
+print("Tot KA req rx cnt", get_value(0xff, 0x41))
+
+#for label, opcode in opcodes.items():
+#    print("%-45s: %d" % (label, get_value(0xff, opcode)))
 print()
