@@ -80,6 +80,20 @@ BLE_DFU_RES_CODE_EXT_ERROR               = 0x0B    # Extended error. The next by
                                                    # contains the error code of the extended error 
                                                    # (see @ref nrf_dfu_ext_error_code_t.
 
+
+BLE_DFU_errCodeMap = {
+  BLE_DFU_RES_CODE_INVALID : "Invalid opcode",
+  BLE_DFU_RES_CODE_SUCCESS : "Operation successful",
+  BLE_DFU_RES_CODE_OP_CODE_NOT_SUPPORTED : "Opcode not supported",
+  BLE_DFU_RES_CODE_INVALID_PARAMETER : "Missing or invalid parameter value",
+  BLE_DFU_RES_CODE_INSUFFICIENT_RESOURCES : "Not enough memory for the data object",
+  BLE_DFU_RES_CODE_INVALID_OBJECT : "Data object does not match fw and hw reqs, wrong signature, or cmd parsing flr",
+  BLE_DFU_RES_CODE_UNSUPPORTED_TYPE : "Not a valid object type for a Create request",
+  BLE_DFU_RES_CODE_OPERATION_NOT_PERMITTED : "The state of the DFU process does not allow this operation",
+  BLE_DFU_RES_CODE_OPERATION_FAILED : "Operation failed",
+}
+
+
 # Field in firmware version request message
 BLE_DFU_FW_TYPE_BOOT_LOADER_IMAGE_NR  = 0
 BLE_DFU_FW_TYPE_SOFT_DEVICE_IMAGE_NR  = 1
@@ -140,6 +154,7 @@ BLE_DFU_OBJ_TYPE_DATA      = 0x2   # Data object.
 BLE_DFU_MSG_TYPE_FIELD_SZ  = 1
 
 BLE_DFU_RESP_RESULT_CODE_FIELD_SZ = 1
+BLE_DFU_RESP_RESULT_EXTENDED_CODE_FIELD_SZ = 1
 
 # MTU is uint16 sent in little endian order
 BLE_DFU_MTU_FIELD_SZ = 2
@@ -189,8 +204,8 @@ BLE_DFU_tgtInitPktValid = False
 
 
 # Local error codes
-BLE_DFU_RC_SUCCESS = 0
-BLE_DFU_RC_FAILURE = 1
+BLE_DFU_RC_FAILURE = 0
+BLE_DFU_RC_SUCCESS = 1
 BLE_DFU_RC_NO_RESPONSE = 2
 BLE_DFU_RC_TIMED_OUT = 3
 BLE_DFU_RC_RCVD_MSG_TOO_SHORT = 4
@@ -202,6 +217,7 @@ BLE_DFU_RC_SLIP_DECODE_FLR = 7
 BLE_DFU_RC_TGT_APP_FW_OFFSET_INVALID = 8
 BLE_DFU_RC_PARTIAL_SUCCESS = 9
 BLE_DFU_RC_TGT_RESP_ERROR_BASE = 128
+BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE = 256
 
 BLE_DFU_RC_TGT_RESP_ERROR_BASE
 
@@ -379,8 +395,24 @@ def SLIP_encodeChunk(msgType, inBuff, maxEncSz):
     outBuff += [SLIP_BYTE_END]
 
     return outBuff, inOffset
-        
-    
+
+
+
+def BLE_DFU_checkRespForError(respLen, respMsg):
+    rc = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
+    if respLen >= BLE_DFU_RESP_RESULT_CODE_FIELD_SZ:
+       rc = respMsg[1]
+       print("Result Code {}".format(rc))
+       if rc != BLE_DFU_RES_CODE_SUCCESS:
+          if rc == BLE_DFU_RES_CODE_EXT_ERROR:
+             if respLen >= (BLE_DFU_RESP_RESULT_EXTENDED_CODE_FIELD_SZ + \
+                            BLE_DFU_RESP_RESULT_CODE_FIELD_SZ):
+                rc = BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE + respMsg[2]
+          else:
+             rc = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
+    return rc
+
+
 
 def ble_dfu_parse_resp(respMsg):
     retList = [BLE_DFU_RC_FAILURE, 0, 0, 0, 0]
@@ -393,6 +425,11 @@ def ble_dfu_parse_resp(respMsg):
           print("Orig Request Type : 0x{:02x}".format(origReqType))
 
        respLen -= BLE_DFU_MSG_TYPE_FIELD_SZ
+
+       rc = BLE_DFU_checkRespForError(respLen, respMsg)
+       if rc != BLE_DFU_RES_CODE_SUCCESS:
+          retList[0] = rc
+          return retList
 
        if origReqType == BLE_DFU_OP_FIRMWARE_VERSION:
           print("Rcvd response to firmware version request")
@@ -462,9 +499,8 @@ def ble_dfu_parse_resp(respMsg):
            
        if origReqType == BLE_DFU_OP_OBJECT_SELECT:
           print("Rcvd response to OBJ SEL request")
+
           if respLen >= BLE_DFU_OBJ_SEL_RESP_PYLD_SZ:
-             rc = respMsg[1] 
-             print("Result Code 0x{:02x}".format(rc))
              if rc == BLE_DFU_RES_CODE_SUCCESS:
                 retList[1] = __leTo32(respMsg[2:6])
                 retList[2] = __leTo32(respMsg[6:10])
@@ -476,7 +512,6 @@ def ble_dfu_parse_resp(respMsg):
           else:
              print("Response length < {}!!".format(BLE_DFU_OBJ_SEL_RESP_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
-
 
        if origReqType == BLE_DFU_OP_MTU_GET:
           print("Rcvd response to MTU GET request")
@@ -591,7 +626,7 @@ def ble_dfu_sendFwVerReqMsg():
     if args.debug:
        print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
-       print("sFVRM(): fw req failed !!! ")
+       BLE_DFU_dispTgtErrorCode(rc)
     else:
        # print("sFVRM(): fw resp rcvd :-) ")
        print("Fw Type : {}".format(retList[1]))
@@ -938,6 +973,16 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     return BLE_DFU_RC_SUCCESS
 
 
+def BLE_DFU_dispTgtErrorCode(errorCode):
+   # if errorCode >= BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE: 
+   #    print("Target returned extended error {}".format(errMsg))
+
+   if errorCode >= BLE_DFU_RC_TGT_RESP_ERROR_BASE: 
+      errorCode -= BLE_DFU_RC_TGT_RESP_ERROR_BASE
+      errMsg = BLE_DFU_errCodeMap.get(errorCode)
+      if errMsg is not None:
+         print("Target returned error :: {}".format(errMsg))
+
 
 
 #--------------------------------------------------------------------------------
@@ -983,7 +1028,8 @@ if args.status:
    respList = ble_dfu_getInitPktInfo()
    rc = respList[0]
    if rc != BLE_DFU_RC_SUCCESS:
-      print("Could not get init packet offset and/or CRC32 from target ... !!!")
+      BLE_DFU_dispTgtErrorCode(rc)
+      print("Could not get init packet offset and/or CRC32 from target ... !!! \n")
    else:
       maxSz = respList[1]
       offset = respList[2]
@@ -997,7 +1043,8 @@ if args.status:
    respList = ble_dfu_getAppFwInfo()
    rc = respList[0]
    if rc != BLE_DFU_RC_SUCCESS:
-      print("Could not get app fw offset and/or CRC32 from target ... !!! ")
+      BLE_DFU_dispTgtErrorCode(rc)
+      print("Could not get app fw offset and/or CRC32 from target ... !!!  \n")
       rc = False
    else:
       maxSz = respList[1]
@@ -1041,11 +1088,10 @@ else:
     quit()
 
 
-
-crcDataObj0 = __calcCRC32(bytes(BLE_DFU_appFwImage))
+#crcDataObj0 = __calcCRC32(bytes(BLE_DFU_appFwImage))
 #crcDataObj1 = __calcCRC32(bytes(BLE_DFU_appFwImage[4096: 8192]))
 #crcDataObj2 = __calcCRC32(bytes(BLE_DFU_appFwImage[0: 8192]))
-print("crc 0x{:08x}".format(crcDataObj0))
+#print("crc 0x{:08x}".format(crcDataObj0))
 #print(" crc 0x{:08x} 0x{:08x} 0x{:08x}", crcDataObj0, crcDataObj1, crcDataObj2)
 #quit()
 
@@ -1054,6 +1100,7 @@ respList = ble_dfu_getMTU()
 rc = respList[0]
 print("ret code", rc)
 if rc != BLE_DFU_RC_SUCCESS:
+   BLE_DFU_dispTgtErrorCode(rc)
    print("Could not get MTU from target... quitting !!! ")
    quit()
 tgtMTU = respList[1]
