@@ -39,6 +39,9 @@ from time import sleep
 # is available, the DFU controller issues an Execute command to initiate the validation of the 
 # init packet.
 
+SLIP_RX_STATE_ESC_RCVD = 1
+SLIP_RX_STATE_DECODING = 2
+
 
 BLE_DFU_OP_PROTOCOL_VERSION     = 0x00     # Retrieve protocol version.
 BLE_DFU_OP_OBJECT_CREATE        = 0x01     # Create selected object.
@@ -77,6 +80,16 @@ BLE_DFU_RES_CODE_EXT_ERROR               = 0x0B    # Extended error. The next by
                                                    # contains the error code of the extended error 
                                                    # (see @ref nrf_dfu_ext_error_code_t.
 
+# Field in firmware version request message
+BLE_DFU_FW_TYPE_BOOT_LOADER_IMAGE_NR  = 0
+BLE_DFU_FW_TYPE_SOFT_DEVICE_IMAGE_NR  = 1
+BLE_DFU_FW_TYPE_APPLICATION_IMAGE_NR  = 2
+
+# Field in firmware version resp message
+BLE_DFU_FIRMWARE_TYPE_SOFTDEVICE    = 0x00
+BLE_DFU_FIRMWARE_TYPE_APPLICATION   = 0x01
+BLE_DFU_FIRMWARE_TYPE_BOOTLOADER    = 0x02
+BLE_DFU_FIRMWARE_TYPE_UNKNOWN       = 0xFF
 
 
 ###########################################################################################################################################
@@ -134,7 +147,19 @@ BLE_DFU_MTU_FIELD_SZ = 2
 BLE_DFU_MAX_SIZE_FIELD_SZ = 4
 BLE_DFU_OFFSET_FIELD_SZ = 4
 BLE_DFU_CRC32_FIELD_SZ = 4
-          
+BLE_DFU_FW_TYPE_FIELD_SZ = 1
+BLE_DFU_FW_START_ADDR_FIELD_SZ = 4
+BLE_DFU_FW_SIZE_FIELD_SZ = 4
+BLE_DFU_FW_VERSION_FIELD_SZ = 4  # Version info in the format xx.yy.zz is converted to 
+                                 # 4 byte integer with value xx * 10000 + yy * 100 + zz
+                                 # For example: 4.3.1 => 4*10000 + 3*100 + 1 = 40301
+
+BLE_DFU_FW_VER_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ \
+                              + BLE_DFU_FW_TYPE_FIELD_SZ \
+                              + BLE_DFU_FW_VERSION_FIELD_SZ \
+                              + BLE_DFU_FW_START_ADDR_FIELD_SZ \
+                              + BLE_DFU_FW_SIZE_FIELD_SZ
+
 BLE_DFU_OBJ_EXEC_RESP_PYLD_SZ = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ
 
 BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ  = BLE_DFU_RESP_RESULT_CODE_FIELD_SZ + BLE_DFU_MTU_FIELD_SZ
@@ -187,10 +212,11 @@ BLE_DFU_createObjReqMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, 0xff, 0, 0, 0, 0, SLIP_
 BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET, SLIP_BYTE_END] 
 BLE_DFU_execReqMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE, SLIP_BYTE_END]
 BLE_DFU_abortReqMsg = [2, BLE_DFU_OP_ABORT, SLIP_BYTE_END]
-BLE_DFU_fwVerReqMsg = [2, BLE_DFU_OP_FIRMWARE_VERSION, SLIP_BYTE_END]
+BLE_DFU_fwVerReqMsg = [3, BLE_DFU_OP_FIRMWARE_VERSION, BLE_DFU_FW_TYPE_APPLICATION_IMAGE_NR, SLIP_BYTE_END]
 
 
 BLE_DFU_MAX_SLIP_PDU_LEN = 64 - 1
+
 
 def __dump(buff):
     print("------------------------------------------------------------------")
@@ -215,6 +241,7 @@ def __dump(buff):
     print("------------------------------------------------------------------")
 
 
+
 def __leTo32(inBuff):
     #print("leTo32 inbuff {}".format(inBuff))
     u32 = 0
@@ -228,10 +255,15 @@ def __leTo32(inBuff):
     #print("leTo32 inbuff {}, u32 0x{:02x}".format(inBuff, u32))
     return u32
 
+
+
 def __calcCRC32(inBuff):
     crc32 = zlib.crc32(inBuff)
-    print("Calc CRC32 is 0x{:08x}".format(crc32))
+    if args.debug:
+       print("Calc CRC32 is 0x{:08x}".format(crc32))
     return crc32 
+
+
 
 def ble_dfu_send_msg(txMsgBuff):
     if args.debug:
@@ -250,8 +282,7 @@ def ble_dfu_get_tgt_msg():
     msg = raw[1:].tolist()
     return msg
 
-SLIP_RX_STATE_ESC_RCVD = 1
-SLIP_RX_STATE_DECODING = 2
+
 
 def SLIP_decodeMsg(inBuff):
     decState = SLIP_RX_STATE_DECODING
@@ -260,7 +291,8 @@ def SLIP_decodeMsg(inBuff):
     for byte in inBuff:
         if decState == SLIP_RX_STATE_DECODING:
            if byte == SLIP_BYTE_END:
-              print("SLIP_dec(): fnd EOP :-)")
+              if args.debug:
+                 print("SLIP_dec(): fnd EOP :-)")
               break
            else:
               if byte == SLIP_BYTE_ESC:
@@ -284,8 +316,11 @@ def SLIP_decodeMsg(inBuff):
         # print("SLIP_dec(): byte 0x{:02x}".format(byte))
         # _dump(outBuff)
 
-    print("Encoded Buff sz {}, decoded buff sz {}".format(len(inBuff), len(outBuff)))
+    if args.debug:
+       print("Encoded Buff sz {}, decoded buff sz {}".format(len(inBuff), len(outBuff)))
     return outBuff
+
+
 
 def SLIP_encodeChunk(msgType, inBuff, maxEncSz):
 
@@ -348,7 +383,7 @@ def SLIP_encodeChunk(msgType, inBuff, maxEncSz):
     
 
 def ble_dfu_parse_resp(respMsg):
-    retList = [BLE_DFU_RC_FAILURE, 0, 0, 0]
+    retList = [BLE_DFU_RC_FAILURE, 0, 0, 0, 0]
     if args.debug:
        print("Parsing response msg of len ", len(respMsg))
     respLen = len(respMsg)
@@ -356,9 +391,28 @@ def ble_dfu_parse_resp(respMsg):
        origReqType = respMsg[0]
        if args.debug:
           print("Orig Request Type : 0x{:02x}".format(origReqType))
-       
+
        respLen -= BLE_DFU_MSG_TYPE_FIELD_SZ
-       
+
+       if origReqType == BLE_DFU_OP_FIRMWARE_VERSION:
+          print("Rcvd response to firmware version request")
+          if respLen >= BLE_DFU_FW_VER_RESP_PYLD_SZ:
+             rc = respMsg[1]
+             print("Result Code 0x{:02x}".format(rc))
+             if rc == BLE_DFU_RES_CODE_SUCCESS:
+                retList[0] = BLE_DFU_RC_SUCCESS
+                retList[1] = respMsg[2]
+                retList[2] = __leTo32(respMsg[3:7])
+                retList[3] = __leTo32(respMsg[7:11])
+                retList[4] = __leTo32(respMsg[11:15])
+             else:
+                print("Response indicates error !! ")
+                retList[0] = BLE_DFU_RC_TGT_RESP_ERROR_BASE + rc
+          else:
+             print("Response length < {}!!".format(BLE_DFU_FW_VER_RESP_PYLD_SZ))
+             retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
+
+
        if origReqType == BLE_DFU_OP_OBJECT_EXECUTE:
           print("Rcvd response to OBJ EXEC Request")
           if respLen >= BLE_DFU_OBJ_EXEC_RESP_PYLD_SZ:
@@ -373,8 +427,9 @@ def ble_dfu_parse_resp(respMsg):
              print("Response length < {}!!".format(BLE_DFU_OBJ_EXEC_RESP_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
 
+
        if origReqType == BLE_DFU_OP_CRC_GET:
-          print("Rcvd response to GET CRC Request")
+          print("Rcvd response to GET CRC request")
           if respLen >= BLE_DFU_GET_CRC_RESP_PYLD_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
@@ -389,8 +444,9 @@ def ble_dfu_parse_resp(respMsg):
              print("Response length < {}!!".format(BLE_DFU_GET_CRC_RESP_PYLD_SZ))
              retList[0] = BLE_DFU_RC_RCVD_MSG_TOO_SHORT
 
+
        if origReqType == BLE_DFU_OP_OBJECT_CREATE:
-          print("Rcvd response to OBJ CREATE Request")
+          print("Rcvd response to OBJ CREATE request")
           if respLen >= BLE_DFU_OBJ_CREATE_RESP_PYLD_LEN_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
@@ -405,7 +461,7 @@ def ble_dfu_parse_resp(respMsg):
 
            
        if origReqType == BLE_DFU_OP_OBJECT_SELECT:
-          print("Rcvd response to OBJ SEL Request")
+          print("Rcvd response to OBJ SEL request")
           if respLen >= BLE_DFU_OBJ_SEL_RESP_PYLD_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
@@ -423,7 +479,7 @@ def ble_dfu_parse_resp(respMsg):
 
 
        if origReqType == BLE_DFU_OP_MTU_GET:
-          print("Rcvd response to MTU GET Request")
+          print("Rcvd response to MTU GET request")
           if respLen >= BLE_DFU_GET_MTU_RESP_MSG_PYLD_SZ:
              rc = respMsg[1] 
              print("Result Code 0x{:02x}".format(rc))
@@ -445,16 +501,20 @@ def ble_dfu_parse_resp(respMsg):
 
     return retList
 
+
+
 def ble_dfu_parse_tgt_msg(msg):
     retList = []
     msgType = msg[0]
-    print("\nParsing rcvd msg .. type 0x{:02x}".format(msgType))
+    if args.debug:
+       print("\nParsing rcvd msg .. type 0x{:02x}".format(msgType))
     if msgType == BLE_DFU_OP_RESPONSE:
        retList = ble_dfu_parse_resp(msg[1:])      
     else:
        print("Dropping msg !!")
     return retList
-    
+
+
 
 def ble_dfu_get_resp():
   retList = []
@@ -465,12 +525,9 @@ def ble_dfu_get_resp():
           print("No msg from tgt... ")
        sleep(0.3)
     else:
-       print(datetime.datetime.now(), " : rcvd msg of len {} from tgt".format(len(msg)))
-       __dump(msg)
-       #idx = 0
-       #for i in msg:
-       #    print("[{}] 0x{:02x}".format(idx, i))
-       #    idx += 1
+       print("Rcvd msg of len {} from tgt".format(len(msg)))
+       if args.debug:
+          __dump(msg)
 
        # Decode SLIP packet here !! TODO
        decMsgBuff = SLIP_decodeMsg(msg)
@@ -481,9 +538,12 @@ def ble_dfu_get_resp():
        break
   return retList
 
+
+
 def ble_dfu_sendObjExecCmd():
     ble_dfu_send_msg(BLE_DFU_objExecCmdMsg)
     return ble_dfu_get_resp()
+
 
 
 def ble_dfu_getMTU():
@@ -491,52 +551,77 @@ def ble_dfu_getMTU():
     return ble_dfu_get_resp()
 
 
+
 def ble_dfu_getAppFwInfo():
     BLE_DFU_objSelMsg[2] = BLE_DFU_OBJ_TYPE_DATA
     ble_dfu_send_msg(BLE_DFU_objSelMsg)
+    print("Sent Obj Select request to target ...")
     return ble_dfu_get_resp()
+
 
 
 def ble_dfu_getInitPktInfo():
     BLE_DFU_objSelMsg[2] = BLE_DFU_OBJ_TYPE_COMMAND
     ble_dfu_send_msg(BLE_DFU_objSelMsg)
+    print("Sent Obj Select request to target ...")
     return ble_dfu_get_resp()
+
+
 
 def ble_dfu_sendAbortReqMsg():
     ble_dfu_send_msg(BLE_DFU_abortReqMsg)
+    print("Sent DFU abort request to target ...")
     retList = ble_dfu_get_resp()
     rc = retList[0]
-    print("ret code", rc)
+    if args.debug:
+       print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
-       print("sARM(): Abort request failed !!! ")
+       print("Abort request failed !!! ")
     else:
-       print("sARM(): DFU Aborted by target :-) ")
+       print("DFU Aborted by target :-) ")
     return rc
+
+
 
 def ble_dfu_sendFwVerReqMsg():
     ble_dfu_send_msg(BLE_DFU_fwVerReqMsg)
+    print("Sent app fw version request to target ...")
     retList = ble_dfu_get_resp()
     rc = retList[0]
-    print("ret code", rc)
+    if args.debug:
+       print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("sFVRM(): fw req failed !!! ")
     else:
-       print("sFVRM(): fw resp rcvd :-) ")
+       # print("sFVRM(): fw resp rcvd :-) ")
+       print("Fw Type : {}".format(retList[1]))
+       fwVerU32 = retList[2]
+       v2 = int(fwVerU32/10000)
+       v1 = int((fwVerU32 - (v2*10000)) / 100)
+       v0 = fwVerU32 - (v2*10000) - (v1*100) 
+       print("Fw Version : {} -> {}.{}.{}".format(fwVerU32, v2, v1, v0))
+       print("Fw Start Addr : 0x{:08x}".format(retList[3]))
+       print("Fw Size : {} bytes".format(retList[4]))
     return rc
+
 
 def ble_dfu_sendExecObjMsg():
     ble_dfu_send_msg(BLE_DFU_execReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
-    print("ret code", rc)
+    if args.debug:
+       print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
-       print("sCOM(): Object Exec request failed !!! ")
+       print("Object Exec request failed !!! ")
     else:
-       print("sCOM(): Object Executed by Target :-) ")
+       print("Object Executed by Target :-) ")
     return rc
 
+
+
 def ble_dfu_sendCreateObjMsg(objType, len):
-    print("sCOM({}, {}) ....".format(objType, len))
+    if args.debug:
+       print("sCOM({}, {}) ....".format(objType, len))
     BLE_DFU_createObjReqMsg[2] = objType
     BLE_DFU_createObjReqMsg[3] = len & 0xff
     BLE_DFU_createObjReqMsg[4] = (len >> 8) & 0xff
@@ -547,17 +632,19 @@ def ble_dfu_sendCreateObjMsg(objType, len):
     rc = retList[0]
     print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
-       print("sCOM(): Could not get object of type {} created on target !!! ".format(objType))
+       print("Could not get object of type {} created on target !!! ".format(objType))
     else:
-       print("sCOM(): Object of type {} created :-) ".format(objType))
+       print("Object of type {} created :-) ".format(objType))
     return rc
+
 
 
 def ble_dfu_displayAppFwInfo():
     rc = True
     respList = ble_dfu_getAppFwInfo()
     rc = respList[0]
-    print("ret code", rc)
+    if args.debug:
+       print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get app fw offset and/or CRC32 from target... quitting !!! ")
        rc = False
@@ -571,10 +658,13 @@ def ble_dfu_displayAppFwInfo():
                                                                                  tgtAppFwCRC32))
     return rc
 
-def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
-    print("\n\n")
 
-    print("sendNextAppFwDataObject({}, {}) Entry ..... ".format(imageOffset, maxDataObjSz))
+
+def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
+
+    if args.debug:
+       print("\n\n")
+       print("sendNextAppFwDataObject({}, {}) Entry ..... ".format(imageOffset, maxDataObjSz))
 
     # TODO - Uncomment !!
     # if maxDataObjSz > 512:
@@ -593,11 +683,13 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     if rc != BLE_DFU_RC_SUCCESS:
        return rc, 0
 
-    print("sleeping for 1 sec for erase to happen ....")
+    if args.debug:
+       print("sleeping for 1 sec for erase to happen ....")
     sleep(1)
 
-    print("Sending data obj of sz {} bytes at off {}".format(currDataObjSz,
-                                                             imageOffset))
+    if args.debug:
+       print("Sending data obj of sz {} bytes at off {}".format(currDataObjSz,
+                                                                imageOffset))
     chunkSize = BLE_DFU_MAX_SLIP_PDU_LEN
     chunkTxCnt = 0
     totBytesCons = 0
@@ -636,15 +728,15 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
        if args.debug:
           print("--------------------------------------------------------------------------")
 
-    print("all chunks in the current data obj sent ... ")
+    print("All chunks in the current data obj sent ... ")
 
     # Get CRC32
-    print("getting current data object crc32 from target .... ")
+    print("Getting CRC32 from target .... ")
     ble_dfu_send_msg(BLE_DFU_getCRCReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
     if args.debug:
-       print("ret code", rc)
+       print("Ret Code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get response to CRC command !!! ")
        return rc, 0
@@ -654,21 +746,21 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
 
     # The CRC32 is calculated over all the bytes received by the target
 
-    print("rcvd resp to calc crc cmd .... ")
+    print("Rcvd resp to calc crc cmd .... ")
 
     print("Offset rcvd {}, expected {}".format(tgtDataObjOffset,
                                                (imageOffset + currDataObjSz)))
 
     currDataObjCRC32 = __calcCRC32(bytes(imageBuff[0: tgtDataObjOffset]))
-    print("crc32 calcd over {} bytes is 0x{:08x}".format(tgtDataObjOffset, currDataObjCRC32))
-    print("crc32 rcvd 0x{:08x}, calcd 0x{:08x}".format(tgtDataObjCRC32, 
+    print("CRC32 calcd over {} bytes is 0x{:08x}".format(tgtDataObjOffset, currDataObjCRC32))
+    print("CRC32 rcvd 0x{:08x}, calcd 0x{:08x}".format(tgtDataObjCRC32, 
                                                        currDataObjCRC32))
 
     if tgtDataObjOffset != (imageOffset + currDataObjSz): 
        print("Target has not received the current data object fully !! ")
        return BLE_DFU_RC_DATA_OBJ_TRANSFER_ERROR, 0
     else:
-        print("Target has received the sent data object fully :-) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< ")
+        print("Target has received the sent data object fully :-) ")
 
     if tgtDataObjCRC32 != currDataObjCRC32:
        print("Curr data object CRC mismatch !!")
@@ -681,6 +773,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     print("Data Object written to flash by target :- )")
 
     return BLE_DFU_RC_SUCCESS, currDataObjSz
+
 
 
 def ble_dfu_sendAppFwToTgt(fwImageBuff):
@@ -697,8 +790,9 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
     # sent over the USB link to the STM32. This corresponds to 4096/61 = 68 chunks.
     # If SLIP encoding inserts extra bytes, this number (68) will go up.
 
-    print("\n\n")
-    print("sAFTT(): app fw sz {}".format(len(fwImageBuff)))
+    if args.debug:
+       print("\n\n")
+       print("SAFTT(): app fw sz {}".format(len(fwImageBuff)))
     rc = BLE_DFU_RC_SUCCESS
 
     dataObjTxCnt = 0
@@ -706,7 +800,8 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
     while 1:
        respList = ble_dfu_getAppFwInfo()
        rc = respList[0]
-       print("ret code", rc)
+       if args.debug:
+          print("Ret Code", rc)
        if rc != BLE_DFU_RC_SUCCESS:
           print("Could not get app fw offset and/or CRC32 from target... quitting !!! ")
           break
@@ -720,7 +815,7 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
                                                                                  tgtAppFwCRC32))
 
        if tgtAppFwOffset == len(fwImageBuff):
-          print("Full app firmware image transferred [0]... :-) ")
+          print("Full app firmware image transferred ... :-) ")
           rc = BLE_DFU_RC_SUCCESS
           break
 
@@ -734,23 +829,26 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
        if rc != BLE_DFU_RC_SUCCESS:
           break
 
-       print("Sent data object # {} of size {} at offset {} :-) ".format(dataObjTxCnt, currObjBytesTxd, tgtAppFwOffset))
+       if args.debug:
+          print("Sent data object # {} of size {} at offset {} :-) ".format(dataObjTxCnt, currObjBytesTxd, tgtAppFwOffset))
+          print("Next data Obj offset {}, file sz {}".format(tgtAppFwOffset + currObjBytesTxd, len(fwImageBuff)))
 
-       print("Next data Obj offset {}, file sz {}".format(tgtAppFwOffset + currObjBytesTxd, len(fwImageBuff)))
        if (tgtAppFwOffset + currObjBytesTxd) >= len(fwImageBuff):
-           print("Full app firmware image transferred [1]... :-) ")
+           print("Full app firmware image transferred ... :-) ")
            rc = BLE_DFU_RC_SUCCESS
            break
 
-       print("sleep for 1 secs before sending next data obj ...")
-       sleep(1)
+       if args.debug:
+          print("Sleep for 0.5 secs before sending next data obj ...")
+       sleep(0.5)
 
        dataObjTxCnt += 1
-       if dataObjTxCnt >= 1:
-          rc = BLE_DFU_RC_PARTIAL_SUCCESS 
-          break
+       # if dataObjTxCnt >= 5:
+       #    rc = BLE_DFU_RC_PARTIAL_SUCCESS 
+       #    break
 
     return rc
+
 
 
 def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
@@ -767,18 +865,21 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     ble_dfu_send_msg(BLE_DFU_createObjReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
-    print("ret code", rc)
+    if args.debug:
+       print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get object created on target !!! ")
        return rc
 
-    print("Object created :-) ")
+    if args.debug:
+       print("Object created :-) ")
 
     # Now we send the init packet
 
     chunkSize = BLE_DFU_MAX_SLIP_PDU_LEN
 
-    print("Sending init file in chunks of {} bytes ".format(chunkSize))
+    if args.debug:
+       print("Sending init file in chunks of {} bytes ".format(chunkSize))
 
     chunkTxCnt = 0
     totBytesCons = 0
@@ -799,9 +900,9 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
        if totBytesCons >= initPktLen:
           break
 
-       print("sleeping for 1 secs .... ")
-       sleep(1)
-       print("woke up after sleeping for 1 secs .... ")
+       if args.debug:
+          print("Sleeping for 0.1 secs .... ")
+       sleep(0.1)
 
     print("Init file sent .... ")
 
@@ -810,7 +911,8 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     ble_dfu_send_msg(BLE_DFU_getCRCReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
-    print("ret code", rc)
+    if args.debug:
+       print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
        print("Could not get response to CRC command !!! ")
        return rc
@@ -818,7 +920,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     tgtCRC32 = retList[2] 
     tgtOffset = retList[1]
 
-    print("Rcvd response to Calc CRC command ... crc32 0x{:08x}, offset {}".format(tgtCRC32, tgtOffset))
+    print("Rcvd response to calc CRC command ... crc32 0x{:08x}, offset {}".format(tgtCRC32, tgtOffset))
 
     if tgtOffset != initPktLen:
        print("Target has not received the full Init Packet !! ")
@@ -835,7 +937,12 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
 
     return BLE_DFU_RC_SUCCESS
 
-# -------------------------------------------------------------------------------
+
+
+
+#--------------------------------------------------------------------------------
+# Script starts here 
+#-------------------------------------------------------------------------------
 
 #SLIP_encBuff = [0x60, 0x03, 0x01, 0x00, 0xdb, 0xdc, 0x00, 0x00,
 #                0x3c, 0x40, 0xa4, 0x53, 0xc0]
@@ -844,21 +951,68 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
 #__dump(SLIP_decodedBuff)
 #quit()
 
-# print('args list ', sys.argv)
 
 ################################################################################
 # parse command-line arguments
 ################################################################################
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--debug",               action="store_true", help="debug output")
-parser.add_argument("--version",             type=str, help="Version Info. Eample 4.3.1")
+parser.add_argument("--debug",        action="store_true", help="debug output")
+parser.add_argument("--upg",          type=str, help="Upgrade to version. Example: --upg 4.3.1")
+parser.add_argument("--ver",          action="store_true", help="Show current app fw version")
+parser.add_argument("--abort",        action="store_true", help="Abort DFU process")
+parser.add_argument("--status",       action="store_true", help="Get status from the target")
 args = parser.parse_args()
 
-if args.version is not None:
-    print("Upgrading to version {}".format(args.version))
+# print("args : ", sys.argv)
+
+dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+if not dev:
+   print("No spectrometer found")
+   sys.exit()
+
+if args.abort:
+   ble_dfu_sendAbortReqMsg()
+   quit()
+
+if args.ver:
+   ble_dfu_sendFwVerReqMsg()
+   quit()
+
+if args.status:
+   respList = ble_dfu_getInitPktInfo()
+   rc = respList[0]
+   if rc != BLE_DFU_RC_SUCCESS:
+      print("Could not get init packet offset and/or CRC32 from target ... !!!")
+   else:
+      maxSz = respList[1]
+      offset = respList[2]
+      crc32 = respList[3]
+
+      print("Init pkt info from target: max Sz {}, off {}, crc32 0x{:02x}".format(maxSz, 
+                                                                                  offset,
+                                                                                  crc32))
+      print("")
+
+   respList = ble_dfu_getAppFwInfo()
+   rc = respList[0]
+   if rc != BLE_DFU_RC_SUCCESS:
+      print("Could not get app fw offset and/or CRC32 from target ... !!! ")
+      rc = False
+   else:
+      maxSz = respList[1]
+      offset = respList[2]
+      crc32 = respList[3]
+
+      print("App fw info from target: max Sz {}, off {}, crc32 0x{:02x}".format(maxSz, 
+                                                                                offset,
+                                                                                crc32))
+   quit()
+
+if args.upg is not None:
+    print("Upgrading to version {}".format(args.upg))
     # Read in the init file
-    BLE_DFU_initFileName = "170086_sig_ble_nrf_v" + args.version + ".dat"
+    BLE_DFU_initFileName = "170086_sig_ble_nrf_v" + args.upg + ".dat"
     print("Reading in init data file {}".format(BLE_DFU_initFileName))
     try:
        with open(BLE_DFU_initFileName, mode='rb') as BLE_DFU_initFileObj: # b is important -> binary
@@ -871,7 +1025,8 @@ if args.version is not None:
     print("Read init packet data of len {} bytes".format(len(BLE_DFU_initPacketData)))
 
     # Read in the application firmware image file
-    BLE_DFU_appFwFileName = "170086_sig_ble_nrf_v" +  args.version + ".bin"
+    BLE_DFU_appFwFileName = "170086_sig_ble_nrf_v" +  args.upg + ".bin"
+    print("Reading in app fw image file {}".format(BLE_DFU_appFwFileName))
     try:
        with open(BLE_DFU_appFwFileName, mode='rb') as BLE_DFU_appFwFileObj: # b is important -> binary
             BLE_DFU_appFwImage = list(BLE_DFU_appFwFileObj.read())
@@ -880,30 +1035,10 @@ if args.version is not None:
        print("Could not open app fw image file !!")
        quit()                                                
 
-
     print("Read app fw image of len {} bytes".format(len(BLE_DFU_appFwImage)))
 else:
-    print("Please specify version to upgrade to !!")
+    print("Please specify app fw version to upgrade to !!")
     quit()
-
-
-dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
-
-if not dev:
-    print("No spectrometer found")
-    sys.exit()
-
-#ble_dfu_sendFwVerReqMsg()
-#quit()
-
-#Testing abort cmd ...
-#ble_dfu_displayAppFwInfo()
-#sleep(1)
-#ble_dfu_sendAbortReqMsg()
-#sleep(1)
-#ble_dfu_displayAppFwInfo()
-#
-#quit()
 
 
 
