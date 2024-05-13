@@ -147,6 +147,23 @@ BLE_DFU_EXT_ERROR_INSUFFICIENT_SPACE = 0x0D   # The available space on the devic
 ###########################################################################################################################################
 
 
+BLE_DFU_extErrCodeMap = {
+  BLE_DFU_EXT_ERROR_NO_ERROR : "No extended error code set",
+  BLE_DFU_EXT_ERROR_INVALID_ERROR_CODE : "Invalid error code",
+  BLE_DFU_EXT_ERROR_WRONG_COMMAND_FORMAT :  "The format of the command is incorrect",
+  BLE_DFU_EXT_ERROR_UNKNOWN_COMMAND : "Command parsed successfully, but it is unsupported or unknown",
+  BLE_DFU_EXT_ERROR_INIT_COMMAND_INVALID : "Init cmd has invalid update type or missing required fields",
+  BLE_DFU_EXT_ERROR_FW_VERSION_FAILURE : "The firmware version is too low.",
+  BLE_DFU_EXT_ERROR_HW_VERSION_FAILURE : "Hardware version mismatch",
+  BLE_DFU_EXT_ERROR_SD_VERSION_FAILURE : "SoftDevice version mismatch",
+  BLE_DFU_EXT_ERROR_SIGNATURE_MISSING : "The init packet does not contain a signature",
+  BLE_DFU_EXT_ERROR_WRONG_HASH_TYPE : "Unsupported hash type in the init packet",
+  BLE_DFU_EXT_ERROR_HASH_FAILED : "Firmware image hash could not be calculated",
+  BLE_DFU_EXT_ERROR_WRONG_SIGNATURE_TYPE : "Signature type is unknown or not supported",
+  BLE_DFU_EXT_ERROR_VERIFICATION_FAILED : "Firmware image hash mismatch with hash in init packet",
+  BLE_DFU_EXT_ERROR_INSUFFICIENT_SPACE :  "Insufficient space for holding firmware image"
+}
+
 BLE_DFU_OBJ_TYPE_INVALID   = 0x0   # Invalid object type.
 BLE_DFU_OBJ_TYPE_COMMAND   = 0x1   # Command object.
 BLE_DFU_OBJ_TYPE_DATA      = 0x2   # Data object.
@@ -667,6 +684,7 @@ def ble_dfu_sendCreateObjMsg(objType, len):
     rc = retList[0]
     print("ret code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
+       BLE_DFU_dispTgtErrorCode(rc)
        print("Could not get object of type {} created on target !!! ".format(objType))
     else:
        print("Object of type {} created :-) ".format(objType))
@@ -708,14 +726,17 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     # Calculate the CRC32 of the data object to be sent
     imageLen = len(imageBuff)
 
+    if imageOffset % maxDataObjSz != 0:
+       imageOffset = imageOffset - (imageOffset % maxDataObjSz)
+       print("Re-Sending partially sent data object at offset {} ... ".format(imageOffset))
+
     lenLeftToSend = imageLen - imageOffset
     currDataObjSz = lenLeftToSend
     if currDataObjSz >= maxDataObjSz:
        currDataObjSz = maxDataObjSz
-
-    rc = ble_dfu_sendCreateObjMsg(BLE_DFU_OBJ_TYPE_DATA,
-                                  currDataObjSz)
+    rc = ble_dfu_sendCreateObjMsg(BLE_DFU_OBJ_TYPE_DATA, currDataObjSz)
     if rc != BLE_DFU_RC_SUCCESS:
+       BLE_DFU_dispTgtErrorCode(rc)
        return rc, 0
 
     if args.debug:
@@ -773,6 +794,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
     if args.debug:
        print("Ret Code", rc)
     if rc != BLE_DFU_RC_SUCCESS:
+       BLE_DFU_dispTgtErrorCode(rc)
        print("Could not get response to CRC command !!! ")
        return rc, 0
 
@@ -795,7 +817,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
        print("Target has not received the current data object fully !! ")
        return BLE_DFU_RC_DATA_OBJ_TRANSFER_ERROR, 0
     else:
-        print("Target has received the sent data object fully :-) ")
+       print("Target has received the sent data object fully :-) ")
 
     if tgtDataObjCRC32 != currDataObjCRC32:
        print("Curr data object CRC mismatch !!")
@@ -803,6 +825,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
 
     rc = ble_dfu_sendExecObjMsg()
     if rc != BLE_DFU_RC_SUCCESS:
+       BLE_DFU_dispTgtErrorCode(rc)
        return rc, 0
 
     print("Data Object written to flash by target :- )")
@@ -838,6 +861,7 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
        if args.debug:
           print("Ret Code", rc)
        if rc != BLE_DFU_RC_SUCCESS:
+          BLE_DFU_dispTgtErrorCode(rc)
           print("Could not get app fw offset and/or CRC32 from target... quitting !!! ")
           break
 
@@ -855,10 +879,10 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
           break
 
 
-       if tgtAppFwOffset % tgtAppMaxObjSz != 0:
-          print("App image offset {} invalid !!".format(tgtAppFwOffset))
-          rc = BLE_DFU_RC_TGT_APP_FW_OFFSET_INVALID
-          break
+       # if tgtAppFwOffset % tgtAppMaxObjSz != 0:
+       #    print("App image offset {} invalid !!".format(tgtAppFwOffset))
+       #    rc = BLE_DFU_RC_TGT_APP_FW_OFFSET_INVALID
+       #    break
 
        rc, currObjBytesTxd = ble_dfu_sendNextAppFwDataObject(fwImageBuff, tgtAppFwOffset, tgtAppMaxObjSz)
        if rc != BLE_DFU_RC_SUCCESS:
@@ -973,15 +997,18 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     return BLE_DFU_RC_SUCCESS
 
 
-def BLE_DFU_dispTgtErrorCode(errorCode):
-   # if errorCode >= BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE: 
-   #    print("Target returned extended error {}".format(errMsg))
 
-   if errorCode >= BLE_DFU_RC_TGT_RESP_ERROR_BASE: 
-      errorCode -= BLE_DFU_RC_TGT_RESP_ERROR_BASE
-      errMsg = BLE_DFU_errCodeMap.get(errorCode)
-      if errMsg is not None:
-         print("Target returned error :: {}".format(errMsg))
+def BLE_DFU_dispTgtErrorCode(errorCode):
+   if errorCode >= BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE: 
+      errorCode -= BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE
+      errMsg = BLE_DFU_extErrCodeMap.get(errorCode)
+      print("Target returned extended error :: [{}]".format(errMsg))
+   else:
+      if errorCode >= BLE_DFU_RC_TGT_RESP_ERROR_BASE: 
+         errorCode -= BLE_DFU_RC_TGT_RESP_ERROR_BASE
+         errMsg = BLE_DFU_errCodeMap.get(errorCode)
+         if errMsg is not None:
+            print("Target returned error :: [{}]".format(errMsg))
 
 
 
@@ -1112,6 +1139,7 @@ respList = ble_dfu_getInitPktInfo()
 rc = respList[0]
 print("ret code", rc)
 if rc != BLE_DFU_RC_SUCCESS:
+   BLE_DFU_dispTgtErrorCode(rc)
    print("Could not get init packet offset and/or CRC32 from target... quitting !!! ")
    quit()
 
@@ -1136,6 +1164,7 @@ if (tgtInitPktOffset != len(BLE_DFU_initPacketData) \
     or (tgtInitPktCRC32 != initFileCalcdCRC32)):
    rc = BLE_DFU_sendInitPktToTgt(BLE_DFU_initPacketData, tgtMTU) 
    if rc != BLE_DFU_RC_SUCCESS:
+      BLE_DFU_dispTgtErrorCode(rc)
       quit()
 else:
    print("Target has received valid init packet .... ")
@@ -1147,6 +1176,7 @@ respList = ble_dfu_sendObjExecCmd()
 rc = respList[0]
 print("ret code", rc)
 if rc != BLE_DFU_RC_SUCCESS:
+   BLE_DFU_dispTgtErrorCode(rc)
    print("Obj Exec did not succeed ... quitting !!! ")
    quit()
 
