@@ -7,21 +7,23 @@ from time import sleep
 dev=usb.core.find(idVendor=0x24aa, idProduct=0x2000)
 print(dev)
 
-print (dev)
 H2D=0x40
 D2H=0xC0
 BUFFER_SIZE=8
 Z='\x00'*BUFFER_SIZE
 TIMEOUT=1000
+PIXELS=512
 
-# select pixel count
-PixelCount=512
+print("Start Data Acquisition")
+dev.ctrl_transfer(H2D, 0xad, 0, 0, Z, TIMEOUT)   # trigger an acquisition
 
-print ("Start Data Acquisition")
-dev.ctrl_transfer(H2D, 0xad, 0,0,Z,TIMEOUT)   # trigger an acquisition
+print("Reading spectrum")
+spectrum = []
+data = dev.read(0x82, PIXELS * 2)
+for i in range(0, len(data), 2):
+    intensity = data[i] | (data[i+1] << 8) # pixels are little-endian uint16
+    spectrum.append(intensity)
 
-Data = dev.read(0x82,PixelCount*2)
-for j in range (0, (PixelCount*2)/32, 1):
-	for i in range (0, 31, 2):
-		NewData = Data[j*32+i+1]*256+Data[j*32+i]
-		print (NewData)
+print("Spectrum:")
+for i, intensity in enumerate(spectrum):
+    print(f"pixel {i:3d}: {intensity}")
