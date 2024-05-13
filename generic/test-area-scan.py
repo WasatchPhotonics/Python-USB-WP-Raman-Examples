@@ -2,6 +2,7 @@
 
 import os
 import sys
+import png
 import usb.core
 import argparse
 
@@ -12,15 +13,17 @@ Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
 
 def process_cmd_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read (default 20)", default=20)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--debug",               action="store_true", help="verbose output")
-    parser.add_argument("--fast",                action="store_true", help="fast mode")
-    parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms) (default 10)", default=10)
-    parser.add_argument("--pid",                 default="4000",      help="USB PID in hex (default 4000)", choices=["1000", "2000", "4000"])
-    parser.add_argument("--pixels",              type=int,            help="expected pixels (default 1952)", default=1952)
-    parser.add_argument("--start-line",          type=int,            help="vertical binning start line")
-    parser.add_argument("--stop-line",           type=int,            help="vertical binning stop line")
+    parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read", default=20)
+    parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=10)
+    parser.add_argument("--pid",                 type=str,            help="USB PID in hex", default="4000", choices=["1000", "2000", "4000"])
+    parser.add_argument("--pixels",              type=int,            help="expected pixels", default=1952)
+    parser.add_argument("--lines",               type=int,            help="max lines", default=1080)
+    parser.add_argument("--start-line",          type=int,            help="vertical binning start line", default=0)
+    parser.add_argument("--stop-line",           type=int,            help="vertical binning stop line", default=1079)
+    parser.add_argument("--csvfile",             type=str,            help="optional file to save row-ordered CSV")
+    parser.add_argument("--pngfile",             type=str,            help="optional file to save PNG images")
     return parser.parse_args()
 
 def send_code(cmd, value=0, index=0, buf=Z, timeout=TIMEOUT_MS):
@@ -60,14 +63,17 @@ if args.stop_line is not None:
 print("Enabling area scan")
 send_code(0xeb, 1)
 
-if args.fast:
-    send_code(0xad)
+# initialize CSV
+if args.csvfile:
+    print(f"Recording to {args.csvfile}")
+    if os.path.exists(args.csvfile):
+        os.remove(args.csvfile)
+
+# initialize PNG
+image = [[0 for _ in range(args.pixels)] for _ in range(args.lines)]
 
 print("Looping over %d spectra (lines)" % args.count)
 for linenum in range(args.count):
-
-    if not args.fast:
-        send_code(0xad)
 
     # read spectrum
     data = dev.read(0x82, args.pixels * 2)
@@ -77,3 +83,33 @@ for linenum in range(args.count):
         spectrum.append(data[i] | (data[i+1] << 8))
 
     print("Spectrum %3d/%3d: %s ..." % (linenum + 1, args.count, spectrum[:10]))
+
+    if args.csvfile:
+        with open(args.csvfile, "a") as csvfile:
+            csvfile.write(", ".join([f"{pixel}" for pixel in spectrum]) + "\n")
+
+    # stomp endpoints so they don't skew image intensity range
+    line_num = spectrum[0] # capture this before stomping
+    for i in range(3):
+        spectrum[i] = spectrum[3]
+    spectrum[-1] = spectrum[-2]
+
+    if args.pngfile:
+        image[line_num] = spectrum
+
+print("Exiting area scan")
+send_code(0xeb, 0)
+
+if args.pngfile:
+    # normalize to 9-bit, then clamp to 8-bit (brightens image)
+    # (probably some clever Numpy way to do this)
+    hi = max([max(line) for line in image])
+    for y in range(args.lines):
+        for x in range(args.pixels):
+            image[y][x] = min(255, int((512.0 * image[y][x] / hi)))
+
+    # save PNG file
+    print(f"Saving {args.pngfile}")
+    with open(args.pngfile, 'wb') as pngfile:
+        png_writer = png.Writer(width=args.pixels, height=args.lines)
+        png_writer.write(pngfile, image)
