@@ -577,7 +577,7 @@ def ble_dfu_get_resp():
           print("No msg from tgt... ")
        sleep(0.3)
     else:
-       print("Rcvd msg of len {} from tgt".format(len(msg)))
+       print("Rcvd msg of len {} from target ".format(len(msg)))
        if args.debug:
           __dump(msg)
 
@@ -646,14 +646,14 @@ def ble_dfu_sendFwVerReqMsg():
        BLE_DFU_dispTgtErrorCode(rc)
     else:
        # print("sFVRM(): fw resp rcvd :-) ")
-       print("Fw Type : {}".format(retList[1]))
+       print("[\n  Fw Type : {}".format(retList[1]))
        fwVerU32 = retList[2]
        v2 = int(fwVerU32/10000)
        v1 = int((fwVerU32 - (v2*10000)) / 100)
        v0 = fwVerU32 - (v2*10000) - (v1*100) 
-       print("Fw Version : {} -> {}.{}.{}".format(fwVerU32, v2, v1, v0))
-       print("Fw Start Addr : 0x{:08x}".format(retList[3]))
-       print("Fw Size : {} bytes".format(retList[4]))
+       print("  Fw Version : {} -> {}.{}.{}".format(fwVerU32, v2, v1, v0))
+       print("  Fw Start Addr : 0x{:08x}".format(retList[3]))
+       print("  Fw Size : {} bytes\n]".format(retList[4]))
     return rc
 
 
@@ -1062,7 +1062,7 @@ if args.status:
       offset = respList[2]
       crc32 = respList[3]
 
-      print("Init pkt info from target: max Sz {}, off {}, crc32 0x{:02x}".format(maxSz, 
+      print("Init pkt info from target: [max Sz {}, off {}, crc32 0x{:02x}]".format(maxSz, 
                                                                                   offset,
                                                                                   crc32))
       print("")
@@ -1078,7 +1078,7 @@ if args.status:
       offset = respList[2]
       crc32 = respList[3]
 
-      print("App fw info from target: max Sz {}, off {}, crc32 0x{:02x}".format(maxSz, 
+      print("App fw info from target: [max Sz {}, off {}, crc32 0x{:02x}]".format(maxSz, 
                                                                                 offset,
                                                                                 crc32))
    quit()

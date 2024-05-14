@@ -17,10 +17,10 @@ TIMEOUT_MS = 1000
 
 try:
   result = dev.ctrl_transfer(HOST_TO_DEVICE,
-                                  0xff,
-                                  0x36,
-                                  0,
-                                  64)
+                             0xff,
+                             0x36,
+                             0,
+                             64)
 except Exception as exc:
-  print("Failied to Send Code Problem with ctrl transfer")
+  print("Failed to Send Code Problem with ctrl transfer")
 
