@@ -71,6 +71,7 @@ def do_flash(selection, erase):
 def main():
     # Create main window
     root = tk.Tk()
+    root.minsize(300, 100)
     root.title("Firmware flash tool")
 
     # Variables to store checkbox/radiobutton states
@@ -86,10 +87,10 @@ def main():
     button_flash = tk.Button(root, text="Flash", command= lambda: do_flash(sel.get(), erase.get()))
 
     #Place
-    ble_rbutton.pack()
-    chkbox_erase.pack()
-    stm_rbutton.pack()
-    button_flash.pack()
+    ble_rbutton.grid(row=0,column=0, pady=2)
+    chkbox_erase.grid(row=0,column=1, pady=2)
+    stm_rbutton.grid(row=1,column=0, pady=2)
+    button_flash.grid(row=2,column=0, pady=2)
 
     # Start the Tkinter event loop
     root.mainloop()
