@@ -3,6 +3,10 @@ name="fw-util"
 version="1.0.0"
 dependencies=[  "tk ~= 0.1.0",
                 "pexpect ~= 4.9.0"]
+readme = "README.md"
+
+[project.optional-dependencies]
+build_exe = ["pyinstaller ~= 6.6.0"]
 
 [build-system]
 requires=["setuptools"]

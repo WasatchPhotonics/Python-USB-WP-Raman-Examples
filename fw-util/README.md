@@ -16,5 +16,12 @@ Provides a minimal GUI for flashing STM and BLE chipsets.
 6. Select whether to flash `BLE652` or `STM32`. For `BLE652` there is an optional erase checkbox that will erase it first.
 7. Click the `Flash` button and watch the magic happen.
 
+# How to build into an executable
+1. Activate your virtual environment and install optional dependencies (only need to do 1x)
+   1. `. venv/bin/activate`
+   2. `pip install '.[build_exe]'`
+2. Build with pyinstaller 
+   1. `pyinstaller fw_util.py --onefile`
+
 # Requirements
 - JLink `https://www.segger.com/downloads/jlink/` (tested with V7.6G)
