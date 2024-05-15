@@ -1,0 +1,9 @@
+[project]
+name="fw-util"
+version="1.0.0"
+dependencies=[  "tk ~= 0.1.0",
+                "pexpect ~= 4.9.0"]
+
+[build-system]
+requires=["setuptools"]
+build-backend="setuptools.build_meta"
