@@ -1034,6 +1034,7 @@ parser.add_argument("--upg",          type=str, help="Upgrade to version. Exampl
 parser.add_argument("--ver",          action="store_true", help="Show current app fw version")
 parser.add_argument("--abort",        action="store_true", help="Abort DFU process")
 parser.add_argument("--status",       action="store_true", help="Get status from the target")
+parser.add_argument("--crc",          action="store_true", help=".dat and .bin CRC32")
 args = parser.parse_args()
 
 # print("args : ", sys.argv)
@@ -1063,8 +1064,8 @@ if args.status:
       crc32 = respList[3]
 
       print("Init pkt info from target: [max Sz {}, off {}, crc32 0x{:02x}]".format(maxSz, 
-                                                                                  offset,
-                                                                                  crc32))
+                                                                                    offset,
+                                                                                    crc32))
       print("")
 
    respList = ble_dfu_getAppFwInfo()
@@ -1079,8 +1080,8 @@ if args.status:
       crc32 = respList[3]
 
       print("App fw info from target: [max Sz {}, off {}, crc32 0x{:02x}]".format(maxSz, 
-                                                                                offset,
-                                                                                crc32))
+                                                                                  offset,
+                                                                                  crc32))
    quit()
 
 if args.upg is not None:
@@ -1110,16 +1111,22 @@ if args.upg is not None:
        quit()                                                
 
     print("Read app fw image of len {} bytes".format(len(BLE_DFU_appFwImage)))
+
+    if args.crc:
+       crc32 = __calcCRC32(bytes(BLE_DFU_initPacketData))
+       print("\n.dat size {} bytes, CRC32 0x{:x}".format(len(BLE_DFU_initPacketData), crc32))
+       crc32 = __calcCRC32(bytes(BLE_DFU_appFwImage))
+       print(".bin size {} bytes, CRC32 0x{:x}".format(len(BLE_DFU_appFwImage), crc32))
+       quit()
+
 else:
-    print("Please specify app fw version to upgrade to !!")
+    if args.crc:
+       print("Please specify app fw version for crc calculation !!")
+    else:
+       print("Please specify app fw version to upgrade to !!")
     quit()
 
 
-#crcDataObj0 = __calcCRC32(bytes(BLE_DFU_appFwImage))
-#crcDataObj1 = __calcCRC32(bytes(BLE_DFU_appFwImage[4096: 8192]))
-#crcDataObj2 = __calcCRC32(bytes(BLE_DFU_appFwImage[0: 8192]))
-#print("crc 0x{:08x}".format(crcDataObj0))
-#print(" crc 0x{:08x} 0x{:08x} 0x{:08x}", crcDataObj0, crcDataObj1, crcDataObj2)
 #quit()
 
 print('-------------------------------------------------------')
