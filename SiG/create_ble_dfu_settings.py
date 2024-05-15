@@ -92,7 +92,7 @@ offset += 4
 if args.ver is not None:
 
     ver_numbers = args.ver.split('.')
-    print(ver_numbers)
+    # print(ver_numbers)
 
     if len(ver_numbers) != 3:
        print("Enter valid version number. Example: 4.3.1 !!")
@@ -108,7 +108,6 @@ if args.ver is not None:
        print("Enter valid version number. Example: 4.3.1 !!")
        quit()
        
-
     app_ver_num_int = n1*10000 + n2*100 + n3
     print("version number 0x{:x}".format(app_ver_num_int))
 
@@ -164,11 +163,12 @@ if args.ver is not None:
     DFU_settingsBuff[offset:offset + 4] = __hostToLE32(DFU_settingsCRC32)
 
     __dump(DFU_settingsBuff)
+    outputFileName = "dfu_settings_" + args.ver + ".bin"
     try:
-       with open("dfu_settings.bin", mode='wb') as settingsFileObj: # b is important -> binary
+       with open(outputFileName, mode='wb') as settingsFileObj: # b is important -> binary
            settingsFileObj.write(bytes(DFU_settingsBuff))
            settingsFileObj.close()
-           print("written to file {}".format("dfu_settings.bin"))
+           print("written DFU settings to binary file {}".format(outputFileName))
     except:
        print("Could not open bin data file to write to !!")
        quit()                                                
