@@ -1,8 +1,8 @@
 name: Build fw-util Action
-run-name: Building fw-util for Windows
+run-name: Building fw-util for MacOS
 on: [push]
 jobs:
-  Build-Windows:
+  Build-MacOS:
     runs-on: macos-13
     steps:
     - name: Check out repository code
