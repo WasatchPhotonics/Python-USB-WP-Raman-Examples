@@ -1,8 +1,8 @@
-name: Build FW Util Action
-run-name: ${{github.actor}} is testing GitHub actions for pyinstaller build automation
+name: Build fw-util Action
+run-name: Building fw-util for Windows
 on: [push]
 jobs:
-  build:
+  Build-Windows:
     runs-on: windows-latest
     steps:
     - name: Check out repository code
@@ -16,7 +16,10 @@ jobs:
     - name: Build executable with pyinstaller
       run: pyinstaller fw-util/fw_util.py --onefile
     - name: Uploading build artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: fw-util
-        path: dist/*
+        path: |
+          dist/*
+          fw_util/170086_sig_ble_nrf_v4.4.0.hex
+          fw_util/config.yaml
