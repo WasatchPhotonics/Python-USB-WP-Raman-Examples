@@ -15,7 +15,7 @@ jobs:
       run: pip install '.[build_exe]'
     - name: Build executable with pyinstaller
       run: pyinstaller fw_util.py --onefile
-    - run echo "Workflow finished succesfully!"
+    - run: echo "🍏 This job's status is ${{ job.status }}."
     # Optionally verify that it works (provided that it does not need user interaction)
 #    - run: ./dist/your-code
 #    - uses: actions/upload-artifact@v2
