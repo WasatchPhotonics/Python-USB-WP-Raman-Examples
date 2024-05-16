@@ -1,24 +1,23 @@
-name: build-fw-util
-
+name: Build FW Util Action
 run-name: ${{github.actor} is testing GitHub actions for pyinstaller build automation}
-
-
+on: [push]
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-
     steps:
-    - uses: actions/checkout@v2
+    - name: Check out repository code
+      uses: actions/checkout@v4
     - uses: actions/setup-python@v2
       with:
         python-version: 3.11
-
-    - run: pip install '.[build_exe]'
-    - run: pyinstaller fw_util.py --onefile
+    - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+    - name: Install dependencies
+      run: pip install '.[build_exe]'
+    - name: Build executable with pyinstaller
+      run: pyinstaller fw_util.py --onefile
+    - run echo "Workflow finished succesfully!"
     # Optionally verify that it works (provided that it does not need user interaction)
-    - run: ./dist/your-code
-    - uses: actions/upload-artifact@v2
-      with:
-        path: dist/*
+#    - run: ./dist/your-code
+#    - uses: actions/upload-artifact@v2
+#      with:
+#        path: dist/*
