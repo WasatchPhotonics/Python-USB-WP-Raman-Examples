@@ -1,0 +1,10 @@
+jlink:
+  exe: /Applications/SEGGER/JLink/JLinkExe
+stm:
+  hex: 170112_v01_0_17_1_170113_v01_4_13.hex
+  part_number: STM32H753VI
+ble:
+  erase_hex: s132_nrf52_7.0.1_softdevice.hex
+  hex: 170086_sig_ble_nrf_v4.4.0.hex
+  part_number: NRF52832_XXAA
+
