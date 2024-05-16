@@ -1,5 +1,5 @@
 name: Build FW Util Action
-run-name: ${{github.actor} is testing GitHub actions for pyinstaller build automation}
+run-name: ${{github.actor}} is testing GitHub actions for pyinstaller build automation}
 on: [push]
 jobs:
   build:
