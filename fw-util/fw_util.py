@@ -8,42 +8,53 @@ import time
 import yaml
 from yaml.loader import SafeLoader
 
+
 def do_flash(cfg, selection, erase):
     """Send appropriate commands to the JLinkEXE"""
+    # Lambda function generating appropriate command / responses for connecting
+    connect_cmd_rsp = lambda pn: {"connect": ".*Type.*",
+                                  f"{cfg['ble']['part_number']}": ".*cJTAG.*",
+                                  "S": ".*Default.*",
+                                  "4000 kHz": ".*4000 kHz.*"}
+
+    # Function generating appropriate command / response for loading file
+    load_file_cmd_rsp = lambda file: {"h": ".*FPSCR.*",
+                                      f"loadfile {file}": ".*O.K..*",
+                                      "r": ".*Reset device.",
+                                      "g": ".* is active.*", }
 
     # Build dictionary of commands / expected responses based on GUI settings
     if selection == 'BL652':
 
+        #    If erase is requested, the bootloader and dfu settings
+        #    are also reloaded
         if erase:
+            load_soft = load_file_cmd_rsp(cfg['ble']['softdevice_hex'])
+            load_bootloader = load_file_cmd_rsp(cfg['ble']['bootloader_hex'])
+            load_dfu_1_settings = load_file_cmd_rsp(cfg['ble']['dfu_settings_1_hex'])
+            load_dfu_2_settings = load_file_cmd_rsp(cfg['ble']['dfu_settings_2_hex'])
             erase_cmd_rsp = {"erase": ".*Erasing done.*",
-                             "h": ".*FPSCR.*",
-                             f"loadfile {cfg['ble']['erase_hex']}": ".*O.K..*",
-                             "r": ".*Reset device.",
-                             "g": ".* is active.*", }
+                             **load_soft,
+                             **load_bootloader,
+                             **load_dfu_1_settings,
+                             **load_dfu_2_settings}
         else:
             erase_cmd_rsp = {}
 
-        cmd_rsp = {"connect": ".*Type.*",
-                   f"{cfg['ble']['part_number']}": ".*cJTAG.*",
-                   "S": ".*Default.*",
-                   "4000 kHz": "Cortex-M4",
+        connect_ble = connect_cmd_rsp(cfg['ble']['part_number'])
+        load_ble_fw = load_file_cmd_rsp(cfg['ble']['app_hex'])
+
+        cmd_rsp = {**connect_ble,
                    **erase_cmd_rsp,
-                   "h": ".*FPSCR.*",
-                   f"loadfile {cfg['ble']['hex']}": ".*O.K.*",
-                   "r": ".*Reset device.*",
-                   "g": ".*is active.*",
+                   **load_ble_fw,
                    "exit": None}
 
     if selection == 'STM32':
-        cmd_rsp = {"connect": ".*Type.*",
-                   f"{cfg['stm']['part_number']}": ".*cJTAG.*",
-                   "S": ".*Default.*",
-                   "4000 kHz": ".*4000 kHz.*",
-                   "h": ".*FPSCR.*",
-                   f"loadfile {cfg['stm']['hex']}": ".*O.K..*",
-                   "r": ".*Reset device.*",
-                   "g": ".*is active.*",
-                   "exit": ".OnDisconnectTarget.*"}
+        connect_stm = connect_cmd_rsp(cfg['stm']['part_number'])
+        load_stm_fw = load_file_cmd_rsp(cfg['stm']['app_hex'])
+        cmd_rsp = {**connect_stm,
+                   **load_stm_fw,
+                   "exit": None}
 
     # Spawn a child application
     ps = pexpect.spawn(cfg['jlink']['exe'], encoding='utf-8')
@@ -54,6 +65,7 @@ def do_flash(cfg, selection, erase):
         ps.sendline(cmd)
         if rsp is not None:
             ps.expect(rsp)
+            print(f"{ps.after}")
 
     time.sleep(1)
 
