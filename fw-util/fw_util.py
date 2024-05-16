@@ -65,7 +65,6 @@ def do_flash(cfg, selection, erase):
 def main():
 
     # Load the YAML file
-
     with open("config.yaml") as f:
         cfg = yaml.load(f, Loader=SafeLoader)
         print(cfg)
@@ -85,13 +84,13 @@ def main():
     sel.set('BL652')
 
     chkbox_erase = tk.Checkbutton(root, text="Erase", variable=erase)
-    button_flash = tk.Button(root, text="Flash", command= lambda: do_flash(cfg, sel.get(), erase.get()))
+    button_flash = tk.Button(root, text="Flash", command=lambda: do_flash(cfg, sel.get(), erase.get()))
 
     #Place
-    ble_rbutton.grid(row=0,column=0, pady=2)
-    chkbox_erase.grid(row=0,column=1, pady=2)
-    stm_rbutton.grid(row=1,column=0, pady=2)
-    button_flash.grid(row=2,column=0, pady=2)
+    ble_rbutton.grid(row=0, column=0, pady=2)
+    chkbox_erase.grid(row=0, column=1, pady=2)
+    stm_rbutton.grid(row=1, column=0, pady=2)
+    button_flash.grid(row=2, column=0, pady=2)
 
     # Start the Tkinter event loop
     root.mainloop()

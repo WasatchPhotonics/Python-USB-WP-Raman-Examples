@@ -2,7 +2,8 @@
 name="fw-util"
 version="1.0.0"
 dependencies=[  "tk ~= 0.1.0",
-                "pexpect ~= 4.9.0"]
+                "pexpect ~= 4.9.0",
+                "yaml ~= 6.0.1"]
 readme = "README.md"
 
 [project.optional-dependencies]
