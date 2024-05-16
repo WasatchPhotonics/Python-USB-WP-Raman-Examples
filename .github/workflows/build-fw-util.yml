@@ -1,30 +1,33 @@
 name: Build fw-util Action
-run-name: Building fw-util for MacOS
+run-name: Building fw-util for MacOS, Windows
 on: [push]
 jobs:
-  Build-MacOS:
-    runs-on: macos-13
+  Build-Matrix:
+    name: Building on {{ matrix.os }}
+    runs-on: {{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-13, windows-latest]
     steps:
-    - name: Check out repository code
-      uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
-    - name: Install dependencies
-      working-directory: ./fw-util
-      run: |
-          pip install '.[build_exe]'
-    - name: Build executable with pyinstaller
-      working-directory: ./fw-util
-      run: |
-          pyinstaller fw_util.py --onefile
-          ls
-          cp *.hex dist/
-          cp config.yaml dist/
-    - name: Uploading build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: fw-util
-        path: |
-          fw-util/dist/*
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+      - name: Install dependencies
+        working-directory: ./fw-util
+        run: |
+            pip install '.[build_exe]'
+      - name: Build executable with pyinstaller
+        working-directory: ./fw-util
+        run: |
+            pyinstaller fw_util.py --onefile
+            cp *.hex dist/
+            cp config.yaml dist/
+      - name: Uploading build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-util
+          path: |
+            fw-util/dist/*
