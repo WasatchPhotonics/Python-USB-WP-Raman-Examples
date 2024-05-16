@@ -15,38 +15,38 @@ def do_flash(cfg, selection, erase):
     if selection == 'BL652':
 
         if erase:
-            erase_cmd_rsp = {"erase":".*Erasing done.*",
-                             "h":".*FPSCR.*",
-                             f"loadfile {cfg['ble']['erase_hex']}":".*O.K..*",
-                             "r":".*Reset device.",
-                             "g":".* is active.*",}
+            erase_cmd_rsp = {"erase": ".*Erasing done.*",
+                             "h": ".*FPSCR.*",
+                             f"loadfile {cfg['ble']['erase_hex']}": ".*O.K..*",
+                             "r": ".*Reset device.",
+                             "g": ".* is active.*", }
         else:
             erase_cmd_rsp = {}
 
-        cmd_rsp = { "connect" : ".*Type.*",
-                    f"{cfg['ble']['part_number']}": ".*cJTAG.*",
-                    "S" : ".*Default.*",
-                    "4000 kHz":"Cortex-M4",
-                    **erase_cmd_rsp,
-                    "h": ".*FPSCR.*",
-                    f"loadfile {cfg['ble']['hex']}" :".*O.K.*",
-                    "r": ".*Reset device.*",
-                    "g": ".*is active.*",
-                    "exit": None}
+        cmd_rsp = {"connect": ".*Type.*",
+                   f"{cfg['ble']['part_number']}": ".*cJTAG.*",
+                   "S": ".*Default.*",
+                   "4000 kHz": "Cortex-M4",
+                   **erase_cmd_rsp,
+                   "h": ".*FPSCR.*",
+                   f"loadfile {cfg['ble']['hex']}": ".*O.K.*",
+                   "r": ".*Reset device.*",
+                   "g": ".*is active.*",
+                   "exit": None}
 
     if selection == 'STM32':
-        cmd_rsp = { "connect" : ".*Type.*",
-                    f"{cfg['stm']['part_number']}" : ".*cJTAG.*",
-                    "S" : ".*Default.*",
-                    "4000 kHz" : ".*4000 kHz.*",
-                    "h" : ".*J-Link>.*",
-                    f"loadfile {cfg['stm']['hex']}" : f".*O.K..*",
-                    "r" : ".*Reset device.*",
-                    "g" : ".*is active.*",
-                    "exit" : ".OnDisconnectTarget.*"}
+        cmd_rsp = {"connect": ".*Type.*",
+                   f"{cfg['stm']['part_number']}": ".*cJTAG.*",
+                   "S": ".*Default.*",
+                   "4000 kHz": ".*4000 kHz.*",
+                   "h": ".*FPSCR.*",
+                   f"loadfile {cfg['stm']['hex']}": ".*O.K..*",
+                   "r": ".*Reset device.*",
+                   "g": ".*is active.*",
+                   "exit": ".OnDisconnectTarget.*"}
 
     # Spawn a child application
-    ps = pexpect.spawn(f"{cfg['jlink']['exe']}", encoding='utf-8')
+    ps = pexpect.spawn(cfg['jlink']['exe'], encoding='utf-8')
 
     # Loop through each command / response
     for cmd, rsp in cmd_rsp.items():
@@ -63,7 +63,6 @@ def do_flash(cfg, selection, erase):
 
 
 def main():
-
     # Load the YAML file
     with open("config.yaml") as f:
         cfg = yaml.load(f, Loader=SafeLoader)
@@ -95,6 +94,6 @@ def main():
     # Start the Tkinter event loop
     root.mainloop()
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     main()
