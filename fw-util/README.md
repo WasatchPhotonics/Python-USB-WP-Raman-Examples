@@ -16,6 +16,10 @@ Provides a minimal GUI for flashing STM and BLE chipsets.
 6. Select whether to flash `BLE652` or `STM32`. For `BLE652` there is an optional erase checkbox that will erase it first.
 7. Click the `Flash` button and watch the magic happen.
 
+# Configuration
+1. JLink executable, hex files and microcontroller part number are stored in the `config.yaml` file
+2. Edit this file using a text editor to adapt to your environment and needs
+
 # How to build into an executable
 1. Activate your virtual environment and install optional dependencies (only need to do 1x)
    1. `. venv/bin/activate`
