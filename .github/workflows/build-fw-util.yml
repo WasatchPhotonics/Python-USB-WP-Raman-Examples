@@ -3,7 +3,7 @@ run-name: Building fw-util for Windows
 on: [push]
 jobs:
   Build-Windows:
-    runs-on: windows-latest
+    runs-on: macos-latest
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
@@ -26,4 +26,4 @@ jobs:
       with:
         name: fw-util
         path: |
-          dist/*
+          fw-util/dist/*
