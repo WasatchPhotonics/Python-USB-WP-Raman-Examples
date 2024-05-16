@@ -1,0 +1,26 @@
+name: build-fw-util
+
+run-name: ${{github.actor} is testing GitHub actions for pyinstaller build automation}
+
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['windows-latest', 'ubuntu-latest, 'macos-latest']
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2
+      with:
+        python-version: 3.11
+
+    - run: pip install '.[build_exe]'
+    - run: pyinstaller fw_util.py --onefile
+    # Optionally verify that it works (provided that it does not need user interaction)
+    - run: ./dist/your-code
+    - uses: actions/upload-artifact@v2
+      with:
+        path: dist/*
