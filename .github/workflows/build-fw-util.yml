@@ -7,19 +7,23 @@ jobs:
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
-    - uses: actions/setup-python@v2
+    - uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
     - name: Install dependencies
-      run: pip install 'fw-util/[build_exe]'
+      run: |
+          cd fw-util
+          pip install '.[build_exe]'
     - name: Build executable with pyinstaller
-      run: pyinstaller fw-util/fw_util.py --onefile
+      run: |
+          pyinstaller fw_util.py --onefile
+          cp *.hex dist/
+          cp config.yaml dist/
     - name: Uploading build artifact
       uses: actions/upload-artifact@v4
       with:
         name: fw-util
         path: |
           dist/*
-          fw_util/170086_sig_ble_nrf_v4.4.0.hex
-          fw_util/config.yaml
+ 
