@@ -14,7 +14,7 @@ jobs:
     - name: Install dependencies
       run: pip install 'fw-util/[build_exe]'
     - name: Build executable with pyinstaller
-      run: pyinstaller fw_util.py --onefile
+      run: pyinstaller fw-util/fw_util.py --onefile
     - run: echo "🍏 This job's status is ${{ job.status }}."
     # Optionally verify that it works (provided that it does not need user interaction)
 #    - run: ./dist/your-code
