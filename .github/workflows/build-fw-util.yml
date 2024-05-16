@@ -12,7 +12,7 @@ jobs:
         python-version: 3.11
     - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
     - name: Install dependencies
-      run: pip install '.[build_exe]'
+      run: pip install 'fw-util/[build_exe]'
     - name: Build executable with pyinstaller
       run: pyinstaller fw_util.py --onefile
     - run: echo "🍏 This job's status is ${{ job.status }}."
