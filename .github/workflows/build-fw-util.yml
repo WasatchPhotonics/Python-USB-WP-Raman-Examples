@@ -16,7 +16,7 @@ jobs:
     - name: Build executable with pyinstaller
       run: pyinstaller fw-util/fw_util.py --onefile
     - name: Uploading build artifact
-    - uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v2
       with:
         name: fw-util
         path: dist/*
