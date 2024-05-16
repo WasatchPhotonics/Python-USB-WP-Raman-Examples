@@ -5,11 +5,9 @@ run-name: ${{github.actor} is testing GitHub actions for pyinstaller build autom
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     strategy:
       fail-fast: false
-      matrix:
-        os: ['windows-latest', 'ubuntu-latest, 'macos-latest']
 
     steps:
     - uses: actions/checkout@v2
