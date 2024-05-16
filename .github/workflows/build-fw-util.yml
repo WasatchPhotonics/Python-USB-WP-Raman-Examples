@@ -3,12 +3,12 @@ run-name: Building fw-util for MacOS, Windows
 on: [push]
 jobs:
   Build-Matrix:
-    name: Building on {{ matrix.os }}
-    runs-on: {{ matrix.os }}
     strategy:
       matrix:
         os: [macos-13, windows-latest]
+    runs-on: {{ matrix.os }}
     steps:
+      - run: echo " Building for {{ matrix.os }}."
       - name: Check out repository code
         uses: actions/checkout@v4
       - uses: actions/setup-python@v5
