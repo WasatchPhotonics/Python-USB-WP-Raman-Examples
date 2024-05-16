@@ -17,6 +17,7 @@ jobs:
           pip install '.[build_exe]'
     - name: Build executable with pyinstaller
       run: |
+          cd fw-util
           pyinstaller fw_util.py --onefile
           cp *.hex dist/
           cp config.yaml dist/
@@ -26,4 +27,3 @@ jobs:
         name: fw-util
         path: |
           dist/*
- 
