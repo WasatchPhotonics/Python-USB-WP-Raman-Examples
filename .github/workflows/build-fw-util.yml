@@ -2,11 +2,8 @@ name: Build fw-util Action
 run-name: Building fw-util for MacOS, Windows
 on: [ push ]
 jobs:
-  build_all:
-    strategy:
-      matrix:
-        os: [ macos-13, windows-latest ]
-    runs-on: ${ { matrix.os } }
+  build_mac:
+    runs-on: macos-13
     steps:
       - run: echo " Building for ${{ matrix.os }}."
       - name: Check out repository code
