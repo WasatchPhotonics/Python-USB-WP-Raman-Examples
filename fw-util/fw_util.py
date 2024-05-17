@@ -147,6 +147,11 @@ class FlashGUI:
             cmd_queue.put((k, v))
 
         self.run_flag = True
+
+        """ Loop through the queue of commands and transmit to the Jlink program.
+            For each command sent, check for appropriate response indicating success.
+        """
+
         while not cmd_queue.empty() and self.run_flag:
             cmd, rsp = cmd_queue.get()
 
@@ -163,13 +168,14 @@ class FlashGUI:
                 logger.error(f"Error while flashing. Halting.\n"
                              f"Last command: {cmd}\n"
                              f"Error message: {err}.")
+
                 jlink_ps.close()
 
                 logger.error("Flashing process failed.")
                 return
 
 
-        # Close the child process
+        # Close the child application
         jlink_ps.close()
 
         self.run_flag = False
@@ -178,7 +184,9 @@ class FlashGUI:
         logger.info("Flashing process completed succesfully.")
 
     def flash(self):
-        """Send appropriate commands to the JLinkEXE"""
+        """ Send appropriate commands to the JLinkEXE
+        """
+
         # Lambda function generating appropriate command / responses for connecting
         connect_cmd_rsp = lambda pn: {"connect": ".*Type.*",
                                       f"{self.cfg['ble']['part_number']}": ".*cJTAG.*",
