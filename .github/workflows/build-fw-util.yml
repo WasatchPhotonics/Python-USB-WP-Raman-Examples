@@ -25,7 +25,7 @@ jobs:
       - name: Uploading build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fw-util
+          name: fw-util-macos13
           path: |
             fw-util/dist/*
   build_windows:
@@ -51,6 +51,6 @@ jobs:
       - name: Uploading build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fw-util
+          name: fw-util-win2022
           path: |
             fw-util/dist/*
