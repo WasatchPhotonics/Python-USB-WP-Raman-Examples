@@ -17,6 +17,8 @@ LOG_FILE = "fw_util.log"
 logger = logging.getLogger(__name__)
 
 class TextHandler(logging.Handler):
+    """Custom log hander to send messages to GUI"""
+
     def __init__(self, textbox):
         super().__init__()
         self.textbox = textbox
@@ -36,14 +38,13 @@ class TextHandler(logging.Handler):
 
 
 class FlashGUI:
-
+    """Class encapsulating program GUI and functionality"""
     def __init__(self, root):
 
         self.cfg = None
         self.root = root
 
-        self.cmd_queue = Queue()
-        self.jlink_ps = None
+        # Flag indicating if commands are being sent to JLink program
         self.run_flag = False
 
         # Gui elements
@@ -133,6 +134,9 @@ class FlashGUI:
 
     def run_jlink(self, cmd_rsp):
 
+        # Queue storing all the commands that will be sent to the JLink program
+        cmd_queue = Queue()
+
         # Disable flash button while running
         self.flash_btn.config(state=tk.DISABLED)
 
@@ -140,11 +144,11 @@ class FlashGUI:
 
         # Load command / responses into queue as tuples
         for k, v in cmd_rsp.items():
-            self.cmd_queue.put((k, v))
+            cmd_queue.put((k, v))
 
         self.run_flag = True
-        while not self.cmd_queue.empty() and self.run_flag:
-            cmd, rsp = self.cmd_queue.get()
+        while not cmd_queue.empty() and self.run_flag:
+            cmd, rsp = cmd_queue.get()
 
             try:
                 logger.debug(f"Sending: {cmd}, expecting: {rsp}.\n")
