@@ -1,7 +1,6 @@
 """
 fw_util.py - Minimal GUI for flashing STM and BLE
 """
-
 import pexpect
 import tkinter as tk
 import time
@@ -9,12 +8,13 @@ import yaml
 import logging
 import threading
 from queue import Queue
-
 from os.path import isfile
 
-# Setup the logger and connect
-logger = logging.getLogger(__name__)
+CONFIG_FILE = "config.yaml"
+LOG_FILE = "fw_util.log"
 
+# Set up the logger and connect
+logger = logging.getLogger(__name__)
 
 class TextHandler(logging.Handler):
     def __init__(self, textbox):
@@ -59,16 +59,15 @@ class FlashGUI:
         # Configure main window
         self.setup_gui()
 
-        # Configure logging
-
         # Logging to text box is through a custom handler
         gui_handler = TextHandler(self.log_txt)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        gui_handler.setFormatter(formatter)
+        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
         logger.addHandler(gui_handler)
 
         # Logging to file
-        logger.addHandler(logging.FileHandler('fw_util.log'))
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
 
         logger.setLevel(logging.DEBUG)
 
@@ -79,7 +78,7 @@ class FlashGUI:
     def load_cfg(self):
         """Load and validate the configuration file"""
         try:
-            with open("config.yaml") as f:
+            with open(CONFIG_FILE) as f:
                 self.cfg = yaml.load(f, Loader=yaml.loader.SafeLoader)
                 logger.debug("Loaded config.yaml.")
         except:
