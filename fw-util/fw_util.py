@@ -1,7 +1,8 @@
 """
 fw_util.py - Minimal GUI for flashing STM and BLE
 """
-import pexpect
+
+import os
 import tkinter as tk
 import time
 import yaml
@@ -9,6 +10,11 @@ import logging
 import threading
 from queue import Queue
 from os.path import isfile
+
+if os.name == 'Linux' or os.name == 'Darwin':
+    from pexpect import spawn
+else:
+    from wexpect import spawn
 
 CONFIG_FILE = "config.yaml"
 LOG_FILE = "fw_util.log"
@@ -140,7 +146,7 @@ class FlashGUI:
         # Disable flash button while running
         self.flash_btn.config(state=tk.DISABLED)
 
-        jlink_ps = pexpect.spawn(self.cfg['jlink']['exe'], encoding='utf-8')
+        jlink_ps = spawn(self.cfg['jlink']['exe'], encoding='utf-8')
 
         # Load command / responses into queue as tuples
         for c in cmd_rsp:
