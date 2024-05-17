@@ -143,8 +143,8 @@ class FlashGUI:
         jlink_ps = pexpect.spawn(self.cfg['jlink']['exe'], encoding='utf-8')
 
         # Load command / responses into queue as tuples
-        for k, v in cmd_rsp.items():
-            cmd_queue.put((k, v))
+        for c in cmd_rsp:
+            cmd_queue.put(c)
 
         self.run_flag = True
 
@@ -153,12 +153,17 @@ class FlashGUI:
         """
 
         while not cmd_queue.empty() and self.run_flag:
-            cmd, rsp = cmd_queue.get()
+            cmd, rsp, msg = cmd_queue.get()
 
             try:
                 logger.debug(f"Sending: {cmd}, expecting: {rsp}.\n")
+                if msg is not None:
+                    logger.info(msg)
+
                 jlink_ps.sendline(cmd)
+
                 time.sleep(1)
+
                 if rsp is not None:
                     logger.debug(f"checking for response: {rsp}")
                     jlink_ps.expect(rsp)
@@ -188,16 +193,17 @@ class FlashGUI:
         """
 
         # Lambda function generating appropriate command / responses for connecting
-        connect_cmd_rsp = lambda pn: {"connect": ".*Type.*",
-                                      f"{self.cfg['ble']['part_number']}": ".*cJTAG.*",
-                                      "S": ".*Default.*",
-                                      "4000 kHz": ".*4000 kHz.*"}
+        # Stored as a list of lists, where content is: COMMAND, EXPECTED RESPONSE, LOG MESSAGE
+        connect_cmd_rsp = lambda pn: [["connect", ".*Type.*", "Connecting to JLink Segger"],
+                                      [f"{pn}", ".*cJTAG.*", f"Connecting to {pn}"],
+                                      ["S", ".*Default.*", "Setting to SWD"],
+                                      ["4000 kHz", ".*4000 kHz.*", "Setting frequency to 4000 kHz"]]
 
         # Function generating appropriate command / response for loading file
-        load_file_cmd_rsp = lambda file: {"h": ".*FPSCR.*",
-                                          f"loadfile {file}": ".*O.K..*",
-                                          "r": ".*Reset device.",
-                                          "g": ".* is active.*", }
+        load_file_cmd_rsp = lambda file: [["h", ".*FPSCR.*", "Halting"],
+                                          [f"loadfile {file}", ".*O.K..*", f"Flashing contents of {file}"],
+                                          ["r", ".*Reset device.","Resetting the device"],
+                                          ["g", ".* is active.*", "Starting the device"]]
 
         # Build dictionary of commands / expected responses based on GUI settings
         if self.which_chip.get() == 'BL652':
@@ -212,30 +218,31 @@ class FlashGUI:
                 load_bootloader = load_file_cmd_rsp(self.cfg['ble']['bootloader_hex'])
                 load_dfu_1_settings = load_file_cmd_rsp(self.cfg['ble']['dfu_settings_1_hex'])
                 load_dfu_2_settings = load_file_cmd_rsp(self.cfg['ble']['dfu_settings_2_hex'])
-                erase_cmd_rsp = {"erase": ".*Erasing done.*",
-                                 **load_soft,
-                                 **load_bootloader,
-                                 **load_dfu_1_settings,
-                                 **load_dfu_2_settings}
+
+                erase_cmd_rsp = [["erase", ".*Erasing done.*","Erasing the device"],
+                                 *load_soft,
+                                 *load_bootloader,
+                                 *load_dfu_1_settings,
+                                 *load_dfu_2_settings]
             else:
-                erase_cmd_rsp = {}
+                erase_cmd_rsp = []
 
             connect_ble = connect_cmd_rsp(self.cfg['ble']['part_number'])
             load_ble_fw = load_file_cmd_rsp(self.cfg['ble']['app_hex'])
 
-            cmd_rsp = {**connect_ble,
-                       **erase_cmd_rsp,
-                       **load_ble_fw,
-                       "exit": None}
+            cmd_rsp = [*connect_ble,
+                       *erase_cmd_rsp,
+                       *load_ble_fw,
+                       ["exit", None, None]]
 
         if self.which_chip.get() == 'STM32':
             logger.info("Flashing STM32")
             connect_stm = connect_cmd_rsp(self.cfg['stm']['part_number'])
             load_stm_fw = load_file_cmd_rsp(self.cfg['stm']['app_hex'])
 
-            cmd_rsp = {**connect_stm,
-                       **load_stm_fw,
-                       "exit": None}
+            cmd_rsp = [*connect_stm,
+                       *load_stm_fw,
+                       ["exit", None, None]]
 
         # Spawn a child application
         if self.run_flag is False:
