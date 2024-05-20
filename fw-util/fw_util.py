@@ -2,16 +2,17 @@
 fw_util.py - Minimal GUI for flashing STM and BLE
 """
 
-import os
+from platform import system
 import tkinter as tk
 import time
 import yaml
 import logging
 import threading
 from queue import Queue
-from os.path import isfile
+from os.path import isfile, normpath
 
-if os.name == 'Linux' or os.name == 'Darwin':
+# Use wexpect package on windows, since pexepect is not available
+if system() == 'Linux' or system() == 'Darwin':
     from pexpect import spawn
 else:
     from wexpect import spawn
@@ -88,6 +89,16 @@ class FlashGUI:
             with open(CONFIG_FILE) as f:
                 self.cfg = yaml.load(f, Loader=yaml.loader.SafeLoader)
                 logger.debug("Loaded config.yaml.")
+
+                # Normalize the path to the executable
+                # This helps to keep things working across multiple platforms
+                self.cfg['jlink']['exe'] = normpath(self.cfg['jlink']['exe'])
+
+                # For wexpect on Windows we also need to both wrap the path in single quotes (in case it has spaces)
+                # And also convert all single to double slashes
+                if system() == 'Windows':
+                    self.cfg['jlink']['exe'] = f"'{self.cfg['jlink']['exe']}'"
+
         except:
             logger.error("Error loading the config.yaml file.")
 
@@ -146,7 +157,10 @@ class FlashGUI:
         # Disable flash button while running
         self.flash_btn.config(state=tk.DISABLED)
 
-        jlink_ps = spawn(self.cfg['jlink']['exe'], encoding='utf-8')
+        # Launch the JLink executable
+        jlink_ps = spawn(self.cfg['jlink']['exe'],
+                         encoding='utf-8',
+                         timeout=5)
 
         # Load command / responses into queue as tuples
         for c in cmd_rsp:
@@ -200,12 +214,14 @@ class FlashGUI:
 
         # Lambda function generating appropriate command / responses for connecting
         # Stored as a list of lists, where content is: COMMAND, EXPECTED RESPONSE, LOG MESSAGE
+
         connect_cmd_rsp = lambda pn: [["connect", ".*Type.*", "Connecting to JLink Segger"],
                                       [f"{pn}", ".*cJTAG.*", f"Connecting to {pn}"],
                                       ["S", ".*Default.*", "Setting to SWD"],
                                       ["4000 kHz", ".*4000 kHz.*", "Setting frequency to 4000 kHz"]]
 
         # Function generating appropriate command / response for loading file
+
         load_file_cmd_rsp = lambda file: [["h", ".*FPSCR.*", "Halting"],
                                           [f"loadfile {file}", ".*O.K..*", f"Flashing contents of {file}"],
                                           ["r", ".*Reset device.","Resetting the device"],
@@ -216,8 +232,7 @@ class FlashGUI:
 
             logger.info(f"Flashing BLE chip.")
 
-            #    If erase is requested, the bootloader and dfu settings
-            #    are also reloaded.
+       # If erase is requested, the bootloader and dfu settings are also reloaded.
 
             if self.erase.get():
                 load_soft = load_file_cmd_rsp(self.cfg['ble']['softdevice_hex'])
