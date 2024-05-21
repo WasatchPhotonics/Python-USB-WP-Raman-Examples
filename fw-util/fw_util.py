@@ -10,12 +10,19 @@ import logging
 import threading
 from queue import Queue
 from os.path import isfile, normpath
+import signal
 
-# Use wexpect package on windows, since pexepect is not available
-if system() == 'Linux' or system() == 'Darwin':
-    from pexpect import spawn
+# Import different package on Windows
+IS_WINDOWS = system() == 'Windows'
+
+if IS_WINDOWS:
+    import pexpect
+    import pexpect.popen_spawn
+    from pexpect.popen_spawn import PopenSpawn
 else:
-    from wexpect import spawn
+    from pexpect import spawn
+
+
 
 CONFIG_FILE = "config.yaml"
 LOG_FILE = "fw_util.log"
@@ -94,10 +101,14 @@ class FlashGUI:
                 # This helps to keep things working across multiple platforms
                 self.cfg['jlink']['exe'] = normpath(self.cfg['jlink']['exe'])
 
-                # For wexpect on Windows we also need to both wrap the path in single quotes (in case it has spaces)
+                # On Windows we also need to both wrap the path in single quotes (in case it has spaces)
                 # And also convert all single to double slashes
-                if system() == 'Windows':
-                    self.cfg['jlink']['exe'] = f"'{self.cfg['jlink']['exe']}'"
+
+                if IS_WINDOWS:
+                    self.cfg['jlink']['exe'].replace("\\", r"/")
+                    logger.debug(f"Path to exe {self.cfg['jlink']['exe']}")
+
+                # debugging
 
         except:
             logger.error("Error loading the config.yaml file.")
@@ -151,62 +162,78 @@ class FlashGUI:
 
     def run_jlink(self, cmd_rsp):
 
-        # Queue storing all the commands that will be sent to the JLink program
-        cmd_queue = Queue()
-
         # Disable flash button while running
         self.flash_btn.config(state=tk.DISABLED)
 
         # Launch the JLink executable
-        jlink_ps = spawn(self.cfg['jlink']['exe'],
-                         encoding='utf-8',
-                         timeout=5)
+        jlink_exe = self.cfg['jlink']['exe']
+        jlink_ps = PopenSpawn(f'"{jlink_exe}"', encoding='utf-8', timeout=5)
 
-        # Load command / responses into queue as tuples
+        # Load command / responses into a Queue
+        cmd_queue = Queue()
         for c in cmd_rsp:
             cmd_queue.put(c)
 
         self.run_flag = True
 
-        """ Loop through the queue of commands and transmit to the Jlink program.
-            For each command sent, check for appropriate response indicating success.
-        """
+        # Loop through the queue of commands and transmit to the Jlink program.
+        # For each command sent, check for appropriate response indicating success.
+        # Note that on Windows, pexpect doesn't seem to be reading from the stdin stream
+        # So we are not able to verify responses as we are in Linux/Mac
 
         while not cmd_queue.empty() and self.run_flag:
             cmd, rsp, msg = cmd_queue.get()
 
             try:
-                logger.debug(f"Sending: {cmd}, expecting: {rsp}.\n")
+                logger.debug(f"Sending: {cmd}, expecting: {rsp}.")
+
+                # If provided, display status message to UI
                 if msg is not None:
                     logger.info(msg)
 
-                jlink_ps.sendline(cmd)
+                jlink_ps.sendline(f"{cmd}\r\n")
 
-                time.sleep(1)
+                time.sleep(3)
 
+                # If expected response is provided, check for it
                 if rsp is not None:
-                    logger.debug(f"checking for response: {rsp}")
-                    jlink_ps.expect(rsp)
-                    logger.debug(f"{jlink_ps.before}")
+                    logger.debug(f"Checking for response: {rsp}")
+
+                    # For Windows, the second option in the expect list is regex for anything
+
+                    if IS_WINDOWS:
+                        expected = [rsp, "[\s\S]*", pexpect.TIMEOUT]
+                    else:
+                        expected = [rsp, pexpect.TIMEOUT]
+
+                    res_index = jlink_ps.expect(expected)
+
+                    # Timeout is never expected
+                    if expected[res_index] == pexpect.TIMEOUT:
+                        logger.error("Timeout occured while communicating with JLink")
+
+                    logger.debug(f"Result: {jlink_ps.before}\n, expected item found = {expected[res_index]}")
 
             except Exception as err:
                 logger.error(f"Error while flashing. Halting.\n"
                              f"Last command: {cmd}\n"
-                             f"Error message: {err}.")
+                             f"Error message: {err}")
 
-                jlink_ps.close()
+                logger.error("Flashing process failed\n")
 
-                logger.error("Flashing process failed.")
-                return
+                break
 
-
-        # Close the child application
-        jlink_ps.close()
+        # Wait for 10 seconds after sending all the commands to make sure they are processed
+        # This is only necessary on Windows since Pexpect does not work as expected.
+        if IS_WINDOWS:
+            time.sleep(10)
+        else:
+            jlink_ps.close()
 
         self.run_flag = False
         self.flash_btn.config(state=tk.ACTIVE)
 
-        logger.info("Flashing process completed succesfully.")
+        logger.info("Flashing process completed successfully.")
 
     def flash(self):
         """ Send appropriate commands to the JLinkEXE
@@ -265,7 +292,7 @@ class FlashGUI:
                        *load_stm_fw,
                        ["exit", None, None]]
 
-        # Spawn a child application
+        # Spawn a child application for sending/receiving to the JLink executable to enable UI to remain responsive
         if self.run_flag is False:
             logger.debug("Launching JLink run thread.")
             jlink_thread = threading.Thread(target=self.run_jlink, args=(cmd_rsp,))
