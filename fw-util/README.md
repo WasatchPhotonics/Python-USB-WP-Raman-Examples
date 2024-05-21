@@ -17,8 +17,10 @@ Provides a minimal GUI for flashing STM and BLE chipsets.
 7. Click the `Flash` button and watch the magic happen.
 
 # Configuration
-1. JLink executable, hex files and microcontroller part number are stored in the `config.yaml` file
-2. Edit this file using a text editor to adapt to your environment and needs
+1. JLink executable, hex files and microcontroller part number are stored in the `config.yaml` file.
+2. Edit this file using a text editor to adapt to your configuration.
+   1.    On Windows, the executable typically lives here: `C:\Program Files\SEGGER\JLink_V796g\JLink.exe`
+   2.    On macOS, the executable typically lives here: `/Applications/SEGGER/JLink/JLinkExe` 
 
 # How to build into an executable
 1. Activate your virtual environment and install optional dependencies (only need to do 1x)
@@ -29,3 +31,7 @@ Provides a minimal GUI for flashing STM and BLE chipsets.
 
 # Requirements
 - JLink `https://www.segger.com/downloads/jlink/` (tested with V7.6G)
+
+# Notes
+1. This has been tested on both Windows and macOS.
+2. The program is not currently able to read responses from the executable when running on Windows. This will reduce the amount of feedback and checks available when run on this platform. This is due to differences in the `pexpect` packages for macOS/Linux and Windows
