@@ -10,13 +10,12 @@ import logging
 import threading
 from queue import Queue
 from os.path import isfile, normpath
-import signal
+import pexpect
 
 # Import different package on Windows
 IS_WINDOWS = system() == 'Windows'
 
 if IS_WINDOWS:
-    import pexpect
     import pexpect.popen_spawn
     from pexpect.popen_spawn import PopenSpawn
 else:
@@ -167,7 +166,11 @@ class FlashGUI:
 
         # Launch the JLink executable
         jlink_exe = self.cfg['jlink']['exe']
-        jlink_ps = PopenSpawn(f'"{jlink_exe}"', encoding='utf-8', timeout=5)
+
+        if IS_WINDOWS:
+            jlink_ps = PopenSpawn(f'"{jlink_exe}"', encoding='utf-8', timeout=5)
+        else:
+            jlink_ps = spawn(jlink_exe, encoding='utf-8')
 
         # Load command / responses into a Queue
         cmd_queue = Queue()
@@ -191,7 +194,7 @@ class FlashGUI:
                 if msg is not None:
                     logger.info(msg)
 
-                jlink_ps.sendline(f"{cmd}\r\n")
+                jlink_ps.sendline(cmd)
 
                 time.sleep(3)
 
@@ -211,6 +214,8 @@ class FlashGUI:
                     # Timeout is never expected
                     if expected[res_index] == pexpect.TIMEOUT:
                         logger.error("Timeout occured while communicating with JLink")
+                        logger.error("Flashing process failed")
+                        break
 
                     logger.debug(f"Result: {jlink_ps.before}\n, expected item found = {expected[res_index]}")
 
@@ -219,7 +224,7 @@ class FlashGUI:
                              f"Last command: {cmd}\n"
                              f"Error message: {err}")
 
-                logger.error("Flashing process failed\n")
+                logger.error("Flashing process failed")
 
                 break
 
