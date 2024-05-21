@@ -1,5 +1,5 @@
 jlink:
-  exe: /Applications/SEGGER/JLink/JLinkExe
+  exe: C:\Program Files\SEGGER\JLink_V796g\JLink.exe
 stm:
   part_number: STM32H753VI
   app_hex: 170112_v01_0_17_1_170113_v01_4_15.hex
