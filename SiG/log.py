@@ -2,7 +2,7 @@
 
 import sys
 import usb.core
-
+import argparse
 import time
 import datetime
 from time import sleep
@@ -27,7 +27,7 @@ def get_next_log():
     len = raw[0]
     if len == 0:
        #print("No fresh log entries ... ")
-       print(".")
+       #print(".")
        sleep(1)
     else:
        logStr=""
@@ -36,8 +36,29 @@ def get_next_log():
            logStr += chr(i)
            if i == 0:
               break
-       print(datetime.datetime.now(), logStr)
        
-      
+       disp = True
+
+       if args.filter is not None:
+          disp = False
+
+          if "ble-ka" in args.filter:
+              if "BLE-T KA" in logStr or "BLE-R KA" in logStr:
+                disp = True
+
+          if "batt" in args.filter:
+             if "B_I" in logStr or "B_V" in logStr or "B_S" in logStr or "(UB) SOC" in logStr:
+                disp = True
+       if disp:
+          print(datetime.datetime.now(), logStr)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--filter", type=str, help="filter topics. Example: --filter=batt, ble-ka")
+args = parser.parse_args()
+
+if args.filter is not None:
+    print("Filter topics {}".format(args.filter))
+
 while (1):
   get_next_log();
