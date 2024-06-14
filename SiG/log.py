@@ -25,9 +25,12 @@ SIG_LOG_USB_CMD=0x81
 def get_next_log():
     raw = dev.ctrl_transfer(DEVICE_TO_HOST, SIG_LOG_USB_CMD, 0x0, 0, 64, TIMEOUT_MS)
     len = raw[0]
+    #print("-----------------------------------------------------------------")
+    #print("log len ", len)
+    #print(raw)
     if len == 0:
        #print("No fresh log entries ... ")
-       #print(".")
+       print(".")
        sleep(1)
     else:
        logStr=""
