@@ -76,7 +76,7 @@ print("Looping over %d spectra (lines)" % args.count)
 for linenum in range(args.count):
 
     # read spectrum
-    data = dev.read(0x82, args.pixels * 2)
+    data = dev.read(0x82, args.pixels*2)
 
     spectrum = []
     for i in range(0, len(data), 2):
