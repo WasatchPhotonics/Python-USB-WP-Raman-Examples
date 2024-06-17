@@ -72,6 +72,8 @@ EEPROM_FIELDS = [
     ((3, 44,  4), "I", "max_integ"),
     ((3, 48,  4), "f", "avg_resolution"),
     ((3, 52,  2), "H", "laser_watchdog_sec"),
+    ((3, 55,  2), "H", "power_watchdog_sec"),
+    ((3, 57,  2), "H", "detector_timeout_sec"),
     ((4,  0, 64), "s", "user_data"),
     ((5, 30, 16), "s", "product_configuration"),
     ((5, 63,  1), "B", "subformat")
