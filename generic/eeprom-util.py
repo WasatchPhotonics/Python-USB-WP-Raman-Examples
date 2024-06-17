@@ -201,11 +201,11 @@ class Fixture(object):
                 ################################################################
 
                 if filetype == "ENLIGHTEN_LOG":
-                    m = re.search("GET_MODEL_CONFIG\((\d)\)", line)
+                    m = re.search(r"GET_MODEL_CONFIG\((\d)\)", line)
                     if not m:
                         raise Exception("can't parse page number")
                     page = int(m.group(1))
-                    m = re.search("array\('B', \[([0-9, ]+)\]\)", line)
+                    m = re.search(r"array\('B', \[([0-9, ]+)\]\)", line)
                     if not m:
                         raise Exception("can't parse data")
                     delimited = m.group(1)
@@ -307,7 +307,7 @@ class Fixture(object):
     def confirm(self, msg):
         print(msg)
         cont = input("\n\nContinue? (y/N) ")
-        return cont.lower() == "y"
+        return "y" in cont.lower()
 
     def do_verify(self):
         IMMUTABLE = r"c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 00 " \
