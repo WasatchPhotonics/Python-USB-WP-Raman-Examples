@@ -35,6 +35,7 @@ class Fixture(object):
         parser.add_argument("--debug",                  action="store_true", help="debug output")
         parser.add_argument("--enable",                 action="store_true", help="fire laser")
         parser.add_argument("--watchdog-sec",           type=int,            help="laser watchdog (seconds)")
+        parser.add_argument("--laser-warning-sec",      type=int,            help="laser warning delay (seconds)")
         parser.add_argument("--max-ms",                 type=int,            help="firing time (ms) (default 1000)", default=1000)
         parser.add_argument("--mod-enable",             action="store_true", help="enable modulation")
         parser.add_argument("--mod-period-us",          type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
@@ -67,6 +68,9 @@ class Fixture(object):
             self.set_modulation_params()
         else:
             self.set_modulation_enable(False)
+
+        if self.args.laser_warning_sec is not None:
+            self.set_laser_warning_delay_sec(self.args.laser_warning_sec)
 
         self.set_enable(True)
 
@@ -106,12 +110,18 @@ class Fixture(object):
     # opcodes
     ############################################################################
 
+    def set_laser_warning_delay_sec(self, sec):
+        print(f"Setting laser warning delay to {sec} seconds")
+        return self.send_cmd(0x8a, sec)
+
     def set_laser_watchdog(self, sec):
         print(f"Setting watchdog to {sec} seconds")
         return self.send_cmd(0xff, 0x18, sec)
 
     def get_battery_level(self):
         raw = self.get_cmd(0xff, 0x13, 3)
+        if raw is None or len(raw) < 3:
+            return f"ERROR: cannot read battery: {raw}"
         percentage = raw[1] + (1.0 * raw[0] / 256.0)
         charging = raw[2] != 0
         return f"%s (%.2f%%) (%s)" % (raw, percentage, "charging" if charging else "not charging")
