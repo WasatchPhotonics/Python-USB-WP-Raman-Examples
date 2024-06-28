@@ -238,14 +238,14 @@ BLE_DFU_RC_TGT_RESP_EXTENDED_ERROR_BASE = 256
 
 BLE_DFU_RC_TGT_RESP_ERROR_BASE
 
-BLE_DFU_objExecCmdMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE, SLIP_BYTE_END]
-BLE_DFU_getMTUMsg =  [2, BLE_DFU_OP_MTU_GET, SLIP_BYTE_END]
-BLE_DFU_objSelMsg =  [3, BLE_DFU_OP_OBJECT_SELECT, 0xff, SLIP_BYTE_END]
-BLE_DFU_createObjReqMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, 0xff, 0, 0, 0, 0, SLIP_BYTE_END]
-BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET, SLIP_BYTE_END] 
-BLE_DFU_execReqMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE, SLIP_BYTE_END]
-BLE_DFU_abortReqMsg = [2, BLE_DFU_OP_ABORT, SLIP_BYTE_END]
-BLE_DFU_fwVerReqMsg = [3, BLE_DFU_OP_FIRMWARE_VERSION, BLE_DFU_FW_TYPE_APPLICATION_IMAGE_NR, SLIP_BYTE_END]
+BLE_DFU_objExecCmdMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE]
+BLE_DFU_getMTUMsg =  [2, BLE_DFU_OP_MTU_GET]
+BLE_DFU_objSelMsg =  [3, BLE_DFU_OP_OBJECT_SELECT, 0xff]
+BLE_DFU_createObjReqMsg = [7,  BLE_DFU_OP_OBJECT_CREATE, 0xff, 0, 0, 0, 0]
+BLE_DFU_getCRCReqMsg = [2, BLE_DFU_OP_CRC_GET]
+BLE_DFU_execReqMsg = [2, BLE_DFU_OP_OBJECT_EXECUTE]
+BLE_DFU_abortReqMsg = [2, BLE_DFU_OP_ABORT]
+BLE_DFU_fwVerReqMsg = [3, BLE_DFU_OP_FIRMWARE_VERSION, BLE_DFU_FW_TYPE_APPLICATION_IMAGE_NR]
 
 
 BLE_DFU_MAX_SLIP_PDU_LEN = 64 - 1
@@ -351,6 +351,58 @@ def SLIP_decodeMsg(inBuff):
 
     if args.debug:
        print("Encoded Buff sz {}, decoded buff sz {}".format(len(inBuff), len(outBuff)))
+    return outBuff
+
+
+def SLIP_encodeCtrlMsg(inBuff):
+
+    error = False
+
+    if args.debug:
+       __dump(inBuff)
+
+    outBuff = [0]  # First byte is msg length (used by STM32)
+    spaceLeft = BLE_DFU_MAX_SLIP_PDU_LEN
+
+    for inByte in inBuff:
+
+        if inByte == SLIP_BYTE_END:
+           if spaceLeft < 2:
+              print("SLIP_eCM(): No space left ... !!")
+              error = True
+              break
+
+           outBuff += [SLIP_BYTE_ESC]
+           outBuff += [SLIP_BYTE_ESC_END]
+           spaceLeft -= 2
+        else:
+           if inByte == SLIP_BYTE_ESC:
+              if spaceLeft < 2:
+                 print("SLIP_eCM(): No space left ... !!")
+                 error = True
+                 break
+
+              outBuff += [SLIP_BYTE_ESC]
+              outBuff += [SLIP_BYTE_ESC_ESC]
+              spaceLeft -= 2
+           else:
+              if spaceLeft < 1:
+                 print("SLIP_eCM(): No space left ... !!")
+                 error = True
+                 break
+
+              outBuff += [inByte]
+              spaceLeft -= 1
+
+    if error:
+       sys.exit()
+
+    outBuff += [SLIP_BYTE_END]
+    outBuff[0] = len(outBuff) - 1
+
+    if args.debug:
+      __dump(outBuff)
+
     return outBuff
 
 
@@ -592,21 +644,28 @@ def ble_dfu_get_resp():
 
 
 
+def ble_dfu_send_ctrl_msg(msgBuff):
+    encMsg = SLIP_encodeCtrlMsg(msgBuff[1:])
+    ble_dfu_send_msg(encMsg)
+    return
+
+
+
 def ble_dfu_sendObjExecCmd():
-    ble_dfu_send_msg(BLE_DFU_objExecCmdMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_objExecCmdMsg)
     return ble_dfu_get_resp()
 
 
 
 def ble_dfu_getMTU():
-    ble_dfu_send_msg(BLE_DFU_getMTUMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_getMTUMsg)
     return ble_dfu_get_resp()
 
 
 
 def ble_dfu_getAppFwInfo():
     BLE_DFU_objSelMsg[2] = BLE_DFU_OBJ_TYPE_DATA
-    ble_dfu_send_msg(BLE_DFU_objSelMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_objSelMsg)
     print("Sent Obj Select request to target ...")
     return ble_dfu_get_resp()
 
@@ -614,14 +673,14 @@ def ble_dfu_getAppFwInfo():
 
 def ble_dfu_getInitPktInfo():
     BLE_DFU_objSelMsg[2] = BLE_DFU_OBJ_TYPE_COMMAND
-    ble_dfu_send_msg(BLE_DFU_objSelMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_objSelMsg)
     print("Sent Obj Select request to target ...")
     return ble_dfu_get_resp()
 
 
 
 def ble_dfu_sendAbortReqMsg():
-    ble_dfu_send_msg(BLE_DFU_abortReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_abortReqMsg)
     print("Sent DFU abort request to target ...")
     retList = ble_dfu_get_resp()
     rc = retList[0]
@@ -636,7 +695,7 @@ def ble_dfu_sendAbortReqMsg():
 
 
 def ble_dfu_sendFwVerReqMsg():
-    ble_dfu_send_msg(BLE_DFU_fwVerReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_fwVerReqMsg)
     print("Sent app fw version request to target ...")
     retList = ble_dfu_get_resp()
     rc = retList[0]
@@ -658,7 +717,7 @@ def ble_dfu_sendFwVerReqMsg():
 
 
 def ble_dfu_sendExecObjMsg():
-    ble_dfu_send_msg(BLE_DFU_execReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_execReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
     if args.debug:
@@ -679,7 +738,7 @@ def ble_dfu_sendCreateObjMsg(objType, len):
     BLE_DFU_createObjReqMsg[4] = (len >> 8) & 0xff
     BLE_DFU_createObjReqMsg[5] = (len >> 16) & 0xff
     BLE_DFU_createObjReqMsg[6] = (len >> 24) & 0xff
-    ble_dfu_send_msg(BLE_DFU_createObjReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_createObjReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
     print("ret code", rc)
@@ -788,7 +847,7 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
 
     # Get CRC32
     print("Getting CRC32 from target .... ")
-    ble_dfu_send_msg(BLE_DFU_getCRCReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_getCRCReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
     if args.debug:
@@ -921,7 +980,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
     BLE_DFU_createObjReqMsg[2] = BLE_DFU_OBJ_TYPE_COMMAND
     BLE_DFU_createObjReqMsg[3] = initPktLen
 
-    ble_dfu_send_msg(BLE_DFU_createObjReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_createObjReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
     if args.debug:
@@ -967,7 +1026,7 @@ def BLE_DFU_sendInitPktToTgt(initPktDataBuff, mtu):
 
     # Get CRC32
     print("Getting init file CRC32 from target .... ")
-    ble_dfu_send_msg(BLE_DFU_getCRCReqMsg)
+    ble_dfu_send_ctrl_msg(BLE_DFU_getCRCReqMsg)
     retList = ble_dfu_get_resp()
     rc = retList[0]
     if args.debug:
@@ -1043,6 +1102,7 @@ dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 if not dev:
    print("No spectrometer found")
    sys.exit()
+
 
 if args.abort:
    ble_dfu_sendAbortReqMsg()
