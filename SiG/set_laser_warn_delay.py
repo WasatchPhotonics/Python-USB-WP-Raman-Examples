@@ -38,13 +38,14 @@ def set_laser_warn_delay(time):
     cmd = VR_SET_LASER_WARNING_DELAY
     value = time
     index = 0
-    length = 1
-    resp = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
-    print("resp is ", resp)
-    if resp[0] == 0:
-       print("laser warn delay set to {} secs".format(time))
-    else:
-       print("failed to set laser warn delay - error code {}".format(resp[0]))
+    length = 0
+    # resp = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+    dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, length, TIMEOUT_MS)
+    #print("resp is ", resp)
+    #if resp[0] == 0:
+    #   print("laser warn delay set to {} secs".format(time))
+    #else:
+    #   print("failed to set laser warn delay - error code {}".format(resp[0]))
 
 
 set_laser_warn_delay(timeSecs)
