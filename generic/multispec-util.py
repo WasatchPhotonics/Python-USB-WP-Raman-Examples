@@ -49,6 +49,7 @@ class Fixture(object):
         parser.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
         parser.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
+        parser.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
         parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
         parser.add_argument("--model",               type=str,            help="desired model")
@@ -147,6 +148,10 @@ class Fixture(object):
                 self.set_dfu(dev)
             return
 
+        if self.args.charging is not None:
+            for dev in self.devices:
+                self.set_charging(dev, self.args.charging)
+
         if self.args.reset_fpga:
             for dev in self.devices:
                 self.reset_fpga(dev)
@@ -238,6 +243,10 @@ class Fixture(object):
     def set_dfu(self, dev):
         print("setting DFU on %s" % dev.eeprom["serial_number"])
         self.send_cmd(dev, 0xfe)
+
+    def set_charging(self, dev, flag):
+        print(f"setting charging to {flag} on {dev.eeprom['serial_number']}")
+        self.send_cmd(dev, 0x86, 1 if flag else 0)
 
     def set_laser_enable(self, dev, flag):
         self.debug("setting laserEnable to %s" % ("on" if flag else "off"))
