@@ -13,7 +13,7 @@ import sys
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
-TIMEOUT_MS = 1000
+TIMEOUT_MS = 5000
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
@@ -51,6 +51,8 @@ class Fixture(object):
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def run(self):
+
+        print("Battery: " + self.get_battery_level())
 
         # handle disable operation first
         if not self.args.enable:
@@ -126,7 +128,9 @@ class Fixture(object):
         return self.send_cmd(0xff, 0x18, sec)
 
     def get_battery_level(self):
-        raw = self.get_cmd(0xff, 0x13, 3)
+        raw = self.dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x13, 0, 3, TIMEOUT_MS)
+        print("g_b_l(): resp raw : ", raw)
+        #raw = self.get_cmd(0xff, 0x13, 3)
         if raw is None or len(raw) < 3:
             return f"ERROR: cannot read battery: {raw}"
         percentage = raw[1] + (1.0 * raw[0] / 256.0)
@@ -190,6 +194,7 @@ class Fixture(object):
                 buf = 0
         self.debug(f"ctrl_transfer(bmRequestType 0x{HOST_TO_DEVICE:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}) >> {buf}")
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
+
 
     def get_cmd(self, cmd, value=0, index=0, length=64):
         result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)

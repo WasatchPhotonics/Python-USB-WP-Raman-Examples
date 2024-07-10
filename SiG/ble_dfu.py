@@ -218,6 +218,7 @@ BLE_DFU_POLL_TGT = 0x8d
 
 # Variables
 BLE_DFU_tgtInitPktValid = False
+BLE_DFU_pktIntvSecs = 0.5
 
 
 # Local error codes
@@ -249,6 +250,8 @@ BLE_DFU_fwVerReqMsg = [3, BLE_DFU_OP_FIRMWARE_VERSION, BLE_DFU_FW_TYPE_APPLICATI
 
 
 BLE_DFU_MAX_SLIP_PDU_LEN = 64 - 1
+
+BLE_DFU_MAX_TRY_CNT = 5
 
 
 def __dump(buff):
@@ -838,8 +841,8 @@ def ble_dfu_sendNextAppFwDataObject(imageBuff, imageOffset, maxDataObjSz):
            print("Sent Image Chunk # {:02}, image off {:06}".format(chunkTxCnt, imageOffset + totBytesCons))
 
        if args.debug:
-          print("sleeping for 0.1 sec .... ")
-       sleep(0.1)
+          print("sleeping for {} sec .... ".format(BLE_DFU_pktIntvSecs))
+       sleep(BLE_DFU_pktIntvSecs)
        if args.debug:
           print("--------------------------------------------------------------------------")
 
@@ -914,6 +917,8 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
 
     dataObjTxCnt = 0
 
+    tryCnt = 0
+
     while 1:
        respList = ble_dfu_getAppFwInfo()
        rc = respList[0]
@@ -945,7 +950,16 @@ def ble_dfu_sendAppFwToTgt(fwImageBuff):
 
        rc, currObjBytesTxd = ble_dfu_sendNextAppFwDataObject(fwImageBuff, tgtAppFwOffset, tgtAppMaxObjSz)
        if rc != BLE_DFU_RC_SUCCESS:
-          break
+          tryCnt += 1
+          print("Failed to transfer data object ... tries so far {} / max {} !!".format(tryCnt, BLE_DFU_MAX_TRY_CNT))
+          if tryCnt >= BLE_DFU_MAX_TRY_CNT:
+             print("Giving up !!")
+             break
+          else:
+             print("Retrying !!")
+             continue
+       else:
+          tryCnt = 0
 
        if args.debug:
           print("Sent data object # {} of size {} at offset {} :-) ".format(dataObjTxCnt, currObjBytesTxd, tgtAppFwOffset))
@@ -1094,6 +1108,7 @@ parser.add_argument("--ver",          action="store_true", help="Show current ap
 parser.add_argument("--abort",        action="store_true", help="Abort DFU process")
 parser.add_argument("--status",       action="store_true", help="Get status from the target")
 parser.add_argument("--crc",          action="store_true", help=".dat and .bin CRC32")
+parser.add_argument("--intv",         type=int, help="Pkt interval (>0 and <= 5000) in milliseconds")
 args = parser.parse_args()
 
 # print("args : ", sys.argv)
@@ -1102,6 +1117,16 @@ dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 if not dev:
    print("No spectrometer found")
    sys.exit()
+
+if args.intv is not None:
+   if args.intv < 0 or args.intv > 5000:
+      print("Specify valid pkt interval - range is 0 to 5000 millisecs !!")
+      quit()
+   BLE_DFU_pktIntvSecs = args.intv
+   BLE_DFU_pktIntvSecs /= 1000
+
+
+print("Pkt interval set to {} s".format(BLE_DFU_pktIntvSecs))
 
 
 if args.abort:
@@ -1254,7 +1279,8 @@ print("Target has successfully validated the init packet .... :-)  ")
 print('Now sending App Firmware Image .....')
 
 rc = ble_dfu_sendAppFwToTgt(BLE_DFU_appFwImage)
-if rc == BLE_DFU_RC_PARTIAL_SUCCESS: 
+# if rc == BLE_DFU_RC_PARTIAL_SUCCESS: 
+if rc != BLE_DFU_RC_SUCCESS:
    print("Not resetting UART back to normal mode ...")
    print("Done ....")
    quit()
