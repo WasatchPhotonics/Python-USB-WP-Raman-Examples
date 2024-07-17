@@ -458,13 +458,13 @@ class Fixture(object):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
             for dev in self.devices:
-                for i in range(self.args.continuous_count):
+                for j in range(self.args.continuous_count):
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
-                    send_trigger = (i == 0) and not self.args.hardware_trigger
+                    send_trigger = (j == 0) and not self.args.hardware_trigger
                     spectrum = self.get_spectrum(dev, send_trigger)
 
                     now = datetime.now()
-                    print("%s Spectrum %3d/%3d %s ..." % (now, i, self.args.spectra, spectrum[:10]))
+                    print("%s Spectrum %3d/%3d/%3d %s ..." % (now, j+1, i+1, self.args.spectra, spectrum[:10]))
                     if outfile is not None:
                         outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
 
@@ -496,12 +496,17 @@ class Fixture(object):
         self.send_cmd(dev, 0xad, 0) # MZ: remind me, what was the '1' supposed to indicate?
 
         bytes_to_read = dev.pixels * 2
+        block_size = 64
+        data = []
 
+        print(f"{datetime.now()} trying to read {dev.pixels} ({bytes_to_read} bytes) in chunks of {block_size} bytes")
         while True:
             try:
-                print(f"{datetime.now()} blocking on read of {dev.pixels} ({bytes_to_read} bytes) with {timeout_ms}ms timeout")
-                data = dev.read(0x82, bytes_to_read, timeout=timeout_ms)
-                break
+                self.debug(f"{datetime.now()} have {len(data)}/{bytes_to_read} bytes, reading next {block_size}")
+                this_data = dev.read(0x82, block_size, timeout=timeout_ms)
+                data.extend(this_data)
+                if len(data) >= bytes_to_read:
+                    break
             except usb.core.USBTimeoutError as ex:
                 if not self.args.keep_trying:
                     raise 
