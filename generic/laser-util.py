@@ -17,13 +17,10 @@ TIMEOUT_MS = 5000
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
-EEPROM_FORMAT = 8
 
 # An extensible, stateful "Test Fixture" 
 class Fixture(object):
     def __init__(self):
-        self.eeprom_pages = None
-        self.subformat = None
         self.dev = None
 
         parser = argparse.ArgumentParser(
@@ -40,6 +37,7 @@ class Fixture(object):
         parser.add_argument("--mod-enable",             action="store_true", help="enable modulation")
         parser.add_argument("--mod-period-us",          type=int,            help="laser modulation pulse period (us) (default 1000)", default=1000)
         parser.add_argument("--mod-width-us",           type=int,            help="laser modulation pulse width (us) (default 100)", default=100)
+        parser.add_argument("--monitor-laser-state",    action="store_true", help="monitor LASER_CAN_FIRE and LASER_IS_FIRING")
         parser.add_argument("--ramp",                   action="store_true", help="ramp PWM up and down")
 
         self.args = parser.parse_args()
@@ -96,6 +94,9 @@ class Fixture(object):
             start = datetime.now()
             while (datetime.now() - start).total_seconds() * 1000.0 < ms:
                 print("Battery: " + self.get_battery_level())
+                if self.args.monitor_laser_state:
+                    print(f"Laser Can Fire: {self.get_laser_can_fire()}")
+                    print(f"Laser Is Firing: {self.get_laser_is_firing()}")
                 sleep(1)
         else:
             sleep(ms/1000.0)
@@ -111,6 +112,12 @@ class Fixture(object):
     ############################################################################
     # opcodes
     ############################################################################
+
+    def get_laser_can_fire(self):
+        return 0 != self.get_cmd(0xef, 0, 1)[0]
+
+    def get_laser_is_firing(self):
+        return 0 != self.get_cmd(0xff, 0x0d, 1)[0]
 
     def set_laser_warning_delay_sec(self, sec):
         print(f"Setting laser warning delay to {sec} seconds")
@@ -185,12 +192,14 @@ class Fixture(object):
                 buf = [0] * 8
             else:
                 buf = 0
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
+        self.debug(f"ctrl_transfer(bmRequestType 0x{HOST_TO_DEVICE:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}) >> {buf}")
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
 
     def get_cmd(self, cmd, value=0, index=0, length=64):
-        return self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+        result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+        self.debug(f"ctrl_transfer(bmRequestType 0x{DEVICE_TO_HOST:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}, wLength {length}) => {result}")
+        return result
 
 fixture = Fixture()
 if fixture.dev:

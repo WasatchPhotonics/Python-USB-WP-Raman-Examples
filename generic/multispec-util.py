@@ -3,9 +3,11 @@
 # We don't want this to become a copy of everything in Wasatch.PY, but we want to
 # make certain things very easy and debuggable from the command-line
 
+import platform
 import math
 import sys
 import re
+import os
 from time import sleep
 from datetime import datetime
 
@@ -13,6 +15,13 @@ import traceback
 import usb.core
 import argparse
 import struct
+
+if platform.system() == "Darwin":
+    from ctypes import *
+    from CoreFoundation import *
+    import usb.backend.libusb1 as backend
+else:
+    import usb.backend.libusb0 as backend
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -43,6 +52,7 @@ class Fixture(object):
         parser.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
         parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
+        parser.add_argument("--integration-times",   type=str,            help="list of integration times (ms)")
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         parser.add_argument("--pixels",              type=int,            help="override pixel count")
@@ -57,17 +67,23 @@ class Fixture(object):
         parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
         parser.add_argument("--dump",                action="store_true", help="dump basic getters")
         parser.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
+        parser.add_argument("--keep-trying",         action="store_true", help="ignore timeouts")
         parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
         self.args = parser.parse_args()
+
+        if self.args.integration_times is None:
+            if self.args.integration_time_ms is not None:
+                self.args.integration_times = [ self.args.integration_time_ms ]
+        else:
+            self.args.integration_times = [ int(ms) for ms in self.args.integration_times.split(",") ]
 
         self.devices = []
         for pid in [0x1000, 0x2000, 0x4000]:
             if self.args.pid is not None:
                 if pid != int(self.args.pid, 16):
                     continue
-            self.devices.extend(usb.core.find(find_all=True, idVendor=0x24aa, idProduct=pid))
+            self.devices.extend(usb.core.find(find_all=True, idVendor=0x24aa, idProduct=pid, backend=backend.get_backend()))
 
-        # is this needed?
         for dev in self.devices:
             self.connect(dev)
 
@@ -106,9 +122,15 @@ class Fixture(object):
             self.devices = filtered
 
     def connect(self, dev):
-        dev.set_configuration(1)
-        usb.util.claim_interface(dev, 0)
-        self.debug("claimed device")
+        if os.name != "posix":
+            self.debug("on Windows, so NOT setting configuration and claiming interface")
+        elif "macOS" in platform.platform():
+            self.debug("on MacOS, so NOT setting configuration and claiming interface")
+        else:
+            self.debug("on Linux, so setting configuration and claiming interface")
+            dev.set_configuration(1)
+            usb.util.claim_interface(dev, 0)
+            self.debug("claimed device")
 
     def read_eeprom(self, dev):
         dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
@@ -157,10 +179,6 @@ class Fixture(object):
                 self.reset_fpga(dev)
             return
 
-        if self.args.integration_time_ms is not None:
-            for dev in self.devices:
-                self.set_integration_time_ms(dev, self.args.integration_time_ms)
-
         if self.args.continuous_count != 1:
             for dev in self.devices:
                 # note we're leaving these set at exit
@@ -176,14 +194,23 @@ class Fixture(object):
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 1) for dev in self.devices]
 
-        self.do_acquisitions()
+        if self.args.integration_times is None:
+            self.do_acquisitions()
+        else:
+            for ms in self.args.integration_times:
+                self.args.integration_time_ms = ms
+                for dev in self.devices:
+                    self.set_integration_time_ms(dev, self.args.integration_time_ms)
+                self.do_acquisitions()
 
         if self.args.eeprom_load_test:
             self.do_eeprom_load_test()
 
+        # disable laser on shutdown
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 0) for dev in self.devices]
 
+        # reset trigger source on shutdown
         if self.args.hardware_trigger:
             [self.set_trigger_source(dev, 0) for dev in self.devices]
 
@@ -222,7 +249,7 @@ class Fixture(object):
     # only supported on Gen 1.5
     def get_fpga_configuration_register(self, dev):
         raw = self.get_cmd(dev, 0xb3, lsb_len=2, label="GET_FPGA_CONFIGURATION_REGISTER")
-        log.debug(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
+        self.debug(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
         return raw
 
     def get_firmware_version(self, dev):
@@ -431,13 +458,13 @@ class Fixture(object):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
             for dev in self.devices:
-                for i in range(self.args.continuous_count):
+                for j in range(self.args.continuous_count):
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
-                    send_trigger = (i == 0) and not self.args.hardware_trigger
+                    send_trigger = (j == 0) and not self.args.hardware_trigger
                     spectrum = self.get_spectrum(dev, send_trigger)
 
                     now = datetime.now()
-                    print("%s Spectrum %3d/%3d %s ..." % (now, i, self.args.spectra, spectrum[:10]))
+                    print("%s Spectrum %3d/%3d/%3d %s ..." % (now, j+1, i+1, self.args.spectra, spectrum[:10]))
                     if outfile is not None:
                         outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
 
@@ -466,12 +493,23 @@ class Fixture(object):
             timeout_ms = TIMEOUT_MS + 100 * 2
 
         print(f"{datetime.now()} sending trigger...")
-        self.send_cmd(dev, 0xad, 1)
+        self.send_cmd(dev, 0xad, 0) # MZ: remind me, what was the '1' supposed to indicate?
 
         bytes_to_read = dev.pixels * 2
+        block_size = 64
+        data = []
 
-        print(f"blocking on read of {dev.pixels} ({bytes_to_read} bytes) with {timeout_ms}ms timeout")
-        data = dev.read(0x82, bytes_to_read, timeout=timeout_ms)
+        print(f"{datetime.now()} trying to read {dev.pixels} ({bytes_to_read} bytes) in chunks of {block_size} bytes")
+        while True:
+            try:
+                self.debug(f"{datetime.now()} have {len(data)}/{bytes_to_read} bytes, reading next {block_size}")
+                this_data = dev.read(0x82, block_size, timeout=timeout_ms)
+                data.extend(this_data)
+                if len(data) >= bytes_to_read:
+                    break
+            except usb.core.USBTimeoutError as ex:
+                if not self.args.keep_trying:
+                    raise 
 
         return self.demarshal_spectrum(data)
 

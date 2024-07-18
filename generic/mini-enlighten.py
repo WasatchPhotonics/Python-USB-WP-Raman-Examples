@@ -4,6 +4,7 @@
 
 import traceback
 import usb.core
+import platform
 import argparse
 import struct
 import sys
@@ -13,6 +14,13 @@ import os
 from time import sleep
 from datetime import datetime
 
+if platform.system() == "Darwin":
+    from ctypes import *
+    from CoreFoundation import *
+    import usb.backend.libusb1 as backend
+else:
+    import usb.backend.libusb0 as backend
+
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 1000
@@ -21,7 +29,6 @@ MAX_PAGES = 8
 PAGE_SIZE = 64
 EEPROM_FORMAT = 8
 
-# An extensible, stateful "Test Fixture" 
 class Fixture(object):
 
     ############################################################################
@@ -39,14 +46,14 @@ class Fixture(object):
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
-        parser.add_argument("--pixels",              type=int,            help="pixels (default 1024)", default=1024)
+        parser.add_argument("--pixels",              type=int,            help="pixels")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=10)
         parser.add_argument("--pid",                 type=str,            help="desired PID (default 1000)", default="1000")
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
         self.args = parser.parse_args()
 
         self.pid = int(self.args.pid, 16)
-        self.device = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
+        self.device = usb.core.find(idVendor=0x24aa, idProduct=self.pid, backend=backend.get_backend())
         if not self.device:
             print("No spectrometers found with PID 0x%04x" % self.pid)
             sys.exit(1)
@@ -55,20 +62,22 @@ class Fixture(object):
             self.debug("claiming interface")
             self.device.set_configuration(1)
             usb.util.claim_interface(self.device, 0)
+        else:
+            self.debug("not on POSIX, so NOT claiming interface")
 
     def connect(self):
         print("starting ENLIGHTEN connection sequence")
 
-        self.pixels = self.args.pixels
+        if self.args.pixels is not None:
+            self.pixels = self.args.pixels
+        else:
+            self.pixels = 1952 if self.pid == 0x4000 else 2048
+        self.debug(f"connect: using pixels {self.pixels}")
 
         if False:
-            self.get_fpga_configuration_register("before 1")
-
             # 1. read EEPROM
             eeprom = self.read_eeprom()
             print(f"eeprom <- {eeprom}")
-
-            self.get_fpga_configuration_register("after eeprom")
 
             self.pixels = eeprom["pixels"]
             print(f"pixels <- {self.pixels}")
@@ -77,15 +86,11 @@ class Fixture(object):
             fpga_options = self.read_fpga_compilation_options()
             print(f"fpga_compilation_options <- {fpga_options}")
 
-            self.get_fpga_configuration_register("after fpga compilation options")
-
             # 3. CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
 
             # 4. set trigger source
             print(f"trigger_source -> 0")
             self.set_trigger_source(0)
-
-            self.get_fpga_configuration_register("after trigger source")
 
         # 5. set integration time
         print(f"integration_time_ms -> {self.args.integration_time_ms}")
@@ -93,19 +98,13 @@ class Fixture(object):
 
         return
 
-        self.get_fpga_configuration_register("after integration time")
-
         # 6. get FW revision
         fw_rev = self.get_firmware_version()
         print(f"FW Revision <- {fw_rev}")
 
-        self.get_fpga_configuration_register("after FW version")
-
         # 7. get FPGA revision
         fpga_rev = self.get_fpga_version()
         print(f"FPGA Revision <- {fpga_rev}")
-
-        self.get_fpga_configuration_register("after FPGA version")
 
         # 8. get integration time (verify it was set correctly)
         ms = self.get_integration_time_ms()
@@ -113,13 +112,9 @@ class Fixture(object):
         if ms != self.args.integration_time_ms:
             print(f"integration time didn't match expectation ({ms} != {self.args.integration_time_ms})")
 
-        self.get_fpga_configuration_register("after getting integration time")
-
         # 9. get detector gain
         gain = self.get_detector_gain()
         print(f"detector gain <- {gain:0.3f}")
-
-        self.get_fpga_configuration_register("after getting gain")
 
         print("finished ENLIGHTEN connection sequence")
 
@@ -131,22 +126,14 @@ class Fixture(object):
             if outfile is not None:
                 outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
 
-            raw_temp = self.get_detector_temperature_raw()
-            print("Raw temperature %04x" % raw_temp)
+            # raw_temp = self.get_detector_temperature_raw()
+            # print("Raw temperature %04x" % raw_temp)
         if outfile is not None:
             outfile.close()
 
     ############################################################################
     # opcodes
     ############################################################################
-
-    ##
-    # @note there is no 0xb3 GET_FPGA_CONFIGURATION_REGISTER in ENG-0001 -- this
-    # was for an internal FW test
-    def get_fpga_configuration_register(self, label=""):
-        # raw = self.get_cmd(0xb3, lsb_len=2)
-        # print(f"FPGA Configuration Register: 0x{raw:04x} ({label})")
-        pass
 
     def read_eeprom(self):
         self.buffers = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
@@ -209,20 +196,15 @@ class Fixture(object):
         return gain
 
     def get_detector_temperature_raw(self):
-        self.get_fpga_configuration_register(f"before GET_CCD_TEMP")
-        result = self.get_cmd(0xd7, label="GET_CCD_TEMP", msb_len=2)
-        self.get_fpga_configuration_register(f"after GET_CCD_TEMP")
-        return result
+        return self.get_cmd(0xd7, label="GET_CCD_TEMP", msb_len=2)
 
     def set_detector_tec_setpoint(self, raw):
-        self.get_fpga_configuration_register(f"before SET_DETECTOR_TEC_SETPOINT")
         self.set_cmd(0xd8, wValue=0xa46, label="SET_DETECTOR_TEC_SETPOINT")
-        self.get_fpga_configuration_register(f"after SET_DETECTOR_TEC_SETPOINT")
 
     ## @see wasatch.FeatureIdentificationDevice.get_line
     def get_spectrum(self):
-        self.get_fpga_configuration_register(f"before spectrum {self.spectrum_count}")
         timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+        self.debug(f"using timeout_ms {timeout_ms}")
         self.send_cmd(0xad, 0)
 
         endpoints = [0x82]
@@ -264,8 +246,6 @@ class Fixture(object):
 
         if len(spectrum) != self.pixels:
             print(f"This is an obviously incomplete spectrum (received {len(spectrum)}, expected {self.pixels})")
-
-        self.get_fpga_configuration_register(f"after spectrum {self.spectrum_count}")
 
         self.spectrum_count += 1
         return spectrum
