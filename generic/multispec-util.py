@@ -17,8 +17,6 @@ import argparse
 import struct
 
 if platform.system() == "Darwin":
-    from ctypes import *
-    from CoreFoundation import *
     import usb.backend.libusb1 as backend
 else:
     import usb.backend.libusb0 as backend
