@@ -19,7 +19,7 @@ TIMEOUT_MS = 1000
 def get_uint(bRequest, wValue, wIndex=0, lsb_len=4):
     data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, lsb_len, TIMEOUT_MS)
     value = 0
-    print(data)
+    # print(data)
     for i in range(lsb_len):
         value <<= 8
         value |= data[lsb_len -1 - i]
@@ -28,6 +28,7 @@ def get_uint(bRequest, wValue, wIndex=0, lsb_len=4):
 report = { "STM32 SYSCLK" : get_uint(0xff, 0x70), }
 
 for label, value in report.items():
-    print("%-45s: %s" % (label, value))
+    value = value/1000000
+    print("%-20s: %s MHZ" % (label, value))
 
 print()
