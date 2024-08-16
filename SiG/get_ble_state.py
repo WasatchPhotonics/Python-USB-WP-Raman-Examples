@@ -2,9 +2,15 @@
 
 import sys
 import usb.core
+import platform
 from datetime import datetime
 
-dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+if platform.system() == "Darwin":
+    import usb.backend.libusb1 as backend
+else:
+    import usb.backend.libusb0 as backend
+
+dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000, backend=backend.get_backend())
 
 if not dev:
     print("No spectrometer found")
@@ -69,9 +75,18 @@ report = { "Timestamp"                                 : datetime.now(),
            "GET_BLE_INTF_FPGA_REG_WR_REQ_RX_CNT"       : get_uint(0xff, 0x48),
            "GET_BLE_INTF_FPGA_REG_DATA_TX_CNT"         : get_uint(0xff, 0x49),
            "GET_BLE_INTF_EEPROM_PAGE_RD_REQ_RX_CNT"    : get_uint(0xff, 0x4a),
-           "GET_BLE_INTF_EEPROM_PAGE_DATA_TX_CNT"      : get_uint(0xff, 0x4b) }
+           "GET_BLE_INTF_EEPROM_PAGE_DATA_TX_CNT"      : get_uint(0xff, 0x4b),
+           "GET_BLE_INTF_BLE_FW_INFO_RX_CNT"           : get_uint(0xff, 0x4c),
+           "GET_BLE_INTF_BLE_PART_NR_INFO_RX_CNT"      : get_uint(0xff, 0x4d),
+           "GET_BLE_INTF_RADIO_STATE_UPD_RX_CNT"       : get_uint(0xff, 0x4e),
+           "GET_BLE_INTF_ENTER_DFU_MODE_REQ_TX_CNT"    : get_uint(0xff, 0x4f),
+           "GET_TEC_MODE"                              : get_uint(0xff, 0x61, lsb_len=1),
+           "GET_FPGA_I2C_ACCESS_ERR_CNT"               : get_uint(0xff, 0x65),
+           "GET_SYSTEM_CORE_CLOCK_RATE"                : get_uint(0xff, 0x70),
+           "GET_IMG_SNSR_STATE_TRANS_TIMEOUT"          : get_uint(0xff, 0x72, lsb_len=2),
+         }
 
 for label, value in report.items():
-    print("%-45s: %s" % (label, value))
+    print("%-40s: %s" % (label, value))
 
 print()
