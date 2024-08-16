@@ -17,8 +17,6 @@ import argparse
 import struct
 
 if platform.system() == "Darwin":
-    from ctypes import *
-    from CoreFoundation import *
     import usb.backend.libusb1 as backend
 else:
     import usb.backend.libusb0 as backend
@@ -44,31 +42,32 @@ class Fixture(object):
         self.last_acquire = datetime.now()
 
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
+        parser.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
         parser.add_argument("--debug",               action="store_true", help="debug output")
-        parser.add_argument("--list",                action="store_true", help="list all spectrometers")
-        parser.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
-        parser.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
-        parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
-        parser.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
         parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
+        parser.add_argument("--dump",                action="store_true", help="dump basic getters")
+        parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
+        parser.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
+        parser.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
+        parser.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
+        parser.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
         parser.add_argument("--integration-times",   type=str,            help="list of integration times (ms)")
+        parser.add_argument("--keep-trying",         action="store_true", help="ignore timeouts")
+        parser.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
+        parser.add_argument("--list",                action="store_true", help="list all spectrometers")
+        parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
+        parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
+        parser.add_argument("--model",               type=str,            help="desired model")
+        parser.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
         parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
-        parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
+        parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         parser.add_argument("--pixels",              type=int,            help="override pixel count")
-        parser.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
-        parser.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
-        parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
-        parser.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
         parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
-        parser.add_argument("--model",               type=str,            help="desired model")
-        parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
-        parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
-        parser.add_argument("--dump",                action="store_true", help="dump basic getters")
-        parser.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
-        parser.add_argument("--keep-trying",         action="store_true", help="ignore timeouts")
-        parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
+        parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
+        parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         self.args = parser.parse_args()
 
         if self.args.integration_times is None:
@@ -214,6 +213,13 @@ class Fixture(object):
         if self.args.hardware_trigger:
             [self.set_trigger_source(dev, 0) for dev in self.devices]
 
+        if self.args.monitor_battery:
+            while True:
+                for dev in self.devices:
+                    (raw, percentage, charging) = self.get_battery_level(dev)
+                    print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
+                sleep(1)
+
     def list(self):
         print("%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA"))
         for dev in self.devices:
@@ -241,6 +247,12 @@ class Fixture(object):
     ############################################################################
     # opcodes
     ############################################################################
+
+    def get_battery_level(self, dev):
+        raw = self.get_cmd(dev, 0xff, 0x13, length=3)
+        percentage = raw[1] + (1.0 * raw[0] / 256.0)
+        charging = raw[2] != 0
+        return (raw, percentage, charging)
 
     def reset_fpga(self, dev):
         print("resetting FPGA on %s" % dev.eeprom["serial_number"])
