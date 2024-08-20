@@ -57,6 +57,8 @@ class Fixture(object):
         # handle disable operation first
         if not self.args.enable:
             self.set_enable(False)
+            if self.args.monitor_laser_state:
+                self.sleep_ms(self.args.max_ms)
             return
 
         if self.args.watchdog_sec is not None:
@@ -93,10 +95,11 @@ class Fixture(object):
             # monitor battery while sleeping
             start = datetime.now()
             while (datetime.now() - start).total_seconds() * 1000.0 < ms:
-                print("Battery: " + self.get_battery_level())
+                data = [ str(datetime.now()), f"Battery: {self.get_battery_level()}" ]
                 if self.args.monitor_laser_state:
-                    print(f"Laser Can Fire: {self.get_laser_can_fire()}")
-                    print(f"Laser Is Firing: {self.get_laser_is_firing()}")
+                    data.append(f"Laser Can Fire: {self.get_laser_can_fire()}")
+                    data.append(f"Laser Is Firing: {self.get_laser_is_firing()}")
+                print(" ".join(data))
                 sleep(1)
         else:
             sleep(ms/1000.0)
@@ -129,7 +132,7 @@ class Fixture(object):
 
     def get_battery_level(self):
         raw = self.dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x13, 0, 3, TIMEOUT_MS)
-        print("g_b_l(): resp raw : ", raw)
+        # print("g_b_l(): resp raw : ", raw)
         #raw = self.get_cmd(0xff, 0x13, 3)
         if raw is None or len(raw) < 3:
             return f"ERROR: cannot read battery: {raw}"
