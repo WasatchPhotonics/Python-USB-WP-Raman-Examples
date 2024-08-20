@@ -2,8 +2,14 @@
 
 import sys
 import usb.core
+import platform
 
-dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
+if platform.system() == "Darwin":
+    import usb.backend.libusb1 as backend
+else:
+    import usb.backend.libusb0 as backend
+
+dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000, backend=backend.get_backend())
 
 if not dev:
     print("No spectrometer found")
