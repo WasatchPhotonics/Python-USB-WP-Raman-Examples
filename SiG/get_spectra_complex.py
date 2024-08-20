@@ -118,6 +118,9 @@ class Fixture:
             # take Raman sample
             sample = self.get_spectrum()
 
+            # disable laser
+            self.set_laser_enable(False)
+
             # perform dark correction
             corr = sample - dark
 
