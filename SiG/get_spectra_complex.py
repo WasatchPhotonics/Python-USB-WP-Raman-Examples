@@ -33,17 +33,17 @@ class Fixture:
         self.last_integ_time = 100
 
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        parser.add_argument("--debug",                    help="Verbose logging", action="store_true")
-        parser.add_argument("--count",          type=int, help="How many spectra to collect", default=5)
-        parser.add_argument("--min-integ-time", type=int, help="Lowest random integration time (ms)", default=100)
-        parser.add_argument("--max-integ-time", type=int, help="Highest random integration time (ms)", default=2000)
-        parser.add_argument("--min-gain-db",    type=int, help="Lowest random gain (dB)", default=8)
-        parser.add_argument("--max-gain-db",    type=int, help="Highest random gain (dB)", default=32)
-        parser.add_argument("--min-laser-perc", type=int, help="Lowest random laser power (%%)", default=5)
-        parser.add_argument("--max-laser-perc", type=int, help="Highest random laser power (%%)", default=100)
-        parser.add_argument("--output-pixel",   type=int, help="Pixel value to output", default=1000)
-        parser.add_argument("--pixels",         type=int, help="Pixels to read", default=1952)
-        parser.add_argument("--outfile",        type=str, help="File to hold row-ordered CSV output")
+        parser.add_argument("--debug",                      help="Verbose logging", action="store_true")
+        parser.add_argument("--count",          type=int,   help="How many spectra to collect", default=5)
+        parser.add_argument("--min-integ-time", type=int,   help="Lowest random integration time (ms)", default=100)
+        parser.add_argument("--max-integ-time", type=int,   help="Highest random integration time (ms)", default=2000)
+        parser.add_argument("--min-gain-db",    type=float, help="Lowest random gain (dB)", default=8.0)
+        parser.add_argument("--max-gain-db",    type=float, help="Highest random gain (dB)", default=32.0)
+        parser.add_argument("--min-laser-perc", type=float, help="Lowest random laser power (%%)", default=5.0)
+        parser.add_argument("--max-laser-perc", type=float, help="Highest random laser power (%%)", default=100.0)
+        parser.add_argument("--output-pixel",   type=int,   help="Pixel value to output", default=1000)
+        parser.add_argument("--pixels",         type=int,   help="Pixels to read", default=1952)
+        parser.add_argument("--outfile",        type=str,   help="File to hold row-ordered CSV output")
         self.args = parser.parse_args()
 
         for dev in usb.core.find(find_all=True, idVendor=0x24aa, idProduct=0x4000, backend=backend.get_backend()):
@@ -89,11 +89,13 @@ class Fixture:
 
             # randomize settings
             integ_time = randrange(self.args.min_integ_time, self.args.max_integ_time)
-            gain_db = round(randrange(self.args.min_gain_db * 10, self.args.max_gain_db * 10) / 10.0, 1)
-            laser_perc = randrange(self.args.min_laser_perc, self.args.max_laser_perc)
+            gain_db    = round(randrange(int(round(self.args.min_gain_db * 10, 0)), 
+                                         int(round(self.args.max_gain_db * 10, 0))) / 10.0, 1)
+            laser_perc = round(randrange(int(round(self.args.min_laser_perc * 10, 0)), 
+                                         int(round(self.args.max_laser_perc * 10, 0))) / 10.0, 1)
 
             # print(f"{datetime.datetime.now()} loop {i:3d}/{self.args.count:3d}: " +
-            #       f"integ_time {integ_time:4d}, gain {gain_db:4.1f}dB, laser {laser_perc:3d}% [setting]")
+            #       f"integ_time {integ_time:4d}, gain {gain_db:4.1f}dB, laser {laser_perc:5.1f}% [setting]")
 
             # apply settings
             self.set_integ_time(integ_time)
@@ -136,7 +138,7 @@ class Fixture:
             # print stats
             now = datetime.datetime.now()
             print(f"{now} loop {i:3d}/{self.args.count:3d}: " +
-                  f"integ_time {integ_time:4d}, gain {gain_db:4.1f}dB, laser {laser_perc:3d}%, " +
+                  f"integ_time {integ_time:4d}, gain {gain_db:4.1f}dB, laser {laser_perc:5.1f}% " +
                   f"max_dark {max_dark:8.2f}, max_sample {max_sample:8.2f}, max_corr {max_corr:8.2f}, " + 
                   f"mean_dark {mean_dark:8.2f}, mean_sample {mean_sample:8.2f}, mean_corr {mean_corr:8.2f}, " +
                   f"at pixel {self.args.output_pixel} {at_pixel:8.2f}")
@@ -193,10 +195,12 @@ class Fixture:
 
         if perc >= 100:
             self.set_mod_enable(False)
-            return self.set_laser_enable(True)
+            return 
+
+        width_us = int(round(perc * 10, 0))
 
         self.send_cmd(0xc7, 1000, label="SET_MOD_PERIOD") # period_us
-        self.send_cmd(0xdb, perc * 10, label="SET_MOD_WIDTH") 
+        self.send_cmd(0xdb, width_us, label="SET_MOD_WIDTH") 
         self.set_mod_enable(True)
 
     def get_spectrum(self):
