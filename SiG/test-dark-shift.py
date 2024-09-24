@@ -14,15 +14,26 @@ TIMEOUT_MS      = 1000
 
 PIXELS = 1952
 
-print("searching for spectrometer with VID 0x%04x, PID 0x%04x" % (VID, PID))
+last_integ = 0
+last_gain = 0
+min_spectra = 100
+spectra_sec = 60
+
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if dev is None:
     print("No matching spectrometer found")
     sys.exit(1)
 
-def get_spectrum():
+def get_spectrum(integ_ms):
     dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
-    data = dev.read(0x82, PIXELS * 2) 
+
+    timeout_ms = TIMEOUT_MS + (last_integ + integ_ms) * 2
+    try:
+        data = dev.read(0x82, PIXELS * 2, timeout=timeout_ms) 
+    except usb.core.USBTimeoutError:
+        print(f"caught USBTimeoutError even though timeout was {timeout_ms}ms")
+        raise 
+
     spectrum = []
     for i in range(PIXELS):
         spectrum.append(data[i] | (data[i+1] << 8))
@@ -38,30 +49,34 @@ def set_gain(db):
     send_cmd(0xb7, raw)
 
 def send_cmd(cmd, value=0, index=0, buf=BUF):
-    print(f"cmd 0x{cmd:02x}, value 0x{value:04x}, index 0x{index:04x}, buf {buf}")
+    # print(f"cmd 0x{cmd:02x}, value 0x{value:04x}, index 0x{index:04x}, buf {buf}")
     dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, BUF, TIMEOUT_MS)
 
 all_integs      = list(range(  10,  100,   10))
 all_integs.extend(list(range( 100, 1000,  100)))
 all_integs.extend(list(range(1000, 5001, 1000)))
+# all_integs = [100, 400, 1000]
 
 all_gains = list(range(0, 31))
+# all_gains = [0, 8, 24]
 
-last_integ = 0
-last_gain = 0
-min_spectra = 100
-spectra_sec = 60
+"""
+@todo
+- consider configurable gain step
+- consider randomly changing int / gain (would automatically provide larger jumps)
+"""
 
 for integ_asc in [True, False]:
 
     for gain_asc in [True, False]:
 
-        these_integs = all_integs if integ_asc else reverse(all_integs)
-        these_gains = all_gains if gain_asc else reverse(all_gains)
+        print(f"# Changing to integ_asc {integ_asc}, gain_asc {gain_asc}")
+        these_integs = all_integs if integ_asc else list(reversed(all_integs))
+        these_gains  = all_gains  if gain_asc  else list(reversed(all_gains))
 
         for integ_ms in these_integs:
 
-            print(f"{'setting' if integ_ms == these_integs[0] else 'increasing' if integ_asc else 'decreasing'} integration time to {integ_ms} (resetting gain)")
+            print(f"# {'setting' if integ_ms == these_integs[0] else 'increasing' if integ_asc else 'decreasing'} integration time to {integ_ms} (resetting gain)")
             set_integration_time(integ_ms)
 
             # plan to collect dark spectra for at least spectra_sec (but not 
@@ -70,20 +85,35 @@ for integ_asc in [True, False]:
 
             for gain_db in these_gains:
 
-                print(f"{'setting' if gain_db == these_gains[0] else 'increasing' if gain_asc else 'decreasing'} gain to {gain_db}")
+                print(f"# {'setting' if gain_db == these_gains[0] else 'increasing' if gain_asc else 'decreasing'} gain to {gain_db}")
                 set_gain(gain_db)
 
-                dark = get_spectrum()
-                dark_med = np.median(dark)
-                print(f"median dark at {integ_ms}ms, {gain_db}dB is {dark_med}")
+                # take ONE throwaway after changing gain
+                throwaway = get_spectrum(integ_ms)
 
+                dark = get_spectrum(integ_ms)
+                dark_med = np.median(dark)
+                dark_time = datetime.now()
+                print(f"# median dark at {integ_ms}ms, {gain_db}dB is {dark_med}")
+
+                last_corr_med = 0
                 for i in range(num_spectra):
-                    spectrum = get_spectrum()
+                    spectrum = get_spectrum(integ_ms)
                     this_med = np.median(spectrum)
                     corrected = spectrum - dark
                     corr_med = np.median(corrected)
                     now = datetime.now()
+
+                    elapsed_sec = (now - dark_time).total_seconds()
+
+                    if i > 0 and abs(corr_med) > 100 and abs(corr_med - last_corr_med) > (0.2 * abs(last_corr_med)):
+                        shift_warning = "SHIFT"
+                    else:                            
+                        shift_warning = ""
+
                     
-                    print(f"{now}, last_integ {last_integ}, integ_ms {integ_ms}, last_gain {last_gain}, gain_db {gain_db}, spectrum {i+1}/{num_spectra}, median {this_med}, corrected median {corr_med}")
+                    print(f"{now}, elapsed_sec {elapsed_sec:5.1f}, integ_asc {integ_asc}, gain_asc {gain_asc}, last_integ {last_integ}, integ_ms {integ_ms}, last_gain {last_gain}, gain_db {gain_db}, spectrum {i+1:3d}/{num_spectra:3d}, median {this_med:8.1f}, corrected median {corr_med:-5.1f}, {shift_warning}")
+                    last_corr_med = corr_med
+
                 last_gain = gain_db
             last_integ = integ_ms
