@@ -37,7 +37,7 @@ def get_spectrum(integ_ms):
 
     spectrum = []
     for i in range(PIXELS):
-        spectrum.append(data[i] | (data[i+1] << 8))
+        spectrum.append(data[i*2] | (data[i*2+1] << 8))
     return np.array(spectrum)
 
 def set_integration_time(ms):

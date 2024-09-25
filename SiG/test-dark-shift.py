@@ -16,8 +16,8 @@ PIXELS = 1952
 
 last_integ = 0
 last_gain = 0
-min_spectra = 100
-spectra_sec = 60
+min_spectra = 200
+spectra_sec = 120
 
 dev = usb.core.find(idVendor=VID, idProduct=PID)
 if dev is None:
@@ -36,7 +36,7 @@ def get_spectrum(integ_ms):
 
     spectrum = []
     for i in range(PIXELS):
-        spectrum.append(data[i] | (data[i+1] << 8))
+        spectrum.append(data[i*2] | (data[i*2+1] << 8))
     return np.array(spectrum)
 
 def set_integration_time(ms):
@@ -52,19 +52,10 @@ def send_cmd(cmd, value=0, index=0, buf=BUF):
     # print(f"cmd 0x{cmd:02x}, value 0x{value:04x}, index 0x{index:04x}, buf {buf}")
     dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, BUF, TIMEOUT_MS)
 
-all_integs      = list(range(  10,  100,   10))
-all_integs.extend(list(range( 100, 1000,  100)))
-all_integs.extend(list(range(1000, 5001, 1000)))
-# all_integs = [100, 400, 1000]
+all_integs = [ 10, 25, 50, 100, 250, 500, 1000, 2000, 5000 ]
+all_gains = [ 16, 24, 30 ]
 
-all_gains = list(range(0, 31))
-# all_gains = [0, 8, 24]
-
-"""
-@todo
-- consider configurable gain step
-- consider randomly changing int / gain (would automatically provide larger jumps)
-"""
+print("timestamp, elapsed_sec, integ_asc, gain_asc, integ_ms, gain_db, spectrum, median, mean, corrected median, corrected mean, edc_avg, edc_0, edc_1, edc_2, edc_3, warning")
 
 for integ_asc in [True, False]:
 
@@ -93,16 +84,22 @@ for integ_asc in [True, False]:
 
                 dark = get_spectrum(integ_ms)
                 dark_med = np.median(dark)
+                dark_avg = np.mean(dark)
                 dark_time = datetime.now()
-                print(f"# median dark at {integ_ms}ms, {gain_db}dB is {dark_med}")
+                print(f"# dark at {integ_ms}ms {gain_db}dB: median {dark_med:.2f} avg {dark_avg:.2f}")
 
                 last_corr_med = 0
                 for i in range(num_spectra):
                     spectrum = get_spectrum(integ_ms)
                     this_med = np.median(spectrum)
+                    this_avg = np.mean(spectrum)
                     corrected = spectrum - dark
                     corr_med = np.median(corrected)
+                    corr_avg = np.mean(corrected)
                     now = datetime.now()
+
+                    edc_px = spectrum[0:4]
+                    edc_avg = round(np.mean(edc_px), 2)
 
                     elapsed_sec = (now - dark_time).total_seconds()
 
@@ -112,7 +109,11 @@ for integ_asc in [True, False]:
                         shift_warning = ""
 
                     
-                    print(f"{now}, elapsed_sec {elapsed_sec:5.1f}, integ_asc {integ_asc}, gain_asc {gain_asc}, last_integ {last_integ}, integ_ms {integ_ms}, last_gain {last_gain}, gain_db {gain_db}, spectrum {i+1:3d}/{num_spectra:3d}, median {this_med:8.1f}, corrected median {corr_med:-5.1f}, {shift_warning}")
+                    print(f"{now}, {elapsed_sec:5.1f}, {integ_asc}, {gain_asc}, " +
+                          f"{integ_ms}, {gain_db}, " +
+                          f"{i+1:3d}/{num_spectra:3d}, {this_med:8.1f}, {this_avg:8.1f}, {corr_med:-5.1f}, {corr_avg:-5.1f}, " +
+                          f"{edc_avg}, {edc_px[0]}, {edc_px[1]}, {edc_px[2]}, {edc_px[3]}, " +
+                          f"{shift_warning}")
                     last_corr_med = corr_med
 
                 last_gain = gain_db
