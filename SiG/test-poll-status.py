@@ -72,7 +72,7 @@ for iteration in range(COUNT):
 
         spectrum = []
         for j in range(PIXELS):
-            spectrum.append(data[j] | (data[j+1] << 8))
+            spectrum.append(data[j*2] | (data[j*2+1] << 8))
         lo = min(spectrum)
         hi = max(spectrum)
         avg = sum(spectrum)/PIXELS

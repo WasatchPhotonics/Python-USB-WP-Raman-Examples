@@ -57,7 +57,7 @@ for i in range(LINES):
 
     spectrum = []
     for j in range(PIXELS):
-        spectrum.append(data[j] | (data[j+1] << 8))
+        spectrum.append(data[j*2] | (data[j*2+1] << 8))
     spectrum[0] = i
     print(f"read spectrum {i}/{LINES}: {spectrum[:10]}")
 
