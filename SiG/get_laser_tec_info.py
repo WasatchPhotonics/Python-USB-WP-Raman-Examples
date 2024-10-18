@@ -44,6 +44,7 @@ def get_tec_mode():
 def get_tec_state():
     data = dev.ctrl_transfer(DEVICE_TO_HOST, 0x85, 0x00, 0, 1, TIMEOUT_MS)
     tecState = data[0]
+    print("TEC state is ", tecState)
     if tecState == 0:
        print("TEC is Off")
     else:
