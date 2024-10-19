@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import struct
 
 from bleak import BleakScanner, BleakClient
 from datetime import datetime
@@ -23,37 +24,37 @@ class Fixture:
         self.eeprom = None
         self.eeprom_field_loc = EEPROMFields.get_eeprom_fields()
 
-        self.char_code_by_name = { "INTEGRATION_TIME_MS":   0xff01, 
-                                   "GAIN_DB":               0xff02,
-                                   "LASER_STATE":           0xff03,
-                                   "ACQUIRE_SPECTRUM":      0xff04,
-                                   "SPECTRUM_CMD":          0xff05,
-                                   "READ_SPECTRUM":         0xff06,
-                                   "EEPROM_CMD":            0xff07,
-                                   "EEPROM_DATA":           0xff08,
-                                   "BATTERY_STATUS":        0xff09,
-                                   "GENERIC_MESSAGE":       0xff0a }
+        self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
+                              "GAIN_DB":             0xff02,
+                              "LASER_STATE":         0xff03,
+                              "ACQUIRE_SPECTRUM":    0xff04,
+                              "SPECTRUM_CMD":        0xff05,
+                              "READ_SPECTRUM":       0xff06,
+                              "EEPROM_CMD":          0xff07,
+                              "EEPROM_DATA":         0xff08,
+                              "BATTERY_STATUS":      0xff09,
+                              "GENERIC_MESSAGE":     0xff0a }
 
-        self.generics = { "SET_GAIN_DB":                    0xb7,
-                          "GET_GAIN_DB":                    0xc5,
-                          "SET_INTEGRATION_TIME_MS":        0xb2,
-                          "GET_INTEGRATION_TIME_MS":        0xbf,
-                          "GET_LASER_WARNING_DELAY_SEC":    0x8b,
-                          "SET_LASER_WARNING_DELAY_SEC":    0x8a,
-                          "SECOND_TIER":                    0xff,
-                                                            
-                          "SET_START_LINE":                 0x21,
-                          "SET_STOP_LINE":                  0x23,
-                          "GET_AMBIENT_TEMPERATURE":        0x2a,
-                          "GET_POWER_WATCHDOG_SEC":         0x31,
-                          "SET_POWER_WATCHDOG_SEC":         0x30,
-                          "SET_SCANS_TO_AVERAGE":           0x62,
-                          "GET_SCANS_TO_AVERAGE":           0x63,
-                          "THIRD_TIER":                     0xff }
+        self.generics = { "SET_GAIN_DB":                 0xb7,
+                          "GET_GAIN_DB":                 0xc5,
+                          "SET_INTEGRATION_TIME_MS":     0xb2,
+                          "GET_INTEGRATION_TIME_MS":     0xbf,
+                          "GET_LASER_WARNING_DELAY_SEC": 0x8b,
+                          "SET_LASER_WARNING_DELAY_SEC": 0x8a,
+                          "SECOND_TIER":                 0xff,
+                                                         
+                          "SET_START_LINE":              0x21,
+                          "SET_STOP_LINE":               0x23,
+                          "GET_AMBIENT_TEMPERATURE":     0x2a,
+                          "GET_POWER_WATCHDOG_SEC":      0x31,
+                          "SET_POWER_WATCHDOG_SEC":      0x30,
+                          "SET_SCANS_TO_AVERAGE":        0x62,
+                          "GET_SCANS_TO_AVERAGE":        0x63,
+                          "THIRD_TIER":                  0xff }
 
-        self.char_name_by_uuid = {}
-        for name, code in self.char_code_by_name.items():
-            self.char_name_by_uuid[self.wrap_uuid(code)] = name
+        self.name_by_uuid = {}
+        for name, code in self.code_by_name.items():
+            self.name_by_uuid[self.wrap_uuid(code)] = name
 
         self.parse_args()
 
@@ -84,6 +85,12 @@ class Fixture:
         self.args = parser.parse_args()
 
     async def run(self):
+
+        # note: will not connect to 'random' or first-found device, for laser safety reasons
+        if self.args.serial_number:
+            print(f"Searching for {self.args.serial_number}...")
+        else:
+            print("No serial number specified, so will simply list search results and exit.\n")
 
         # connect to device, read device information and characteristics
         await self.connect()
@@ -225,7 +232,7 @@ class Fixture:
         # iterate over standard Characteristics
         print("Characteristics:")
         for char in self.primary_service.characteristics:
-            name = self.get_char_name_by_uuid(char.uuid)
+            name = self.get_name_by_uuid(char.uuid)
             if "read" in char.properties:
                 try:
                     value = await self.client.read_gatt_char(char.uuid)
@@ -391,7 +398,7 @@ class Fixture:
         start_time = datetime.now()
 
         self.eeprom = {}
-        self.eeprom_pages = []
+        self.pages = []
 
         cmd_uuid = self.get_uuid_by_name("EEPROM_CMD")
         data_uuid = self.get_uuid_by_name("EEPROM_DATA")
@@ -402,11 +409,11 @@ class Fixture:
                 page_ids = bytearray([i, j])
                 await self.client.write_gatt_char(cmd_uuid, page_ids, response = True)
 
-                log.debug("reading EEPROM_DATA")
+                self.debug("reading EEPROM_DATA")
                 response = await self.client.read_gatt_char(data_uuid)
                 for byte in response:
                     buf.append(byte)
-            pages.append(buf)
+            self.pages.append(buf)
 
         elapsed_sec = (datetime.now() - start_time).total_seconds()
         self.debug("reading eeprom took {elapsed_sec:.2f} sec")
@@ -425,12 +432,12 @@ class Fixture:
         length     = address[2]
         end_byte   = start_byte + length
 
-        if page > len(self.eeprom_pages):
+        if page > len(self.pages):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
                 page, start_byte, length, data_type, field))
             return
 
-        buf = self.eeprom_pages[page]
+        buf = self.pages[page]
         if buf is None or end_byte > len(buf):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
                 page, start_byte, length, data_type, buf, field))
@@ -446,13 +453,11 @@ class Fixture:
             unpack_result = 0 
             try:
                 unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
-            except:
-                print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+            except Exception as ex:
+                print("error unpacking EEPROM page %d, offset %d, len %d as %s (field %s): %s" % (page, start_byte, length, data_type, field, ex))
                 return
 
         # self.debug(f"Unpacked page {page:02d}, offset {start_byte:02d}, len {length:02d}, datatype {data_type}: {unpack_result} {field}")
-
-        self.field_names.append(field)
         self.eeprom[field] = unpack_result
 
     ############################################################################
@@ -466,11 +471,11 @@ class Fixture:
     def wrap_uuid(self, code):
         return f"d1a7{code:04x}-af78-4449-a34f-4da1afaf51bc".lower()
 
-    def get_char_name_by_uuid(self, uuid):
-        return self.char_name_by_uuid.get(uuid.lower(), None)
+    def get_name_by_uuid(self, uuid):
+        return self.name_by_uuid.get(uuid.lower(), None)
         
-    def get_char_uuid_by_name(self, name):
-        code = self.char_code_by_name.get(name.upper(), None)
+    def get_uuid_by_name(self, name):
+        code = self.code_by_name.get(name.upper(), None)
         if code is None:
             return
         return self.wrap_uuid(code)
