@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import struct
 
+from time import sleep
 from bleak import BleakScanner, BleakClient
 from datetime import datetime
 
@@ -60,28 +61,28 @@ class Fixture:
 
     def parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        parser.add_argument("--debug",               action="store_true", help="debug output")
-        parser.add_argument("--timeout-sec",         type=int,            help="how long to search for spectrometers", default=30)
-        parser.add_argument("--serial-number",       type=str,            help="delay n ms between spectra")
+        parser.add_argument("--debug",                   action="store_true", help="debug output")
+        parser.add_argument("--timeout-sec",             type=int,            help="how long to search for spectrometers", default=30)
+        parser.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
+        parser.add_argument("--eeprom",                  action="store_true", help="load and parse the EEPROM")
+        parser.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
 
-        # not yet implemented
-        parser.add_argument("--eeprom",              action="store_true", help="load and parse the EEPROM")
-        parser.add_argument("--monitor",             action="store_true", help="monitor battery, laser state etc")
-
-        parser.add_argument("--integration-time-ms", type=int,            help="set integration time")
-        parser.add_argument("--gain-db",             type=float,          help="set gain (dB)")
-        parser.add_argument("--scans-to-average",    type=int,            help="set scan averaging")
-        parser.add_argument("--laser-enable",        action="store_true", help="fire the laser")
-
-        parser.add_argument("--spectra",             type=int,            help="spectra to acquire", default=5)
-        parser.add_argument("--outfile",             type=str,            help="save spectra to CSV file")
-        parser.add_argument("--auto-dark",           action="store_true", help="take Auto-Dark measurements")
-        parser.add_argument("--auto-raman",          action="store_true", help="take Auto-Raman measurements")
-
-        parser.add_argument("--laser-warning-delay-sec", type=int,        help="set laser warning delay (sec)")
-        parser.add_argument("--start-line",          type=int,            help="set vertical ROI start line")
-        parser.add_argument("--stop-line",           type=int,            help="set vertical ROI stop line")
-        parser.add_argument("--power-watchdog-sec",  type=int,            help="set power watchdog (sec)")
+        # need implemented / tested
+        parser.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
+        parser.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (sec)")
+                                                         
+        parser.add_argument("--integration-time-ms",     type=int,            help="set integration time")
+        parser.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
+        parser.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
+        parser.add_argument("--laser-enable",            action="store_true", help="fire the laser")
+                                                         
+        parser.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
+        parser.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
+        parser.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
+        parser.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
+                                                         
+        parser.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
+        parser.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line")
         self.args = parser.parse_args()
 
     async def run(self):
@@ -156,7 +157,7 @@ class Fixture:
         await self.read_characteristics()
 
         elapsed_sec = (datetime.now() - self.start_time).total_seconds()
-        self.debug("initial connection took {elapsed_sec:.2f} sec")
+        self.debug(f"initial connection took {elapsed_sec:.2f} sec")
 
     def detection_callback(self, device, advertisement_data):
         """
@@ -204,8 +205,8 @@ class Fixture:
         print("\ndisconnected")
 
     async def read_device_information(self):
-        print(f"address = {self.client.address}")
-        print(f"mtu_size = {self.client.mtu_size} bytes")
+        self.debug(f"address {self.client.address}")
+        self.debug(f"mtu_size {self.client.mtu_size} bytes")
 
         self.device_info = {}
         for service in self.client.services:
@@ -215,9 +216,9 @@ class Fixture:
                     value = self.decode(await self.client.read_gatt_char(char.uuid))
                     self.device_info[name] = value
 
-        print("Device Information:")
+        self.debug("Device Information:")
         for k, v in self.device_info.items():
-            print(f"  {k:24s} = {v}")
+            self.debug(f"  {k:24s} = {v}")
 
     async def read_characteristics(self):
         # find the primary service
@@ -230,7 +231,7 @@ class Fixture:
             return
 
         # iterate over standard Characteristics
-        print("Characteristics:")
+        self.debug("Characteristics:")
         for char in self.primary_service.characteristics:
             name = self.get_name_by_uuid(char.uuid)
             if "read" in char.properties:
@@ -247,7 +248,7 @@ class Fixture:
                 extra += f", Max write w/o rsp size: {char.max_write_without_response_size}"
 
             props = ",".join(char.properties)
-            print(f"  Characteristic {name:16s} {char.uuid} ({props}){extra}")
+            self.debug(f"  Characteristic {name:16s} {char.uuid} ({props}){extra}")
 
         # @see https://bleak.readthedocs.io/en/latest/api/client.html#gatt-characteristics
         # async BleakClient.read_gatt_char (char_specifier: Union[BleakGATTCharacteristic, int, str, UUID], **kwargs)→ bytearray
@@ -256,14 +257,14 @@ class Fixture:
     async def read_char(self, name, min_len=None):
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
-            raise f"invalid characteristic {name}"
+            raise RuntimeError(f"invalid characteristic {name}")
 
         response = await self.client.read_gatt_char(uuid)
         if response is None:
-            raise f"characteristic {name} returned no data"
+            raise RuntimeError(f"characteristic {name} returned no data")
 
         if min_len is not None and len(response) < min_len:
-            raise f"characteristic {name} returned insufficient data ({len(response)} < {min_len})"
+            self.debug(f"WARNING: characteristic {name} returned insufficient data ({len(response)} < {min_len})")
 
         buf = bytearray()
         for byte in response:
@@ -273,13 +274,13 @@ class Fixture:
     async def write_char(self, name, data, response_len=0):
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
-            raise f"invalid characteristic {name}"
+            raise RuntimeError(f"invalid characteristic {name}")
 
         if isinstance(list, data):
             data = bytearray(data)
         response = await self.client.write_gatt_char(uuid, data, response=(response_len > 0))
         if response_len and response is None or len(response) < response_len:
-            raise f"characteristic {name} returned insufficient data (response {response} < response_len {response_len})"
+            raise RuntimeError(f"characteristic {name} returned insufficient data (response {response} < response_len {response_len})")
         return response
 
     ############################################################################
@@ -347,27 +348,38 @@ class Fixture:
 
     async def get_battery_state(self):
         buf = await self.read_char("BATTERY_STATUS", 2)
-        print(f"battery response: {buf}")
-        return { 'perc': 100.0, 
-                 'charging': True }
+        self.debug(f"battery response: {buf}")
+        return { 'charging': buf[0] != 0,
+                 'perc': int(buf[1]) }
 
     async def get_laser_state(self):
-        buf = await self.read_char("LASER_STATUS", 7)
-        return { 'mode':            buf[0],
-                 'type':            buf[1],
-                 'enable':          buf[2],
-                 'watchdog_sec':    buf[3],
-                 'mask':            buf[6],
-                 'interlock_closed':buf[6] & 0x01,
-                 'firing':          buf[6] & 0x02 }
+        retval = {}
+        for k in [ 'mode', 'type', 'enable', 'watchdog_sec', 'mask', 'interlock_closed', 'laser_firing' ]:
+            retval[k] = None
+            
+        buf = await self.read_char("LASER_STATE", 7)
+        if len(buf) >= 4:
+            retval.update({
+                'mode':            buf[0],
+                'type':            buf[1],
+                'enable':          buf[2],
+                'watchdog_sec':    buf[3] })
+
+        if len(buf) >= 7: 
+            retval.update({
+                'mask':            buf[6],
+                'interlock_closed':buf[6] & 0x01,
+                'laser_firing':    buf[6] & 0x02 })
+
+        return retval
 
     async def get_status(self):
         bat = await self.get_battery_state()
-        bat_perc = f"{bat['perc']:.2f}%%"
+        bat_perc = f"{bat['perc']:3d}%"
         bat_chg = 'charging' if bat['charging'] else 'discharging'
 
         las = await self.get_laser_state()
-        las_firing = las['firing']
+        las_firing = las['laser_firing']
         intlock = 'closed (armed)' if las['interlock_closed'] else 'open (safe)'
 
         return f"Battery {bat_perc} ({bat_chg}), Laser {las_firing}, Interlock {intlock}"
@@ -416,7 +428,7 @@ class Fixture:
             self.pages.append(buf)
 
         elapsed_sec = (datetime.now() - start_time).total_seconds()
-        self.debug("reading eeprom took {elapsed_sec:.2f} sec")
+        self.debug(f"reading eeprom took {elapsed_sec:.2f} sec")
 
     def parse_eeprom_pages(self):
         for name, field in self.eeprom_field_loc.items():
