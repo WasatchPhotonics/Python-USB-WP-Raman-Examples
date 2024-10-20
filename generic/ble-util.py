@@ -26,7 +26,7 @@ class Fixture:
         self.stop_event = asyncio.Event()
 
         self.client = None
-        self.found = False
+        self.keep_scanning = True
         self.eeprom = None
         self.eeprom_field_loc = EEPROMFields.get_eeprom_fields()
         self.integration_time_ms = 0 # read from EEPROM startup field
@@ -114,7 +114,7 @@ class Fixture:
             print(f"No serial number specified, so will list search results and exit after {self.args.search_timeout_sec}sec.\n")
 
         # connect to device, read device information and characteristics
-        await self.connect()
+        await self.search_for_devices()
         if not self.client:
             return
 
@@ -163,8 +163,14 @@ class Fixture:
     # BLE Connection
     ############################################################################
 
-    async def connect(self):
+    async def search_for_devices(self):
         self.start_time = datetime.now()
+
+        # for some reason asyncio.timeout() isn't in my Python 3.10.15, so kludging
+        async def cancel_task(sec):
+            await asyncio.sleep(sec)
+            self.stop_scanning()
+        task = asyncio.create_task(cancel_task(self.args.search_timeout_sec))
 
         print(f"{datetime.now()} rssi local_name")
         async with BleakScanner(detection_callback=self.detection_callback, service_uuids=[self.WASATCH_SERVICE]) as scanner:
@@ -197,7 +203,7 @@ class Fixture:
                                              service_uuids=['0000ff00-0000-1000-8000-00805f9b34fb', 'd1a7ff00-af78-4449-a34f-4da1afaf51bc'], 
                                              tx_power=0, rssi=-67)
         """
-        if self.found:
+        if not self.keep_scanning:
             return
 
         if (datetime.now() - self.start_time).total_seconds() >= self.args.search_timeout_sec:
@@ -217,7 +223,7 @@ class Fixture:
             return # not the one
 
         self.debug("stopping scanner")
-        self.found = True
+        self.stop_scanning()
 
         if self.args.debug:
             self.dump(device, advertisement_data)
@@ -226,10 +232,10 @@ class Fixture:
         self.client = BleakClient(address_or_ble_device=device, 
                                   disconnected_callback=self.disconnected_callback,
                                   timeout=self.args.search_timeout_sec)
-        self.stop_event.set()
         self.debug(f"BleakClient instantiated: {self.client}")
 
     def stop_scanning(self):
+        self.keep_scanning = False
         self.stop_event.set()
 
     def disconnected_callback(self):
