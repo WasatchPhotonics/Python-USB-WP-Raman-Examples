@@ -65,12 +65,15 @@ class Fixture:
         parser.add_argument("--debug",                   action="store_true", help="debug output")
         parser.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
         parser.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
-        parser.add_argument("--eeprom",                  action="store_true", help="display EEPROM contents")
+        parser.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
         parser.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
         parser.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
+        parser.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
         parser.add_argument("--plot",                    action="store_true", help="graph spectra")
-
-        # need implemented / tested
+        parser.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
+        parser.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
+                                                         
+        # need implemented 
         parser.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
         parser.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (sec)")
                                                          
@@ -78,10 +81,6 @@ class Fixture:
         parser.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
         parser.add_argument("--scans-to-average",        type=int,            help="set scan averaging", default=1)
         parser.add_argument("--laser-enable",            action="store_true", help="fire the laser")
-                                                         
-        parser.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
-        parser.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
-        parser.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
                                                          
         parser.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
         parser.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line")
@@ -102,6 +101,9 @@ class Fixture:
 
         # always read EEPROM (needed to read spectra)
         await self.read_eeprom()
+        if self.args.eeprom:
+            self.display_eeprom()
+            return
 
         # timeouts
         if self.args.power_watchdog_sec is not None:
@@ -266,6 +268,11 @@ class Fixture:
         return buf
 
     async def write_char(self, name, data):
+        """
+        Although write_gatt_char takes a 'response' flag, that is used to request
+        an ACK for purpose of delivery verification; BLE writes don't ever 
+        generate a "data" response.
+        """
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
             raise RuntimeError(f"invalid characteristic {name}")
@@ -392,10 +399,15 @@ class Fixture:
         return f"Battery {bat_perc} ({bat_chg}), Laser {las_firing}, Interlock {intlock}"
 
     async def monitor(self):
+        print("\nPress ctrl-C to exit...\n")
         while True:
-            status = await self.get_status()
-            print(f"{datetime.now()} {status}")
-            sleep(1)
+            try:
+                status = await self.get_status()
+                print(f"{datetime.now()} {status}")
+                sleep(1)
+            except KeyboardInterrupt:
+                print()
+                break
 
     ############################################################################
     # Spectra
@@ -405,10 +417,10 @@ class Fixture:
         # write header rows
         if self.args.outfile:
             with open(self.args.outfile, "a") as outfile:
-                outfile.write(f"pixel, " + ", ".join([f"{v}" for v in range(self.pixels)]))
-                outfile.write(f"wavelengths, " + ", ".join([f"{v:.2f}" for v in self.wavelengths]))
+                outfile.write(f"pixel, " + ", ".join([f"{v}" for v in range(self.pixels)]) + "\n")
+                outfile.write(f"wavelengths, " + ", ".join([f"{v:.2f}" for v in self.wavelengths]) + "\n")
                 if self.wavenumbers:
-                    outfile.write(f"wavenumbers, " + ", ".join([f"{v:.2f}" for v in self.wavenumbers]))
+                    outfile.write(f"wavenumbers, " + ", ".join([f"{v:.2f}" for v in self.wavenumbers]) + "\n")
 
         if self.args.plot:
             xaxis = self.wavenumbers if self.wavenumbers else self.wavelengths
@@ -425,8 +437,8 @@ class Fixture:
             print(f"{now} received spectrum {i+1:3d}/{self.args.spectra} (max {hi:8.2f}, mean {avg:8.2f}) {spectrum[:10]}")
 
             if self.args.outfile:
-                with open(self.a0rgf.outfile, "a") as outfile:
-                    outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]))
+                with open(self.args.outfile, "a") as outfile:
+                    outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]) + "\n")
                     
             if self.args.plot:
                 plt.clf()
@@ -514,10 +526,10 @@ class Fixture:
             msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
         print(f"{datetime.now()} {msg}")
 
-        if self.args.eeprom:
-            print("EEPROM:")
-            for name, value in self.eeprom.items():
-                print(f"  {name:30s} {value}")
+    def display_eeprom(self):
+        print("EEPROM:")
+        for name, value in self.eeprom.items():
+            print(f"  {name:30s} {value}")
 
     def generate_wavecal(self):
         self.pixels = self.eeprom["active_pixels_horizontal"]
