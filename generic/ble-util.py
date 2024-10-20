@@ -1,11 +1,13 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import argparse
 import asyncio
 import struct
+import re
 
 from time import sleep
 from bleak import BleakScanner, BleakClient
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 import EEPROMFields
 
@@ -62,28 +64,39 @@ class Fixture:
 
     def parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        parser.add_argument("--debug",                   action="store_true", help="debug output")
-        parser.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
-        parser.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
-        parser.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
-        parser.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
-        parser.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
-        parser.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
-        parser.add_argument("--plot",                    action="store_true", help="graph spectra")
-        parser.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
-        parser.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
+
+        group = parser.add_argument_group('Discovery')
+        group.add_argument("--debug",                   action="store_true", help="debug output")
+        group.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
+        group.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
+        group.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
+        group.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc\n")
+
+        group = parser.add_argument_group('Spectra')
+        group.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
+        group.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
+        group.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements\n")
+        group.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
+        group.add_argument("--plot",                    action="store_true", help="graph spectra")
                                                          
-        # need implemented 
-        parser.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
-        parser.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (sec)")
-                                                         
-        parser.add_argument("--integration-time-ms",     type=int,            help="set integration time")
-        parser.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
-        parser.add_argument("--scans-to-average",        type=int,            help="set scan averaging", default=1)
-        parser.add_argument("--laser-enable",            action="store_true", help="fire the laser")
-                                                         
-        parser.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
-        parser.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line")
+        group = parser.add_argument_group('Acquisition Parameters')
+        group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
+        group.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
+        group.add_argument("--scans-to-average",        type=int,            help="set scan averaging", default=1)
+        group.add_argument("--laser-enable",            action="store_true", help="fire the laser")
+        group.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
+        group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line\n")
+
+        group = parser.add_argument_group('Ramping')
+        group.add_argument("--ramp-integ",              action="store_true", help="ramp integration time")
+        group.add_argument("--ramp-gain",               action="store_true", help="ramp gain dB")
+        group.add_argument("--ramp-avg",                action="store_true", help="ramp scan averaging")
+        group.add_argument("--ramp-roi",                action="store_true", help="ramp vertical roi")
+
+        group = parser.add_argument_group('Timing')
+        group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
+        group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (sec)")
+
         self.args = parser.parse_args()
 
     async def run(self):
@@ -328,33 +341,42 @@ class Fixture:
 
     async def set_integration_time_ms(self, ms):
         # using dedicated Characteristic, although 2nd-tier version now exists
+        print(f"setting integration time to {ms}ms")
         data = [ 0x00,               # fixed
                  (ms << 16) & 0xff,  # MSB
                  (ms <<  8) & 0xff,
                  (ms      ) & 0xff ] # LSB
-        await self.write_char("INTEGRATION_TIME", data)
+        await self.write_char("INTEGRATION_TIME_MS", data)
         self.integration_time_ms = ms
 
     async def set_gain_db(self, db):
         # using dedicated Characteristic, although 2nd-tier version now exists
+        print(f"setting gain to {db}dB")
         msb = int(db) & 0xff
         lsb = int((value - int(value)) * 256) & 0xff
         await self.write_char("GAIN_DB", [msb, lsb])
 
     async def set_scans_to_average(self, n):
+        print(f"setting scan averaging to {n}")
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_SCANS_TO_AVERAGE")
         await self.write_char("GENERIC", [tier, cmd, n])
 
     async def set_start_line(self, n):
+        print(f"setting start line to {n}")
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_START_LINE")
         await self.write_char("GENERIC", [tier, cmd, n])
 
     async def set_stop_line(self, n):
+        print(f"setting stop line to {n}")
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_STOP_LINE")
         await self.write_char("GENERIC", [tier, cmd, n])
+
+    async def set_vertical_roi(self, pair):
+        await self.set_start_line(pair[0])
+        await self.set_stop_line (pair[1])
 
     ############################################################################
     # Monitor
@@ -413,8 +435,41 @@ class Fixture:
     # Spectra
     ############################################################################
 
+    def init_ramps(self):
+        self.ramped_integ = None
+        self.ramped_gain = None
+        self.ramped_avg = None
+        self.ramped_roi = None
+        self.ramping = False
+
+        n = self.args.spectra
+
+        if self.args.ramp_integ:
+            self.ramping = True
+            self.ramped_integ = list(range(10, 2011, 2000 // (n-1)))
+            print(f"ramping integration time: {self.ramped_integ}")
+        if self.args.ramp_gain:
+            self.ramping = True
+            self.ramped_gain = list(range(0, 31, 30 / (n-1)))
+            print(f"ramping gain dB: {self.ramped_gain}")
+        if self.args.ramp_avg:
+            self.ramping = True
+            self.ramped_avg = list(range(1, 102, 100 // (n-1)))
+            print(f"ramping scan averaging: {self.ramped_avg}")
+        if self.args.ramp_roi:
+            self.ramping = True
+            step = 1080 // n
+            self.ramped_roi = [ (i*n, (i+1)*n) for i in range(n) ]
+            print(f"ramping vertical ROI: {self.ramped_roi}")
+
+    async def update_ramps(self, i):
+        if self.ramped_integ: await self.set_integration_time_ms(self.ramped_integ[i])
+        if self.ramped_gain:  await self.set_gain_db            (self.ramped_gain [i])
+        if self.ramped_avg:   await self.set_scans_to_average   (self.ramped_avg  [i])
+        if self.ramped_roi:   await self.set_vertical_roi       (self.ramped_roi  [i])
+
     async def perform_collection(self):
-        # write header rows
+        # init outfile
         if self.args.outfile:
             with open(self.args.outfile, "a") as outfile:
                 outfile.write(f"pixel, " + ", ".join([f"{v}" for v in range(self.pixels)]) + "\n")
@@ -422,29 +477,39 @@ class Fixture:
                 if self.wavenumbers:
                     outfile.write(f"wavenumbers, " + ", ".join([f"{v:.2f}" for v in self.wavenumbers]) + "\n")
 
+        # init graph
         if self.args.plot:
             xaxis = self.wavenumbers if self.wavenumbers else self.wavelengths
             plt.ion()
 
+        # init ramps
+        self.init_ramps()
+
         # collect however many spectra were requested
         for i in range(self.args.spectra):
+            await self.update_ramps(i)
+
+            start_time = datetime.now()
             spectrum = await self.get_spectrum()
             now = datetime.now()
+            elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
 
             hi = max(spectrum)
             avg = sum(spectrum) / len(spectrum)
+            std = np.std(spectrum)
 
-            print(f"{now} received spectrum {i+1:3d}/{self.args.spectra} (max {hi:8.2f}, mean {avg:8.2f}) {spectrum[:10]}")
+            print(f"{now} received spectrum {i+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
 
             if self.args.outfile:
                 with open(self.args.outfile, "a") as outfile:
                     outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]) + "\n")
                     
             if self.args.plot:
-                plt.clf()
+                if self.ramping:
+                    plt.clf()
                 plt.plot(xaxis, spectrum)
                 plt.draw()
-                plt.pause(0.01)
+                # plt.pause(0.01)
 
     async def get_spectrum(self):
         header_len = 2 # the 2-byte first_pixel
