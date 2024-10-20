@@ -24,6 +24,7 @@ class Fixture:
         self.found = False
         self.eeprom = None
         self.eeprom_field_loc = EEPROMFields.get_eeprom_fields()
+        self.integration_time_ms = 0 # read from EEPROM startup field
 
         self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
                               "GAIN_DB":             0xff02,
@@ -62,10 +63,12 @@ class Fixture:
     def parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--debug",                   action="store_true", help="debug output")
-        parser.add_argument("--timeout-sec",             type=int,            help="how long to search for spectrometers", default=30)
+        parser.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
         parser.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
-        parser.add_argument("--eeprom",                  action="store_true", help="load and parse the EEPROM")
+        parser.add_argument("--eeprom",                  action="store_true", help="display EEPROM contents")
         parser.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
+
+        parser.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
 
         # need implemented / tested
         parser.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
@@ -73,10 +76,9 @@ class Fixture:
                                                          
         parser.add_argument("--integration-time-ms",     type=int,            help="set integration time")
         parser.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
-        parser.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
+        parser.add_argument("--scans-to-average",        type=int,            help="set scan averaging", default=1)
         parser.add_argument("--laser-enable",            action="store_true", help="fire the laser")
                                                          
-        parser.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
         parser.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
         parser.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
         parser.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
@@ -96,9 +98,8 @@ class Fixture:
         # connect to device, read device information and characteristics
         await self.connect()
 
-        # read EEPROM
-        if self.args.eeprom:
-            await self.read_eeprom()
+        # always read EEPROM (needed to read spectra)
+        await self.read_eeprom()
 
         # timeouts
         if self.args.power_watchdog_sec is not None:
@@ -126,7 +127,7 @@ class Fixture:
         if self.args.monitor:
             await self.monitor()
         elif self.args.spectra:
-            await self.read_spectra()
+            await self.perform_collection()
 
     ############################################################################
     # BLE Connection
@@ -169,7 +170,7 @@ class Fixture:
         if self.found:
             return
 
-        if (datetime.now() - self.start_time).total_seconds() >= self.args.timeout_sec:
+        if (datetime.now() - self.start_time).total_seconds() >= self.args.search_timeout_sec:
             self.debug("timeout expired")
             self.stop_scanning()
             return
@@ -194,7 +195,7 @@ class Fixture:
         self.debug("instantiating BleakClient")
         self.client = BleakClient(address_or_ble_device=device, 
                                   disconnected_callback=self.disconnected_callback,
-                                  timeout=self.args.timeout_sec)
+                                  timeout=self.args.search_timeout_sec)
         self.stop_event.set()
         self.debug(f"BleakClient instantiated: {self.client}")
 
@@ -276,10 +277,13 @@ class Fixture:
         if uuid is None:
             raise RuntimeError(f"invalid characteristic {name}")
 
-        if isinstance(list, data):
+        if isinstance(data, list):
             data = bytearray(data)
+
+        self.debug(f">> write_char({name}, {data}, response_len {response_len})")
         response = await self.client.write_gatt_char(uuid, data, response=(response_len > 0))
-        if response_len and response is None or len(response) < response_len:
+        self.debug(f"<< write_char response {response}")
+        if response_len and (response is None or len(response) < response_len):
             raise RuntimeError(f"characteristic {name} returned insufficient data (response {response} < response_len {response_len})")
         return response
 
@@ -320,6 +324,7 @@ class Fixture:
                  (ms <<  8) & 0xff,
                  (ms      ) & 0xff ] # LSB
         await self.write_char("INTEGRATION_TIME", data)
+        self.integration_time_ms = ms
 
     async def set_gain_db(self, db):
         # using dedicated Characteristic, although 2nd-tier version now exists
@@ -394,8 +399,93 @@ class Fixture:
     # Spectra
     ############################################################################
 
-    async def read_spectra(self):
-        pass
+    async def perform_collection(self):
+        # write header rows
+        if self.args.outfile:
+            with open(self.args.outfile, "a") as outfile:
+                outfile.write(f"pixel, " + ", ".join([f"{v}" for v in range(self.pixels)]))
+                outfile.write(f"wavelengths, " + ", ".join([f"{v:.2f}" for v in self.wavelengths]))
+                if self.wavenumbers:
+                    outfile.write(f"wavenumbers, " + ", ".join([f"{v:.2f}" for v in self.wavenumbers]))
+
+        # collect however many spectra were requested
+        for i in range(self.args.spectra):
+            spectrum = await self.get_spectrum()
+            now = datetime.now()
+
+            hi = max(spectrum)
+            avg = sum(spectrum) / len(spectrum)
+
+            print(f"{now} received spectrum of {len(spectrum)} pixels with max {hi:8.2f} and mean {avg:8.2f}: {spectrum[:10]}")
+
+            if self.args.outfile:
+                with open(self.a0rgf.outfile, "a") as outfile:
+                    outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]))
+
+    async def get_spectrum(self):
+        header_len = 2 # the 2-byte first_pixel
+        pixels_read = 0
+        spectrum = [0] * self.pixels
+
+        # determine which type of measurement
+        if self.args.auto_raman: 
+            arg = 2
+        elif self.args.auto_dark: 
+            arg = 1
+        else: 
+            arg = 0
+
+        # send the ACQUIRE
+        await self.write_char("ACQUIRE_SPECTRUM", [arg])
+
+        # compute timeout
+        timeout_ms = self.integration_time_ms * self.args.scans_to_average + 6000 # 4sec latency + 2sec buffer
+        start_time = datetime.now()
+
+        # read the spectral data
+        while True:
+            if (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
+                raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
+
+            self.debug(f"requesting spectrum packet starting at pixel {pixels_read}")
+            data = pixels_read.to_bytes(2, byteorder="big")
+            await self.write_char("SPECTRUM_CMD", data)
+
+            self.debug(f"reading spectrum data (hopefully from pixels_read {pixels_read})")
+            response = await self.read_char("READ_SPECTRUM")
+
+            # validate spectrum response
+            response_len = len(response)
+            if (response_len < header_len or response_len % 2 != 0):
+                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes")
+
+            # first_pixel is a big-endian uint16
+            first_pixel = int((response[0] << 8) | response[1])
+            if (first_pixel > 2048 or first_pixel < 0):
+                self.debug(f"received NACK (first_pixel {first_pixel})")
+                sleep(0.1)
+                continue
+            
+            if first_pixel != pixels_read:
+               raise RuntimeError(f"requested packet to start at {pixels_read}, received first_pixel {first_pixel}")
+
+            pixels_in_packet = int((response_len - header_len) / 2)
+            log.debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
+
+            for i in range(pixels_in_packet):
+                # pixel intensities are little-endian uint16
+                offset = header_len + i * 2
+                intensity = int((response[offset+1] << 8) | response[offset])
+
+                spectrum[pixels_read] = intensity
+                pixels_read += 1
+
+                if pixels_read == self.pixels:
+                    self.debug("read complete spectrum")
+                    if (i + 1 != pixels_in_packet):
+                        raise RuntimeError(f"ERROR: ignoring {pixels_in_packet - (i + 1)} trailing pixels")
+
+        return spectrum
 
     ############################################################################
     # EEPROM
@@ -404,7 +494,36 @@ class Fixture:
     async def read_eeprom(self):
         await self.read_eeprom_pages()
         self.parse_eeprom_pages()
+        self.generate_wavecal()
 
+        self.integration_time_ms = self.eeprom["startup_integration_time_ms"]
+
+        if self.args.eeprom:
+            print("EEPROM:")
+            for name, value in self.eeprom.items():
+                print(f"  {name:30s} {value}")
+            print(f"Wavecal: ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)", end='')
+            if self.wavenumbers:
+                print(f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)", end='')
+            print()
+
+    def generate_wavecal(self):
+        self.pixels = self.eeprom["active_pixels_horizontal"]
+        coeffs = [ self.eeprom[f"wavecal_c{i}"] for i in range(5) ]
+
+        self.wavelengths = []
+        for i in range(self.pixels):
+            nm = (  coeffs[0] +
+                  + coeffs[1] * i
+                  + coeffs[2] * i * i
+                  + coeffs[3] * i * i * i
+                  + coeffs[4] * i * i * i * i)
+            self.wavelengths.append(nm)
+
+        self.excitation = self.eeprom["excitation_nm_float"]
+        self.wavenumbers = None
+        if self.excitation:
+            self.wavenumbers = [ (1e7/self.excitation - 1e7/nm) for nm in self.wavelengths ]
 
     async def read_eeprom_pages(self):
         start_time = datetime.now()
@@ -433,10 +552,6 @@ class Fixture:
     def parse_eeprom_pages(self):
         for name, field in self.eeprom_field_loc.items():
             self.unpack_eeprom_field(field.pos, field.data_type, name)
-
-        print("EEPROM:")
-        for name, value in self.eeprom.items():
-            print(f"  {name:30s} {value}")
 
     def unpack_eeprom_field(self, address, data_type, field):
         page       = address[0]
