@@ -417,7 +417,7 @@ class Fixture:
             hi = max(spectrum)
             avg = sum(spectrum) / len(spectrum)
 
-            print(f"{now} received spectrum of {len(spectrum)} pixels with max {hi:8.2f} and mean {avg:8.2f}: {spectrum[:10]}")
+            print(f"{now} received spectrum {i+1:3d}/{self.args.spectra} (max {hi:8.2f}, mean {avg:8.2f}) {spectrum[:10]}")
 
             if self.args.outfile:
                 with open(self.a0rgf.outfile, "a") as outfile:
@@ -462,14 +462,11 @@ class Fixture:
 
             # first_pixel is a big-endian uint16
             first_pixel = int((response[0] << 8) | response[1])
-            if (first_pixel > 2048 or first_pixel < 0):
+            if first_pixel != pixels_read:
                 self.debug(f"received NACK (first_pixel {first_pixel})")
                 sleep(0.2)
                 continue
             
-            if first_pixel != pixels_read:
-               raise RuntimeError(f"requested packet to start at {pixels_read}, received first_pixel {first_pixel}")
-
             pixels_in_packet = int((response_len - header_len) / 2)
             self.debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
 
@@ -497,16 +494,19 @@ class Fixture:
         self.parse_eeprom_pages()
         self.generate_wavecal()
 
+        # grab initial integration time (used for acquisition timeout)
         self.integration_time_ms = self.eeprom["startup_integration_time_ms"]
+
+        msg  = f"Connected to {self.eeprom['model']} {self.eeprom['serial_number']} with {self.pixels} pixels "
+        msg += f"from ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)"
+        if self.wavenumbers:
+            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
+        print(f"{datetime.now()} {msg}")
 
         if self.args.eeprom:
             print("EEPROM:")
             for name, value in self.eeprom.items():
                 print(f"  {name:30s} {value}")
-            print(f"Wavecal: ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)", end='')
-            if self.wavenumbers:
-                print(f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)", end='')
-            print()
 
     def generate_wavecal(self):
         self.pixels = self.eeprom["active_pixels_horizontal"]
