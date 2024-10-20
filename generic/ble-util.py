@@ -35,7 +35,7 @@ class Fixture:
                               "EEPROM_CMD":          0xff07,
                               "EEPROM_DATA":         0xff08,
                               "BATTERY_STATUS":      0xff09,
-                              "GENERIC_MESSAGE":     0xff0a }
+                              "GENERIC":             0xff0a }
 
         self.generics = { "SET_GAIN_DB":                 0xb7,
                           "GET_GAIN_DB":                 0xc5,
@@ -43,7 +43,7 @@ class Fixture:
                           "GET_INTEGRATION_TIME_MS":     0xbf,
                           "GET_LASER_WARNING_DELAY_SEC": 0x8b,
                           "SET_LASER_WARNING_DELAY_SEC": 0x8a,
-                          "SECOND_TIER":                 0xff,
+                          "NEXT_TIER":                   0xff,
                                                          
                           "SET_START_LINE":              0x21,
                           "SET_STOP_LINE":               0x23,
@@ -51,12 +51,11 @@ class Fixture:
                           "GET_POWER_WATCHDOG_SEC":      0x31,
                           "SET_POWER_WATCHDOG_SEC":      0x30,
                           "SET_SCANS_TO_AVERAGE":        0x62,
-                          "GET_SCANS_TO_AVERAGE":        0x63,
-                          "THIRD_TIER":                  0xff }
+                          "GET_SCANS_TO_AVERAGE":        0x63 }
 
-        self.name_by_uuid = {}
-        for name, code in self.code_by_name.items():
-            self.name_by_uuid[self.wrap_uuid(code)] = name
+        # reverse lookups
+        self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
+        self.generic_by_code = { code: name for name, code in self.generics.items() }
 
         self.parse_args()
 
@@ -93,10 +92,12 @@ class Fixture:
         if self.args.serial_number:
             print(f"Searching for {self.args.serial_number}...")
         else:
-            print("No serial number specified, so will simply list search results and exit.\n")
+            print(f"No serial number specified, so will list search results and exit after {self.args.search_timeout_sec}sec.\n")
 
         # connect to device, read device information and characteristics
         await self.connect()
+        if not self.client:
+            return
 
         # always read EEPROM (needed to read spectra)
         await self.read_eeprom()
@@ -152,10 +153,10 @@ class Fixture:
         await self.client.connect()
 
         # grab device information
-        await self.read_device_information()
+        await self.load_device_information()
 
         # get Characteristic information
-        await self.read_characteristics()
+        await self.load_characteristics()
 
         elapsed_sec = (datetime.now() - self.start_time).total_seconds()
         self.debug(f"initial connection took {elapsed_sec:.2f} sec")
@@ -205,7 +206,7 @@ class Fixture:
     def disconnected_callback(self):
         print("\ndisconnected")
 
-    async def read_device_information(self):
+    async def load_device_information(self):
         self.debug(f"address {self.client.address}")
         self.debug(f"mtu_size {self.client.mtu_size} bytes")
 
@@ -219,9 +220,9 @@ class Fixture:
 
         self.debug("Device Information:")
         for k, v in self.device_info.items():
-            self.debug(f"  {k:24s} = {v}")
+            self.debug(f"  {k:30s} {v}")
 
-    async def read_characteristics(self):
+    async def load_characteristics(self):
         # find the primary service
         self.primary_service = None
         for service in self.client.services:
@@ -232,28 +233,17 @@ class Fixture:
             return
 
         # iterate over standard Characteristics
+        # @see https://bleak.readthedocs.io/en/latest/api/client.html#gatt-characteristics
         self.debug("Characteristics:")
         for char in self.primary_service.characteristics:
             name = self.get_name_by_uuid(char.uuid)
-            if "read" in char.properties:
-                try:
-                    value = await self.client.read_gatt_char(char.uuid)
-                    value = self.decode(value)
-                    extra = f", Value: {value}"
-                except Exception as e:
-                    extra = f", Error: {e}"
-            else:
-                extra = ""
+            extra = ""
 
             if "write-without-response" in char.properties:
                 extra += f", Max write w/o rsp size: {char.max_write_without_response_size}"
 
             props = ",".join(char.properties)
-            self.debug(f"  Characteristic {name:16s} {char.uuid} ({props}){extra}")
-
-        # @see https://bleak.readthedocs.io/en/latest/api/client.html#gatt-characteristics
-        # async BleakClient.read_gatt_char (char_specifier: Union[BleakGATTCharacteristic, int, str, UUID], **kwargs)→ bytearray
-        # async BleakClient.write_gatt_char(char_specifier: Union[BleakGATTCharacteristic, int, str, UUID], data: Buffer, response: bool = None)→ None
+            self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
 
     async def read_char(self, name, min_len=None):
         uuid = self.get_uuid_by_name(name)
@@ -262,8 +252,10 @@ class Fixture:
 
         response = await self.client.read_gatt_char(uuid)
         if response is None:
-            raise RuntimeError(f"characteristic {name} returned no data")
+            # responses may be optional on a write, but they're required on read
+            raise RuntimeError("attempt to read {name} returned no data")
 
+        self.debug(f"<< read_char({name}, min_len {min_len}): {response}")
         if min_len is not None and len(response) < min_len:
             self.debug(f"WARNING: characteristic {name} returned insufficient data ({len(response)} < {min_len})")
 
@@ -272,33 +264,42 @@ class Fixture:
             buf.append(byte)
         return buf
 
-    async def write_char(self, name, data, response_len=0):
+    async def write_char(self, name, data):
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
             raise RuntimeError(f"invalid characteristic {name}")
 
         if isinstance(data, list):
             data = bytearray(data)
+        extra = self.expand_path(name, data)
 
-        self.debug(f">> write_char({name}, {data}, response_len {response_len})")
-        response = await self.client.write_gatt_char(uuid, data, response=(response_len > 0))
-        self.debug(f"<< write_char response {response}")
-        if response_len and (response is None or len(response) < response_len):
-            raise RuntimeError(f"characteristic {name} returned insufficient data (response {response} < response_len {response_len})")
-        return response
+        self.debug(f">> write_char({name}, {data}){extra}")
+        await self.client.write_gatt_char(uuid, data, response=True) # ack all writes
+
+    def expand_path(self, name, data):
+        if name != "GENERIC":
+            return ""
+        path = []
+        for i in range(len(data)):
+            code = data[i]
+            name = self.generic_by_code[code]
+            path.append(name)
+            if code != 0xff:
+                break
+        return " [" + ", ".join(path) + "]"
 
     ############################################################################
     # Timeouts
     ############################################################################
 
     async def set_power_watchdog_sec(self, sec):
-        tier = self.generics.get("SECOND_TIER")
+        tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_POWER_WATCHDOG_SEC")
-        await self.write_char("GENERIC_MESSAGE", [tier, cmd, sec])
+        await self.write_char("GENERIC", [tier, cmd, sec])
 
     async def set_laser_warning_delay_sec(self, sec):
         cmd = self.generics.get("SET_LASER_WARNING_DELAY_SEC")
-        await self.write_char("GENERIC_MESSAGE", [cmd, sec])
+        await self.write_char("GENERIC", [cmd, sec])
 
     ############################################################################
     # Laser Control
@@ -333,19 +334,19 @@ class Fixture:
         await self.write_char("GAIN_DB", [msb, lsb])
 
     async def set_scans_to_average(self, n):
-        tier = self.generics.get("SECOND_TIER")
+        tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_SCANS_TO_AVERAGE")
-        await self.write_char("GENERIC_MESSAGE", [tier, cmd, n])
+        await self.write_char("GENERIC", [tier, cmd, n])
 
     async def set_start_line(self, n):
-        tier = self.generics.get("SECOND_TIER")
+        tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_START_LINE")
-        await self.write_char("GENERIC_MESSAGE", [tier, cmd, n])
+        await self.write_char("GENERIC", [tier, cmd, n])
 
     async def set_stop_line(self, n):
-        tier = self.generics.get("SECOND_TIER")
+        tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_STOP_LINE")
-        await self.write_char("GENERIC_MESSAGE", [tier, cmd, n])
+        await self.write_char("GENERIC", [tier, cmd, n])
 
     ############################################################################
     # Monitor
@@ -443,7 +444,7 @@ class Fixture:
         start_time = datetime.now()
 
         # read the spectral data
-        while True:
+        while pixels_read < self.pixels:
             if (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
                 raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
 
@@ -463,14 +464,14 @@ class Fixture:
             first_pixel = int((response[0] << 8) | response[1])
             if (first_pixel > 2048 or first_pixel < 0):
                 self.debug(f"received NACK (first_pixel {first_pixel})")
-                sleep(0.1)
+                sleep(0.2)
                 continue
             
             if first_pixel != pixels_read:
                raise RuntimeError(f"requested packet to start at {pixels_read}, received first_pixel {first_pixel}")
 
             pixels_in_packet = int((response_len - header_len) / 2)
-            log.debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
+            self.debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
 
             for i in range(pixels_in_packet):
                 # pixel intensities are little-endian uint16
@@ -533,15 +534,14 @@ class Fixture:
 
         cmd_uuid = self.get_uuid_by_name("EEPROM_CMD")
         data_uuid = self.get_uuid_by_name("EEPROM_DATA")
-        for i in range(8):
+        for page in range(8):
             buf = bytearray()
-            for j in range(4):
-                self.debug(f"writing EEPROM_CMD(page {i}, subpage {j})")
-                page_ids = bytearray([i, j])
-                await self.client.write_gatt_char(cmd_uuid, page_ids, response = True)
+            for subpage in range(4):
+                await self.write_char("EEPROM_CMD", [page, subpage])
+                #await self.client.write_gatt_char(cmd_uuid, page_ids, response = True)
 
-                self.debug("reading EEPROM_DATA")
-                response = await self.client.read_gatt_char(data_uuid)
+                response = await self.read_char("EEPROM_DATA")
+                #response = await self.client.read_gatt_char(data_uuid)
                 for byte in response:
                     buf.append(byte)
             self.pages.append(buf)
