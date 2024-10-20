@@ -5,6 +5,7 @@ import struct
 from time import sleep
 from bleak import BleakScanner, BleakClient
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 import EEPROMFields
 
@@ -66,8 +67,8 @@ class Fixture:
         parser.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
         parser.add_argument("--eeprom",                  action="store_true", help="display EEPROM contents")
         parser.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
-
         parser.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
+        parser.add_argument("--plot",                    action="store_true", help="graph spectra")
 
         # need implemented / tested
         parser.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
@@ -409,6 +410,10 @@ class Fixture:
                 if self.wavenumbers:
                     outfile.write(f"wavenumbers, " + ", ".join([f"{v:.2f}" for v in self.wavenumbers]))
 
+        if self.args.plot:
+            xaxis = self.wavenumbers if self.wavenumbers else self.wavelengths
+            plt.ion()
+
         # collect however many spectra were requested
         for i in range(self.args.spectra):
             spectrum = await self.get_spectrum()
@@ -422,6 +427,12 @@ class Fixture:
             if self.args.outfile:
                 with open(self.a0rgf.outfile, "a") as outfile:
                     outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]))
+                    
+            if self.args.plot:
+                plt.clf()
+                plt.plot(xaxis, spectrum)
+                plt.draw()
+                plt.pause(0.01)
 
     async def get_spectrum(self):
         header_len = 2 # the 2-byte first_pixel
