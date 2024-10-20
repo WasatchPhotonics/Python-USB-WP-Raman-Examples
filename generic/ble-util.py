@@ -92,6 +92,7 @@ class Fixture:
         group.add_argument("--ramp-gain",               action="store_true", help="ramp gain dB")
         group.add_argument("--ramp-avg",                action="store_true", help="ramp scan averaging")
         group.add_argument("--ramp-roi",                action="store_true", help="ramp vertical roi")
+        group.add_argument("--ramp-repeats",            type=int,            help="spectra at each ramp step", default=5)
 
         group = parser.add_argument_group('Timing')
         group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
@@ -126,7 +127,7 @@ class Fixture:
 
         # explicit laser control
         if self.args.laser_enable:
-            await self.set_laser_enable(self.args.laser_enable)
+            await self.set_laser_enable(True)
 
         # apply acquisition parameters
         if self.args.integration_time_ms is not None:
@@ -145,6 +146,10 @@ class Fixture:
             await self.monitor()
         elif self.args.spectra:
             await self.perform_collection()
+
+        # explicit laser control
+        if self.args.laser_enable:
+            await self.set_laser_enable(False)
 
     ############################################################################
     # BLE Connection
@@ -261,7 +266,7 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
 
-    async def read_char(self, name, min_len=None):
+    async def read_char(self, name, min_len=None, quiet=False):
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
             raise RuntimeError(f"invalid characteristic {name}")
@@ -271,16 +276,17 @@ class Fixture:
             # responses may be optional on a write, but they're required on read
             raise RuntimeError("attempt to read {name} returned no data")
 
-        self.debug(f"<< read_char({name}, min_len {min_len}): {response}")
-        if min_len is not None and len(response) < min_len:
-            self.debug(f"WARNING: characteristic {name} returned insufficient data ({len(response)} < {min_len})")
+        if not quiet:
+            self.debug(f"<< read_char({name}, min_len {min_len}): {response}")
+            if min_len is not None and len(response) < min_len:
+                self.debug(f"WARNING: characteristic {name} returned insufficient data ({len(response)} < {min_len})")
 
         buf = bytearray()
         for byte in response:
             buf.append(byte)
         return buf
 
-    async def write_char(self, name, data):
+    async def write_char(self, name, data, quiet=False):
         """
         Although write_gatt_char takes a 'response' flag, that is used to request
         an ACK for purpose of delivery verification; BLE writes don't ever 
@@ -291,10 +297,13 @@ class Fixture:
             raise RuntimeError(f"invalid characteristic {name}")
 
         if isinstance(data, list):
+            self.debug(f"data was {data}")
             data = bytearray(data)
+            self.debug(f"data now {data}")
         extra = self.expand_path(name, data)
 
-        self.debug(f">> write_char({name}, {data}){extra}")
+        if not quiet:
+            self.debug(f">> write_char({name}, {data}){extra}")
         await self.client.write_gatt_char(uuid, data, response=True) # ack all writes
 
     def expand_path(self, name, data):
@@ -353,7 +362,7 @@ class Fixture:
         # using dedicated Characteristic, although 2nd-tier version now exists
         print(f"setting gain to {db}dB")
         msb = int(db) & 0xff
-        lsb = int((value - int(value)) * 256) & 0xff
+        lsb = int((db - int(db)) * 256) & 0xff
         await self.write_char("GAIN_DB", [msb, lsb])
 
     async def set_scans_to_average(self, n):
@@ -432,7 +441,7 @@ class Fixture:
                 break
 
     ############################################################################
-    # Spectra
+    # Ramps
     ############################################################################
 
     def init_ramps(self):
@@ -445,17 +454,22 @@ class Fixture:
         n = self.args.spectra
 
         if self.args.ramp_integ:
+            step = 2000 // (n-1)
             self.ramping = True
-            self.ramped_integ = list(range(10, 2011, 2000 // (n-1)))
+            self.ramped_integ = [ max(10, i*step) for i in range(n) ]
             print(f"ramping integration time: {self.ramped_integ}")
+
         if self.args.ramp_gain:
+            step = round(30 / (n-1), 1)
             self.ramping = True
-            self.ramped_gain = list(range(0, 31, 30 / (n-1)))
+            self.ramped_gain = [ i*step for i in range(n) ]
             print(f"ramping gain dB: {self.ramped_gain}")
+
         if self.args.ramp_avg:
             self.ramping = True
-            self.ramped_avg = list(range(1, 102, 100 // (n-1)))
+            self.ramped_avg = [ 1, 5, 25, 125, 255 ]
             print(f"ramping scan averaging: {self.ramped_avg}")
+
         if self.args.ramp_roi:
             self.ramping = True
             step = 1080 // n
@@ -463,10 +477,22 @@ class Fixture:
             print(f"ramping vertical ROI: {self.ramped_roi}")
 
     async def update_ramps(self, i):
-        if self.ramped_integ: await self.set_integration_time_ms(self.ramped_integ[i])
-        if self.ramped_gain:  await self.set_gain_db            (self.ramped_gain [i])
-        if self.ramped_avg:   await self.set_scans_to_average   (self.ramped_avg  [i])
-        if self.ramped_roi:   await self.set_vertical_roi       (self.ramped_roi  [i])
+        if self.ramped_integ: 
+            await self.set_integration_time_ms(self.ramped_integ[i])
+
+        if self.ramped_gain:  
+            await self.set_gain_db(self.ramped_gain[i])
+
+        if self.ramped_roi:   
+            await self.set_vertical_roi(self.ramped_roi[i])
+
+        if self.ramped_avg:
+            if i < len(self.ramped_avg):
+                await self.set_scans_to_average(self.ramped_avg[i])
+
+    ############################################################################
+    # Spectra
+    ############################################################################
 
     async def perform_collection(self):
         # init outfile
@@ -486,30 +512,34 @@ class Fixture:
         self.init_ramps()
 
         # collect however many spectra were requested
-        for i in range(self.args.spectra):
-            await self.update_ramps(i)
+        count = 0
+        for step in range(self.args.spectra):
+            await self.update_ramps(step)
 
-            start_time = datetime.now()
-            spectrum = await self.get_spectrum()
-            now = datetime.now()
-            elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
+            repeats = self.args.ramp_repeats if self.ramping else 1
+            for repeat in range(repeats):
+                count += 1
+                start_time = datetime.now()
+                spectrum = await self.get_spectrum()
+                now = datetime.now()
+                elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
 
-            hi = max(spectrum)
-            avg = sum(spectrum) / len(spectrum)
-            std = np.std(spectrum)
+                hi = max(spectrum)
+                avg = sum(spectrum) / len(spectrum)
+                std = np.std(spectrum)
 
-            print(f"{now} received spectrum {i+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
+                print(f"{now} received spectrum {step:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
 
-            if self.args.outfile:
-                with open(self.args.outfile, "a") as outfile:
-                    outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]) + "\n")
-                    
-            if self.args.plot:
-                if self.ramping:
-                    plt.clf()
-                plt.plot(xaxis, spectrum)
-                plt.draw()
-                # plt.pause(0.01)
+                if self.args.outfile:
+                    with open(self.args.outfile, "a") as outfile:
+                        outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]) + "\n")
+                        
+                if self.args.plot:
+                    if not self.ramping:
+                        plt.clf()
+                    plt.plot(xaxis, spectrum)
+                    plt.draw()
+                    plt.pause(0.01)
 
     async def get_spectrum(self):
         header_len = 2 # the 2-byte first_pixel
@@ -525,7 +555,7 @@ class Fixture:
             arg = 0
 
         # send the ACQUIRE
-        await self.write_char("ACQUIRE_SPECTRUM", [arg])
+        await self.write_char("ACQUIRE_SPECTRUM", [arg], quiet=True)
 
         # compute timeout
         timeout_ms = self.integration_time_ms * self.args.scans_to_average + 6000 # 4sec latency + 2sec buffer
@@ -536,12 +566,12 @@ class Fixture:
             if (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
                 raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
 
-            self.debug(f"requesting spectrum packet starting at pixel {pixels_read}")
+            # self.debug(f"requesting spectrum packet starting at pixel {pixels_read}")
             data = pixels_read.to_bytes(2, byteorder="big")
-            await self.write_char("SPECTRUM_CMD", data)
+            await self.write_char("SPECTRUM_CMD", data, quiet=True)
 
-            self.debug(f"reading spectrum data (hopefully from pixels_read {pixels_read})")
-            response = await self.read_char("READ_SPECTRUM")
+            # self.debug(f"reading spectrum data (hopefully from pixels_read {pixels_read})")
+            response = await self.read_char("READ_SPECTRUM", quiet=True)
 
             # validate spectrum response
             response_len = len(response)
@@ -551,12 +581,12 @@ class Fixture:
             # first_pixel is a big-endian uint16
             first_pixel = int((response[0] << 8) | response[1])
             if first_pixel != pixels_read:
-                self.debug(f"received NACK (first_pixel {first_pixel})")
+                # self.debug(f"received NACK (first_pixel {first_pixel})")
                 sleep(0.2)
                 continue
             
             pixels_in_packet = int((response_len - header_len) / 2)
-            self.debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
+            self# .debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
 
             for i in range(pixels_in_packet):
                 # pixel intensities are little-endian uint16
@@ -567,7 +597,7 @@ class Fixture:
                 pixels_read += 1
 
                 if pixels_read == self.pixels:
-                    self.debug("read complete spectrum")
+                    # self.debug("read complete spectrum")
                     if (i + 1 != pixels_in_packet):
                         raise RuntimeError(f"ERROR: ignoring {pixels_in_packet - (i + 1)} trailing pixels")
 
@@ -625,10 +655,10 @@ class Fixture:
         for page in range(8):
             buf = bytearray()
             for subpage in range(4):
-                await self.write_char("EEPROM_CMD", [page, subpage])
+                await self.write_char("EEPROM_CMD", [page, subpage], quiet=True)
                 #await self.client.write_gatt_char(cmd_uuid, page_ids, response = True)
 
-                response = await self.read_char("EEPROM_DATA")
+                response = await self.read_char("EEPROM_DATA", quiet=True)
                 #response = await self.client.read_gatt_char(data_uuid)
                 for byte in response:
                     buf.append(byte)
@@ -726,27 +756,3 @@ class Fixture:
 if __name__ == "__main__":
     fixture = Fixture()
     asyncio.run(fixture.run())
-
-"""
-MacBook-Pro.lan [~/work/code/Python-USB-WP-Raman-Examples/generic] mzieg  4:06PM $ python -u ble-util.py --serial-number WP-01791
-2024-10-18 16:06:49.828516 rssi local_name
-2024-10-18 16:06:51.426465  -71 WP-SiG:WP-01791
-address = 13874014-5EDA-5E6B-220E-605D00FE86DF
-mtu_size = 515 bytes
-Device Information:
-  Manufacturer Name String = Wasatch Photonics
-  Hardware Revision String = 4
-  Firmware Revision String = 01.4.28
-  Software Revision String = 4.7.3
-Characteristics:
-  Characteristic INTEGRATION_TIME d1a7ff01-af78-4449-a34f-4da1afaf51bc (read,write), Value:
-  Characteristic GAIN_DB          d1a7ff02-af78-4449-a34f-4da1afaf51bc (read,write), Value: bytearray(b'\xaf')
-  Characteristic LASER_STATE      d1a7ff03-af78-4449-a34f-4da1afaf51bc (read,write,notify), Value:
-  Characteristic ACQUIRE_SPECTRUM d1a7ff04-af78-4449-a34f-4da1afaf51bc (write)
-  Characteristic SPECTRUM_COMMAND d1a7ff05-af78-4449-a34f-4da1afaf51bc (read,write), Value:
-  Characteristic READ_SPECTRUM    d1a7ff06-af78-4449-a34f-4da1afaf51bc (read,write,indicate), Value: bytearray(b'\xff\xff')
-  Characteristic EEPROM_COMMAND   d1a7ff07-af78-4449-a34f-4da1afaf51bc (read,write), Value: bytearray(b'\xad')
-  Characteristic EEPROM_DATA      d1a7ff08-af78-4449-a34f-4da1afaf51bc (read,indicate), Value: bytearray(b'\xe1')
-  Characteristic BATTERY_STATUS   d1a7ff09-af78-4449-a34f-4da1afaf51bc (read,notify), Value:
-  Characteristic GENERIC_MESSAGE  d1a7ff0a-af78-4449-a34f-4da1afaf51bc (read,write,indicate), Value:
-"""
