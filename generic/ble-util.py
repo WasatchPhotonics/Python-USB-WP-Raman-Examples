@@ -12,6 +12,8 @@ from datetime import datetime
 import EEPROMFields
 
 class Fixture:
+    VERSION = "1.0.0"
+
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
 
@@ -63,7 +65,9 @@ class Fixture:
         self.parse_args()
 
     def parse_args(self):
-        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser = argparse.ArgumentParser(
+            description="Command-line utility for testing and characterizing BLE spectrometers",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
         group = parser.add_argument_group('Discovery')
         group.add_argument("--debug",                   action="store_true", help="debug output")
@@ -82,7 +86,7 @@ class Fixture:
         group = parser.add_argument_group('Acquisition Parameters')
         group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
         group.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
-        group.add_argument("--scans-to-average",        type=int,            help="set scan averaging", default=1)
+        group.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser")
         group.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
         group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line\n")
@@ -103,6 +107,7 @@ class Fixture:
     async def run(self):
 
         # note: will not connect to 'random' or first-found device, for laser safety reasons
+        print(f"ble-util {self.VERSION}")
         if self.args.serial_number:
             print(f"Searching for {self.args.serial_number}...")
         else:
@@ -297,9 +302,7 @@ class Fixture:
             raise RuntimeError(f"invalid characteristic {name}")
 
         if isinstance(data, list):
-            self.debug(f"data was {data}")
             data = bytearray(data)
-            self.debug(f"data now {data}")
         extra = self.expand_path(name, data)
 
         if not quiet:
@@ -308,14 +311,18 @@ class Fixture:
 
     def expand_path(self, name, data):
         if name != "GENERIC":
-            return ""
+            return [ f"0x{v:02x}" for v in data ]
         path = []
+        header = True
         for i in range(len(data)):
             code = data[i]
-            name = self.generic_by_code[code]
-            path.append(name)
-            if code != 0xff:
-                break
+            if header:
+                name = self.generic_by_code[code]
+                path.append(name)
+                if code != 0xff:
+                    header = False
+            else:
+                path.append(f"0x{code:02x}")
         return " [" + ", ".join(path) + "]"
 
     ############################################################################
@@ -336,11 +343,16 @@ class Fixture:
     ############################################################################
 
     async def set_laser_enable(self, flag):
+        """
+        @bug mode and type should be settable to 0xff (same with watchdog)
+        """
+        print(f"setting laser enable {flag}")
         data = [ 0xff,                   # mode (no change)
                  0xff,                   # type (no change)
                  0x01 if flag else 0x00, # laser enable
-                 0xff ]                  # laser watchdog (no change)
-               # 0xffff                  # reserved
+                 0xff,                   # laser watchdog (no change)
+                 0x00,                   # reserved
+                 0x00 ]                  # reserved
                # 0xff                    # status mask
         await self.write_char("LASER_STATE", data)
 
@@ -352,8 +364,8 @@ class Fixture:
         # using dedicated Characteristic, although 2nd-tier version now exists
         print(f"setting integration time to {ms}ms")
         data = [ 0x00,               # fixed
-                 (ms << 16) & 0xff,  # MSB
-                 (ms <<  8) & 0xff,
+                 (ms >> 16) & 0xff,  # MSB
+                 (ms >>  8) & 0xff,
                  (ms      ) & 0xff ] # LSB
         await self.write_char("INTEGRATION_TIME_MS", data)
         self.integration_time_ms = ms
@@ -512,13 +524,12 @@ class Fixture:
         self.init_ramps()
 
         # collect however many spectra were requested
-        count = 0
         for step in range(self.args.spectra):
             await self.update_ramps(step)
 
+            # if we're doing ramps, take a set of repeats at each step to capture any settling
             repeats = self.args.ramp_repeats if self.ramping else 1
             for repeat in range(repeats):
-                count += 1
                 start_time = datetime.now()
                 spectrum = await self.get_spectrum()
                 now = datetime.now()
@@ -528,7 +539,7 @@ class Fixture:
                 avg = sum(spectrum) / len(spectrum)
                 std = np.std(spectrum)
 
-                print(f"{now} received spectrum {step:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
+                print(f"{now} received spectrum {step+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
 
                 if self.args.outfile:
                     with open(self.args.outfile, "a") as outfile:
@@ -558,7 +569,8 @@ class Fixture:
         await self.write_char("ACQUIRE_SPECTRUM", [arg], quiet=True)
 
         # compute timeout
-        timeout_ms = self.integration_time_ms * self.args.scans_to_average + 6000 # 4sec latency + 2sec buffer
+        avg = self.args.scans_to_average if self.args.scans_to_average is not None else 1
+        timeout_ms = 2 * self.integration_time_ms * avg + 6000 # 4sec latency + 2sec buffer
         start_time = datetime.now()
 
         # read the spectral data
@@ -576,7 +588,9 @@ class Fixture:
             # validate spectrum response
             response_len = len(response)
             if (response_len < header_len or response_len % 2 != 0):
-                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes")
+                # this used to be an exception with BLE FW 4.7.3, but it happens regularly with 4.8.7
+                self.debug(f"received invalid READ_SPECTRUM response of {response_len} bytes: {response}")
+                continue
 
             # first_pixel is a big-endian uint16
             first_pixel = int((response[0] << 8) | response[1])
