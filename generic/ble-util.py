@@ -124,6 +124,9 @@ class Fixture:
             self.display_eeprom()
             return
 
+        # apply startup settings
+        await self.apply_startup_settings()
+
         # timeouts
         if self.args.power_watchdog_sec is not None:
             await self.set_power_watchdog_sec(self.args.power_watchdog_sec)
@@ -244,9 +247,9 @@ class Fixture:
                     value = self.decode(await self.client.read_gatt_char(char.uuid))
                     self.device_info[name] = value
 
-        self.debug("Device Information:")
+        print("Device Information:")
         for k, v in self.device_info.items():
-            self.debug(f"  {k:30s} {v}")
+            print(f"  {k:30s} {v}")
 
     async def load_characteristics(self):
         # find the primary service
@@ -347,18 +350,29 @@ class Fixture:
         @bug mode and type should be settable to 0xff (same with watchdog)
         """
         print(f"setting laser enable {flag}")
-        data = [ 0xff,                   # mode (no change)
-                 0xff,                   # type (no change)
-                 0x01 if flag else 0x00, # laser enable
-                 0xff,                   # laser watchdog (no change)
-                 0x00,                   # reserved
-                 0x00 ]                  # reserved
-               # 0xff                    # status mask
+
+        if False:
+            data = [ 0xff,                   # mode (no change)
+                     0xff,                   # type (no change)
+                     0x01 if flag else 0x00, # laser enable
+                     0xff,                   # laser watchdog (no change)
+                     0x00,                   # reserved
+                     0x00 ]                  # reserved
+                   # 0xff                    # status mask
+        data = [1] if flag else [0]
         await self.write_char("LASER_STATE", data)
 
     ############################################################################
     # Acquisition Parameters
     ############################################################################
+
+    async def apply_startup_settings(self):
+        # in case the last test left it with 5sec integration time or whatever
+        if self.args.integration_time_ms is None:
+            await self.set_integration_time_ms(self.eeprom["startup_integration_time_ms"])
+        if self.args.gain_db is None:
+            await self.set_gain_db(self.eeprom["gain"])
+        # don't worry about startup_temp_degC (should be set by FW)
 
     async def set_integration_time_ms(self, ms):
         # using dedicated Characteristic, although 2nd-tier version now exists
@@ -585,18 +599,22 @@ class Fixture:
             # self.debug(f"reading spectrum data (hopefully from pixels_read {pixels_read})")
             response = await self.read_char("READ_SPECTRUM", quiet=True)
 
-            # validate spectrum response
+            # validate header
             response_len = len(response)
-            if (response_len < header_len or response_len % 2 != 0):
-                # this used to be an exception with BLE FW 4.7.3, but it happens regularly with 4.8.7
-                self.debug(f"received invalid READ_SPECTRUM response of {response_len} bytes: {response}")
-                continue
+            if (response_len < header_len):
+                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (missing header): {response}")
 
             # first_pixel is a big-endian uint16
             first_pixel = int((response[0] << 8) | response[1])
             if first_pixel != pixels_read:
                 # self.debug(f"received NACK (first_pixel {first_pixel})")
                 sleep(0.2)
+                continue
+
+            # validate spectrum response even
+            response_len = len(response)
+            if (response_len < header_len or response_len % 2 != 0):
+                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
                 continue
             
             pixels_in_packet = int((response_len - header_len) / 2)
@@ -633,7 +651,7 @@ class Fixture:
         msg += f"from ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)"
         if self.wavenumbers:
             msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
-        print(f"{datetime.now()} {msg}")
+        print(msg)
 
     def display_eeprom(self):
         print("EEPROM:")
