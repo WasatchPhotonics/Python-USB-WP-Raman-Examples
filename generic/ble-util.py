@@ -17,6 +17,11 @@ class Fixture:
         - advertisement_data.local_name seems cropped to 10char ("WP-XS:WP-0") on 
           Windows (bleak.backends.winrt), making connection by serial number 
           impossible?
+
+        - enable notifications on:
+          ?READ_SPECTRUM       (read,write,indicate)
+          ?EEPROM_DATA         (read,indicate)
+          ?GENERIC             (read,write,indicate)
     """
     VERSION = "1.0.0"
 
@@ -82,12 +87,13 @@ class Fixture:
         group.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
         group.add_argument("--first",                   action="store_true", help="connect to first-discovered 'WP-XS' device (required for Windows?)")
         group.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
-        group.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc\n")
+        group.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
+        group.add_argument("--notifications",           action="store_true", help="enable notifications")
 
         group = parser.add_argument_group('Spectra')
         group.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
         group.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
-        group.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements\n")
+        group.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
         group.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
         group.add_argument("--plot",                    action="store_true", help="graph spectra")
         group.add_argument("--overlay",                 action="store_true", help="overlay spectra on graph")
@@ -97,7 +103,7 @@ class Fixture:
         group.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
         group.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
         group.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
-        group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line\n")
+        group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line")
 
         group = parser.add_argument_group('Laser Control')
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
@@ -295,6 +301,21 @@ class Fixture:
 
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
+    
+            if self.args.notifications:
+                if "notify" in char.properties or "indicate" in char.properties:
+                    if name == "BATTERY_STATUS":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.battery_notification)
+                    elif name == "LASER_STATE":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.laser_state_notification)
+
+    def battery_notification(self, sender, data):
+        print(f"received BATTERY_STATUS notification: sender {sender}, data {data}")
+
+    def laser_state_notification(self, sender, data):
+        print(f"received LASER_STATE notification: sender {sender}, data {data}")
 
     async def read_char(self, name, min_len=None, quiet=False):
         uuid = self.get_uuid_by_name(name)
