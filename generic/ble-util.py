@@ -28,6 +28,8 @@ class Fixture:
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
 
+    LASER_TEC_MODES = ['OFF', 'ON', 'AUTO', 'AUTO_ON']
+
     ############################################################################
     # Lifecycle
     ############################################################################
@@ -107,7 +109,7 @@ class Fixture:
 
         group = parser.add_argument_group('Laser Control')
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
-        group.add_argument("--laser-tec-mode",          type=int,            help="laser TEC mode (0-3)")
+        group.add_argument("--laser-tec-mode",          type=str,            help="laser TEC mode", choices=self.LASER_TEC_MODES)
         group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
 
         group = parser.add_argument_group('Post-Processing')
@@ -410,15 +412,15 @@ class Fixture:
                # 0xff                    # status mask
         await self.write_char("LASER_STATE", data)
 
-    async def set_laser_tec_mode(self, mode):
-        if not (0 <= mode <= 3):
-            print("ERROR: laser TEC mode only supports 0 (OFF), 1 (ON), 2 (AUTO) and 3 (AUTO_ON)")
+    async def set_laser_tec_mode(self, mode: str):
+        try:
+            index = self.LASER_TEC_MODES.index(mode)
+        except:
+            print(f"ERROR: invalid laser TEC mode {mode}")
             return
 
-        print(f"setting laser TEC mode {mode}")
         cmd = self.generics.get("SET_LASER_TEC_MODE")
-
-        await self.write_char("GENERIC", [cmd, mode])
+        await self.write_char("GENERIC", [cmd, index])
 
     ############################################################################
     # Acquisition Parameters
