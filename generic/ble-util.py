@@ -23,12 +23,14 @@ class Fixture:
           ?EEPROM_DATA         (read,indicate)
           ?GENERIC             (read,write,indicate)
     """
-    VERSION = "1.0.2"
+    VERSION = "1.0.3"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
 
     LASER_TEC_MODES = ['OFF', 'ON', 'AUTO', 'AUTO_ON']
+    ACQUIRE_ERRORS = ['NONE', 'BATT_SOC_INFO_NOT_RCVD', 'BATT_SOC_TOO_LOW', 'LASER_DIS_FLR', 'LASER_ENA_FLR', 
+                      'IMG_SNSR_IN_BAD_STATE', 'IMG_SNSR_STATE_TRANS_FLR', 'SPEC_ACQ_SIG_WAIT_TMO', 'UNKNOWN']
 
     ############################################################################
     # Lifecycle
@@ -698,27 +700,47 @@ class Fixture:
             # self.debug(f"reading spectrum data (hopefully from pixels_read {pixels_read})")
             response = await self.read_char("READ_SPECTRUM", quiet=True)
 
-            # validate header
+            ####################################################################
+            # validate response
+            ####################################################################
+
+            ok = True
             response_len = len(response)
             if (response_len < header_len):
-                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (missing header): {response}")
+                print(f"ERROR: received invalid READ_SPECTRUM response of {response_len} bytes (missing header): {response}")
+                ok = False
+            else:
+                # check for official NAK
+                first_pixel = int((response[0] << 8) | response[1]) # big-endian int16
+                if first_pixel == 0xffff:
+                    # this is a NAK, check for detail
+                    ok = False
+                    if len(response) > 2:
+                        error_code = response[2]
+                        if error_code < len(self.ACQUIRE_ERRORS):
+                            error_str = self.ACQUIRE_ERRORS[error_code]
+                            if error_str != "NONE":
+                                print(f"ERROR: READ_SPECTRUM returned {error_str}")
+                        else:
+                            print(f"ERROR: unknown READ_SPECTRUM error_code {error_code}")
+                    if len(response) > 3:
+                        print("ERROR: trailing data after NAK error code: {self.to_hex(response)}")
+                elif first_pixel != pixels_read:
+                    print(f"ERROR: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
+                    ok = False
+                elif (response_len < header_len or response_len % 2 != 0):
+                    print(f"ERROR: received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
+                    ok = False
 
-            # first_pixel is a big-endian uint16
-            first_pixel = int((response[0] << 8) | response[1])
-            if first_pixel != pixels_read:
-                # self.debug(f"received NACK (first_pixel {first_pixel})")
+            if not ok:
                 sleep(0.2)
                 continue
-
-            # validate spectrum response even
-            response_len = len(response)
-            if (response_len < header_len or response_len % 2 != 0):
-                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
-                continue
             
-            pixels_in_packet = int((response_len - header_len) / 2)
-            self# .debug(f"received spectrum packet starting at pixel {first_pixel} with {pixels_in_packet} pixels")
+            ####################################################################
+            # apparently it was a valid response
+            ####################################################################
 
+            pixels_in_packet = int((response_len - header_len) / 2)
             for i in range(pixels_in_packet):
                 # pixel intensities are little-endian uint16
                 offset = header_len + i * 2
@@ -730,9 +752,10 @@ class Fixture:
                 if pixels_read == self.pixels:
                     # self.debug("read complete spectrum")
                     if (i + 1 != pixels_in_packet):
-                        raise RuntimeError(f"ERROR: ignoring {pixels_in_packet - (i + 1)} trailing pixels")
+                        print(f"ERROR: ignoring {pixels_in_packet - (i + 1)} trailing pixels")
 
         if self.args.bin_2x2:
+            # note, this needs updated for 633XS
             self.debug("applying 2x2 binning")
             binned = []
             for i in range(len(spectrum)-1):
