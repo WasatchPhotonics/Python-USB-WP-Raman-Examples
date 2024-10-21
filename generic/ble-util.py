@@ -23,7 +23,7 @@ class Fixture:
           ?EEPROM_DATA         (read,indicate)
           ?GENERIC             (read,write,indicate)
     """
-    VERSION = "1.0.0"
+    VERSION = "1.0.1"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -108,6 +108,10 @@ class Fixture:
         group = parser.add_argument_group('Laser Control')
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
         group.add_argument("--laser-tec-mode",          type=int,            help="laser TEC mode (0-3)")
+        group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
+
+        group = parser.add_argument_group('Post-Processing')
+        group.add_argument("--bin-2x2",                 action="store_true", help="apply 2x2 horizontal binning")
 
         group = parser.add_argument_group('Ramping')
         group.add_argument("--ramp-integ",              action="store_true", help="ramp integration time")
@@ -117,7 +121,6 @@ class Fixture:
         group.add_argument("--ramp-repeats",            type=int,            help="spectra at each ramp step", default=5)
 
         group = parser.add_argument_group('Timing')
-        group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
         group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (uint16 sec)")
 
         self.args = parser.parse_args()
@@ -549,24 +552,24 @@ class Fixture:
             step = 2000 // (n-1)
             self.ramping = True
             self.ramped_integ = [ max(10, i*step) for i in range(n) ]
-            print(f"ramping integration time: {self.ramped_integ}")
+            print(f"\nramping integration time: {self.ramped_integ}")
 
         if self.args.ramp_gain:
             step = round(30 / (n-1), 1)
             self.ramping = True
             self.ramped_gain = [ round(i*step, 1) for i in range(n) ]
-            print(f"ramping gain dB: {self.ramped_gain}")
+            print(f"\nramping gain dB: {self.ramped_gain}")
 
         if self.args.ramp_avg:
             self.ramping = True
             self.ramped_avg = [ 1, 5, 25, 125, 255 ]
-            print(f"ramping scan averaging: {self.ramped_avg}")
+            print(f"\nramping scan averaging: {self.ramped_avg}")
 
         if self.args.ramp_roi:
             self.ramping = True
             step = 1080 // n
             self.ramped_roi = [ (i*step, (i+1)*step) for i in range(n) ]
-            print(f"ramping vertical ROI with step {step}: {self.ramped_roi}")
+            print(f"\nramping vertical ROI with step {step}: {self.ramped_roi}")
 
     async def update_ramps(self, i):
         if self.ramped_integ: 
@@ -632,6 +635,9 @@ class Fixture:
                         plt.plot(xaxis, spectrum)
                         plt.draw()
                         plt.pause(0.01)
+
+                if repeats > 1:
+                    print()
         except KeyboardInterrupt:
             print()
 
@@ -702,6 +708,14 @@ class Fixture:
                     if (i + 1 != pixels_in_packet):
                         raise RuntimeError(f"ERROR: ignoring {pixels_in_packet - (i + 1)} trailing pixels")
 
+        if self.args.bin_2x2:
+            self.debug("applying 2x2 binning")
+            binned = []
+            for i in range(len(spectrum)-1):
+                binned.append((spectrum[i] + spectrum[i+1]) / 2.0)
+            binned.append(spectrum[-1])
+            spectrum = binned
+            
         return spectrum
 
     ############################################################################
