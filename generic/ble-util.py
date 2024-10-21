@@ -75,9 +75,9 @@ class Fixture:
         parser = argparse.ArgumentParser(
             description="Command-line utility for testing and characterizing BLE spectrometers",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser.add_argument("--debug",                  action="store_true", help="debug output")
 
         group = parser.add_argument_group('Discovery')
-        group.add_argument("--debug",                   action="store_true", help="debug output")
         group.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
         group.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
         group.add_argument("--first",                   action="store_true", help="connect to first-discovered 'WP-XS' device (required for Windows?)")
@@ -529,7 +529,7 @@ class Fixture:
         if self.args.ramp_gain:
             step = round(30 / (n-1), 1)
             self.ramping = True
-            self.ramped_gain = [ i*step for i in range(n) ]
+            self.ramped_gain = [ round(i*step, 1) for i in range(n) ]
             print(f"ramping gain dB: {self.ramped_gain}")
 
         if self.args.ramp_avg:
