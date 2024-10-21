@@ -12,6 +12,12 @@ from datetime import datetime
 import EEPROMFields
 
 class Fixture:
+    """
+    Known issues:
+        - advertisement_data.local_name seems cropped to 10char ("WP-XS:WP-0") on 
+          Windows (bleak.backends.winrt), making connection by serial number 
+          impossible?
+    """
     VERSION = "1.0.0"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
@@ -42,15 +48,16 @@ class Fixture:
                               "BATTERY_STATUS":      0xff09,
                               "GENERIC":             0xff0a }
 
-        self.generics = { "SET_GAIN_DB":                 0xb7,
+        self.generics = { "SET_GAIN_DB":                 0xb7, # first-tier
                           "GET_GAIN_DB":                 0xc5,
                           "SET_INTEGRATION_TIME_MS":     0xb2,
                           "GET_INTEGRATION_TIME_MS":     0xbf,
                           "GET_LASER_WARNING_DELAY_SEC": 0x8b,
                           "SET_LASER_WARNING_DELAY_SEC": 0x8a,
+                          "SET_LASER_TEC_MODE":          0x84,
                           "NEXT_TIER":                   0xff,
                                                          
-                          "SET_START_LINE":              0x21,
+                          "SET_START_LINE":              0x21, # second-tier
                           "SET_STOP_LINE":               0x23,
                           "GET_AMBIENT_TEMPERATURE":     0x2a,
                           "GET_POWER_WATCHDOG_SEC":      0x31,
@@ -73,6 +80,7 @@ class Fixture:
         group.add_argument("--debug",                   action="store_true", help="debug output")
         group.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
         group.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
+        group.add_argument("--first",                   action="store_true", help="connect to first-discovered 'WP-XS' device (required for Windows?)")
         group.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
         group.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc\n")
 
@@ -82,14 +90,18 @@ class Fixture:
         group.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements\n")
         group.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
         group.add_argument("--plot",                    action="store_true", help="graph spectra")
+        group.add_argument("--overlay",                 action="store_true", help="overlay spectra on graph")
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
         group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
         group.add_argument("--gain-db",                 type=float,          help="set gain (dB)")
         group.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
-        group.add_argument("--laser-enable",            action="store_true", help="fire the laser")
         group.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
         group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line\n")
+
+        group = parser.add_argument_group('Laser Control')
+        group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
+        group.add_argument("--laser-tec-mode",          type=int,            help="laser TEC mode (0-3)")
 
         group = parser.add_argument_group('Ramping')
         group.add_argument("--ramp-integ",              action="store_true", help="ramp integration time")
@@ -100,7 +112,7 @@ class Fixture:
 
         group = parser.add_argument_group('Timing')
         group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
-        group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (sec)")
+        group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (uint16 sec)")
 
         self.args = parser.parse_args()
 
@@ -110,6 +122,8 @@ class Fixture:
         print(f"ble-util {self.VERSION}")
         if self.args.serial_number:
             print(f"Searching for {self.args.serial_number}...")
+        elif self.args.first:
+            print(f"Searching for first available WP-XS spectrometer...")
         else:
             print(f"No serial number specified, so will list search results and exit after {self.args.search_timeout_sec}sec.\n")
 
@@ -134,6 +148,8 @@ class Fixture:
             await self.set_laser_warning_delay_sec(self.args.laser_warning_delay_sec)
 
         # explicit laser control
+        if self.args.laser_tec_mode is not None:
+            await self.set_laser_tec_mode(self.args.laser_tec_mode)
         if self.args.laser_enable:
             await self.set_laser_enable(True)
 
@@ -180,8 +196,8 @@ class Fixture:
         self.debug("scanner stopped")
 
         if self.client is None:
-            if self.args.serial_number:
-                print(f"{self.args.serial_number} not found")
+            if self.args.serial_number or self.args.first:
+                print(f"spectrometer not found")
             return
 
         # connect 
@@ -216,10 +232,10 @@ class Fixture:
             return
 
         print(f"{datetime.now()} {advertisement_data.rssi:4d} {advertisement_data.local_name}")
-        if self.args.serial_number is None:
+        if self.args.serial_number is None and not self.args.first:
             return # we're just listing
 
-        if self.args.serial_number.lower() not in advertisement_data.local_name.lower():
+        if not self.args.first and self.args.serial_number.lower() not in advertisement_data.local_name.lower():
             return # not the one
 
         self.debug("stopping scanner")
@@ -341,7 +357,11 @@ class Fixture:
     async def set_power_watchdog_sec(self, sec):
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_POWER_WATCHDOG_SEC")
-        await self.write_char("GENERIC", [tier, cmd, sec])
+
+        msb = (sec >> 8) & 0xff
+        lsb = (sec     ) & 0xff
+
+        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
 
     async def set_laser_warning_delay_sec(self, sec):
         cmd = self.generics.get("SET_LASER_WARNING_DELAY_SEC")
@@ -357,16 +377,24 @@ class Fixture:
         """
         print(f"setting laser enable {flag}")
 
-        if False:
-            data = [ 0xff,                   # mode (no change)
-                     0xff,                   # type (no change)
-                     0x01 if flag else 0x00, # laser enable
-                     0xff,                   # laser watchdog (no change)
-                     0x00,                   # reserved
-                     0x00 ]                  # reserved
-                   # 0xff                    # status mask
-        data = [1] if flag else [0]
+        data = [ 0x00,                   # mode (no change)
+                 0x00,                   # type (no change)
+                 0x01 if flag else 0x00, # laser enable
+                 0x00,                   # laser watchdog (DISABLE)
+                 0x00,                   # reserved
+                 0x00 ]                  # reserved
+               # 0xff                    # status mask
         await self.write_char("LASER_STATE", data)
+
+    async def set_laser_tec_mode(self, mode):
+        if not (0 <= mode <= 3):
+            print("ERROR: laser TEC mode only supports 0 (OFF), 1 (ON), 2 (AUTO) and 3 (AUTO_ON)")
+            return
+
+        print(f"setting laser TEC mode {mode}")
+        cmd = self.generics.get("SET_LASER_TEC_MODE")
+
+        await self.write_char("GENERIC", [cmd, mode])
 
     ############################################################################
     # Acquisition Parameters
@@ -407,13 +435,21 @@ class Fixture:
         print(f"setting start line to {n}")
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_START_LINE")
-        await self.write_char("GENERIC", [tier, cmd, n])
+
+        msb = (n >> 8) & 0xff
+        lsb = (n     ) & 0xff
+
+        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
 
     async def set_stop_line(self, n):
         print(f"setting stop line to {n}")
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_STOP_LINE")
-        await self.write_char("GENERIC", [tier, cmd, n])
+
+        msb = (n >> 8) & 0xff
+        lsb = (n     ) & 0xff
+
+        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
 
     async def set_vertical_roi(self, pair):
         await self.set_start_line(pair[0])
@@ -462,15 +498,14 @@ class Fixture:
         return f"Battery {bat_perc} ({bat_chg}), Laser {las_firing}, Interlock {intlock}"
 
     async def monitor(self):
-        print("\nPress ctrl-C to exit...\n")
-        while True:
-            try:
+        try:
+            print("\nPress ctrl-C to exit...\n")
+            while True:
                 status = await self.get_status()
                 print(f"{datetime.now()} {status}")
                 sleep(1)
-            except KeyboardInterrupt:
-                print()
-                break
+        except KeyboardInterrupt:
+            print()
 
     ############################################################################
     # Ramps
@@ -505,8 +540,8 @@ class Fixture:
         if self.args.ramp_roi:
             self.ramping = True
             step = 1080 // n
-            self.ramped_roi = [ (i*n, (i+1)*n) for i in range(n) ]
-            print(f"ramping vertical ROI: {self.ramped_roi}")
+            self.ramped_roi = [ (i*step, (i+1)*step) for i in range(n) ]
+            print(f"ramping vertical ROI with step {step}: {self.ramped_roi}")
 
     async def update_ramps(self, i):
         if self.ramped_integ: 
@@ -543,34 +578,37 @@ class Fixture:
         # init ramps
         self.init_ramps()
 
-        # collect however many spectra were requested
-        for step in range(self.args.spectra):
-            await self.update_ramps(step)
+        try:
+            # collect however many spectra were requested
+            for step in range(self.args.spectra):
+                await self.update_ramps(step)
 
-            # if we're doing ramps, take a set of repeats at each step to capture any settling
-            repeats = self.args.ramp_repeats if self.ramping else 1
-            for repeat in range(repeats):
-                start_time = datetime.now()
-                spectrum = await self.get_spectrum()
-                now = datetime.now()
-                elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
+                # if we're doing ramps, take a set of repeats at each step to capture any settling
+                repeats = self.args.ramp_repeats if self.ramping else 1
+                for repeat in range(repeats):
+                    start_time = datetime.now()
+                    spectrum = await self.get_spectrum()
+                    now = datetime.now()
+                    elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
 
-                hi = max(spectrum)
-                avg = sum(spectrum) / len(spectrum)
-                std = np.std(spectrum)
+                    hi = max(spectrum)
+                    avg = sum(spectrum) / len(spectrum)
+                    std = np.std(spectrum)
 
-                print(f"{now} received spectrum {step+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
+                    print(f"{now} received spectrum {step+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
 
-                if self.args.outfile:
-                    with open(self.args.outfile, "a") as outfile:
-                        outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]) + "\n")
-                        
-                if self.args.plot:
-                    if not self.ramping:
-                        plt.clf()
-                    plt.plot(xaxis, spectrum)
-                    plt.draw()
-                    plt.pause(0.01)
+                    if self.args.outfile:
+                        with open(self.args.outfile, "a") as outfile:
+                            outfile.write(f"{now}, " + ", ".join([str(v) for v in spectrum]) + "\n")
+                            
+                    if self.args.plot:
+                        if not self.ramping and not self.args.overlay:
+                            plt.clf()
+                        plt.plot(xaxis, spectrum)
+                        plt.draw()
+                        plt.pause(0.01)
+        except KeyboardInterrupt:
+            print()
 
     async def get_spectrum(self):
         header_len = 2 # the 2-byte first_pixel
