@@ -47,6 +47,8 @@ class Fixture:
         self.integration_time_ms = 0 # read from EEPROM startup field
         self.last_integration_time_ms = 2000
         self.last_spectrum_received = None
+        self.laser_enable = False
+        self.laser_warning_delay_sec = 3
 
         self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
                               "GAIN_DB":             0xff02,
@@ -399,6 +401,9 @@ class Fixture:
         cmd = self.generics.get("SET_LASER_WARNING_DELAY_SEC")
         await self.write_char("GENERIC", [cmd, sec])
 
+        self.laser_warning_delay_sec = sec
+        # I don't _think_ I need to call sync_laser_state() here...
+
     ############################################################################
     # Laser Control
     ############################################################################
@@ -408,13 +413,16 @@ class Fixture:
         @bug mode and type should be settable to 0xff (same with watchdog)
         """
         print(f"setting laser enable {flag}")
+        self.laser_enable = flag
+        await self.sync_laser_state()
 
-        data = [ 0x00,                   # mode (no change)
-                 0x00,                   # type (no change)
-                 0x01 if flag else 0x00, # laser enable
+    async def sync_laser_state(self):
+        data = [ 0x00,                   # mode
+                 0x00,                   # type
+                 0x01 if self.laser_enable else 0x00, 
                  0x00,                   # laser watchdog (DISABLE)
-                 0x00,                   # reserved
-                 0x00 ]                  # reserved
+                 (self.laser_warning_delay_sec >> 8) & 0xff,
+                 (self.laser_warning_delay_sec     ) & 0xff ]
                # 0xff                    # status mask
         await self.write_char("LASER_STATE", data)
 
@@ -726,7 +734,7 @@ class Fixture:
                     if len(response) > 3:
                         print("ERROR: trailing data after NAK error code: {self.to_hex(response)}")
                 elif first_pixel != pixels_read:
-                    print(f"ERROR: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
+                    self.debug(f"WARNING: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
                     ok = False
                 elif (response_len < header_len or response_len % 2 != 0):
                     print(f"ERROR: received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
