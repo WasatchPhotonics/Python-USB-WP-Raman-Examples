@@ -350,16 +350,18 @@ class Fixture:
         an ACK for purpose of delivery verification; BLE writes don't ever 
         generate a "data" response.
         """
+        name = name.upper()
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
             raise RuntimeError(f"invalid characteristic {name}")
 
         if isinstance(data, list):
             data = bytearray(data)
-        extra = self.expand_path(name, data)
+        extra = self.expand_path(name, data) if name == "GENERIC" else ""
 
         if not quiet:
-            self.debug(f">> write_char({name}, {data}){extra}")
+            code = self.code_by_name.get(name)
+            self.debug(f">> write_char({name} 0x{code:02x}, {self.to_hex(data)}){extra}")
         await self.client.write_gatt_char(uuid, data, response=True) # ack all writes
 
     def expand_path(self, name, data):
@@ -849,6 +851,9 @@ class Fixture:
     def debug(self, msg):
         if self.args.debug:
             print(f"{datetime.now()} DEBUG: {msg}")
+
+    def to_hex(self, a):
+        return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
 
     def wrap_uuid(self, code):
         return f"d1a7{code:04x}-af78-4449-a34f-4da1afaf51bc".lower()
