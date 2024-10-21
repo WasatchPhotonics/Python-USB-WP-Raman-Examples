@@ -429,7 +429,11 @@ class Fixture:
         print(f"setting scan averaging to {n}")
         tier = self.generics.get("NEXT_TIER")
         cmd = self.generics.get("SET_SCANS_TO_AVERAGE")
-        await self.write_char("GENERIC", [tier, cmd, n])
+
+        msb = (n >> 8) & 0xff
+        lsb = (n     ) & 0xff
+
+        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
 
     async def set_start_line(self, n):
         print(f"setting start line to {n}")
