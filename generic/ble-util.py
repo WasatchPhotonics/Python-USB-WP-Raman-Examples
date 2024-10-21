@@ -83,15 +83,15 @@ class Fixture:
         parser.add_argument("--debug",                  action="store_true", help="debug output")
 
         group = parser.add_argument_group('Discovery')
-        group.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
-        group.add_argument("--serial-number",           type=str,            help="delay n ms between spectra")
+        group.add_argument("--serial-number",           type=str,            help="auto-connect on discovery")
         group.add_argument("--first",                   action="store_true", help="connect to first-discovered 'WP-XS' device (required for Windows?)")
         group.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
         group.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
         group.add_argument("--notifications",           action="store_true", help="enable notifications")
+        group.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
 
         group = parser.add_argument_group('Spectra')
-        group.add_argument("--spectra",                 type=int,            help="spectra to acquire", default=5)
+        group.add_argument("--spectra",                 type=int,            help="number of spectra to acquire", default=5)
         group.add_argument("--auto-dark",               action="store_true", help="take Auto-Dark measurements")
         group.add_argument("--auto-raman",              action="store_true", help="take Auto-Raman measurements")
         group.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
