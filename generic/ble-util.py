@@ -23,7 +23,7 @@ class Fixture:
           ?EEPROM_DATA         (read,indicate)
           ?GENERIC             (read,write,indicate)
     """
-    VERSION = "1.0.1"
+    VERSION = "1.0.2"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -43,6 +43,8 @@ class Fixture:
         self.eeprom = None
         self.eeprom_field_loc = EEPROMFields.get_eeprom_fields()
         self.integration_time_ms = 0 # read from EEPROM startup field
+        self.last_integration_time_ms = 2000
+        self.last_spectrum_received = None
 
         self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
                               "GAIN_DB":             0xff02,
@@ -165,7 +167,7 @@ class Fixture:
             await self.set_laser_enable(True)
 
         # apply acquisition parameters
-        if self.args.integration_time_ms is not None:
+        if self.args.integration_time_ms is not None and not self.args.ramp_integ:
             await self.set_integration_time_ms(self.args.integration_time_ms)
         if self.args.gain_db is not None:
             await self.set_gain_db(self.args.gain_db)
@@ -442,6 +444,7 @@ class Fixture:
                  (ms >>  8) & 0xff,
                  (ms      ) & 0xff ] # LSB
         await self.write_char("INTEGRATION_TIME_MS", data)
+        self.last_integration_time_ms = self.integration_time_ms
         self.integration_time_ms = ms
 
     async def set_gain_db(self, db):
@@ -551,26 +554,31 @@ class Fixture:
         n = self.args.spectra
 
         if self.args.ramp_integ:
-            step = 2000 // (n-1)
+            hi = self.args.integration_time_ms if self.args.integration_time_ms else 2000
+            step = hi // (n-1)
             self.ramping = True
             self.ramped_integ = [ max(10, i*step) for i in range(n) ]
             print(f"\nramping integration time: {self.ramped_integ}")
 
         if self.args.ramp_gain:
-            step = round(30 / (n-1), 1)
+            hi = self.args.gain_db if self.args.gain_db else 30
+            step = round(hi / (n-1), 1)
             self.ramping = True
             self.ramped_gain = [ round(i*step, 1) for i in range(n) ]
             print(f"\nramping gain dB: {self.ramped_gain}")
 
         if self.args.ramp_avg:
             self.ramping = True
-            self.ramped_avg = [ 1, 5, 25, 125, 255 ]
+            self.ramped_avg = [ 1, 5, 25, 125, 625 ]
             print(f"\nramping scan averaging: {self.ramped_avg}")
 
         if self.args.ramp_roi:
             self.ramping = True
-            step = 1080 // n
-            self.ramped_roi = [ (i*step, (i+1)*step) for i in range(n) ]
+            lo = self.args.start_line if self.args.start_line else 0
+            hi = self.args.stop_line if self.args.stop_line else 1080
+            rng = hi - lo
+            step = rng // n
+            self.ramped_roi = [ (lo + i*step, lo + (i+1)*step) for i in range(n) ]
             print(f"\nramping vertical ROI with step {step}: {self.ramped_roi}")
 
     async def update_ramps(self, i):
@@ -615,15 +623,20 @@ class Fixture:
 
                 # if we're doing ramps, take a set of repeats at each step to capture any settling
                 repeats = self.args.ramp_repeats if self.ramping else 1
+                spectra = []
                 for repeat in range(repeats):
-                    start_time = datetime.now()
                     spectrum = await self.get_spectrum()
+
+                    # compute total start-to-start period
                     now = datetime.now()
+                    start_time = self.last_spectrum_received if self.last_spectrum_received else self.start_time
                     elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
+                    self.last_spectrum_received = now
 
                     hi = max(spectrum)
                     avg = sum(spectrum) / len(spectrum)
                     std = np.std(spectrum)
+                    spectra.append(spectrum)
 
                     print(f"{now} received spectrum {step+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
 
@@ -639,7 +652,14 @@ class Fixture:
                         plt.pause(0.01)
 
                 if repeats > 1:
-                    print()
+                    # if we're doing some kind of ramping, compute the average pixel stdev (pixel noise over time, not space)
+                    stds = []
+                    for px in range(len(spectra[0])):
+                        px_std = np.std([ spectrum[px] for spectrum in spectra ])
+                        stds.append(px_std)
+                    avg_std = np.mean(stds)
+                    print(f"average PIXEL stdev (over repeats) over the entire spectrum: {avg_std:.2f}\n")
+
         except KeyboardInterrupt:
             print()
 
@@ -661,7 +681,7 @@ class Fixture:
 
         # compute timeout
         avg = self.args.scans_to_average if self.args.scans_to_average is not None else 1
-        timeout_ms = 2 * self.integration_time_ms * avg + 6000 # 4sec latency + 2sec buffer
+        timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * avg + 6000 # 4sec latency + 2sec buffer
         start_time = datetime.now()
 
         # read the spectral data
