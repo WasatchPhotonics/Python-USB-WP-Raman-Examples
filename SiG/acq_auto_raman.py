@@ -15,45 +15,14 @@ DEVICE_TO_HOST = 0xC0
 BUFFER_SIZE = 8
 Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
-VR_SET_LASER_POWER_ATTENUATION = 0x82
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--attn", type=int, help="attenuation setpoint (0 to 255)")
 args = parser.parse_args()
 
-attnSetPoint = -1
-
-#if args.attn is None:
-#   print("specify attn setpoint (0 to 255) !!")
-#   quit()
-#
-#if args.attn is not None:
-#   attnSetPoint = args.attn
-#   # print("attn setpoint ", attnSetPoint)
-#   if attnSetPoint < 0 or attnSetPoint > 255:
-#      print("attn setpoint range is 0 to 255 !!")
-#      quit()
-
 def send_cmd(cmd, value, index=0, buf=None):
     dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
-def Get_Value(Command, command2, ByteCount, index=0):
-    return dev.ctrl_transfer(DEVICE_TO_HOST, Command, command2, 0, ByteCount, TIMEOUT_MS)
-
-def set_laser_pwr_attn_level(setPoint):
-    # send_cmd(VR_SET_LASER_POWER_ATTENUATION, setPoint)
-    cmd = VR_SET_LASER_POWER_ATTENUATION
-    value = setPoint
-    index = 0
-    length = 1
-    resp = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
-    print("resp is ", resp)
-    if resp[0] == 0:
-       print("laser pwr attn set to {}".format(setPoint))
-    else:
-       print("failed to set laser pwr attn - error code {}".format(resp[0]))
-       
 def send_acq_auto_raman_req(maxMS,
                             startIntegMS,
                             startGainDB,
@@ -68,7 +37,6 @@ def send_acq_auto_raman_req(maxMS,
                             dropFactor,
                             saturation,
                             maxAvg):
-
     buff = bytearray()
 
     # maxMS [2]
@@ -148,20 +116,43 @@ def send_acq_auto_raman_req(maxMS,
     print("params sz ", len(buff))
 
     send_cmd(0xfd, 0, 0, buff)
-    #resp = dev.ctrl_transfer(DEVICE_TO_HOST, 0xfd, 0, 0, 0, TIMEOUT_MS)
 
-send_acq_auto_raman_req(12345, 
-                        321,
-                        2,
-                        567, 
-                        14,
-                        22,
-                        1,
-                        47890,
-                        51234,
-                        42876,
-                        6,
-                        400,
-                        61234,
-                        34)
-# print("sent setpoint {} to unit".format(attnSetPoint))
+    ############################################################################
+    # get spectrum
+    ############################################################################
+
+    bytes_to_read = 1952 * 2
+    block_size = 64
+    data = []
+    print(f"trying to read {bytes_to_read} bytes in chunks of {block_size} bytes")
+    while True:
+        try:
+            this_data = dev.read(0x82, block_size, timeout=1000)
+            data.extend(this_data)
+            if len(data) >= bytes_to_read:
+                break
+        except usb.core.USBTimeoutError as ex:
+            print(".", end='')
+    print()
+
+    spectrum = []
+    if data is not None:
+        for i in range(0, len(data), 2):
+            spectrum.append(data[i] | (data[i+1] << 8))
+    print(", ".join([str(v) for v in spectrum]))
+
+send_acq_auto_raman_req(
+    maxMS        = 12345,       
+    startIntegMS = 321,         
+    startGainDB  = 2,           
+    maxIntegMS   = 567,         
+    minIntegMS   = 14,          
+    maxGainDB    = 22,          
+    minGainDB    = 1,           
+    tgtCounts    = 47890,       
+    maxCounts    = 51234,       
+    minCounts    = 42876,       
+    maxFactor    = 6,           
+    dropFactor   = 400,         
+    saturation   = 61234,       
+    maxAvg       = 34)
