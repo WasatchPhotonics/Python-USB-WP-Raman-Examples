@@ -417,12 +417,15 @@ class Fixture:
         await self.sync_laser_state()
 
     async def sync_laser_state(self):
+        # kludge for BLE FW <4.8.9
+        laser_warning_delay_ms = self.laser_warning_delay_sec * 1000
+
         data = [ 0x00,                   # mode
                  0x00,                   # type
                  0x01 if self.laser_enable else 0x00, 
                  0x00,                   # laser watchdog (DISABLE)
-                 (self.laser_warning_delay_sec >> 8) & 0xff,
-                 (self.laser_warning_delay_sec     ) & 0xff ]
+                 (laser_warning_delay_ms >> 8) & 0xff,
+                 (laser_warning_delay_ms     ) & 0xff ]
                # 0xff                    # status mask
         await self.write_char("LASER_STATE", data)
 
