@@ -22,6 +22,8 @@ spectra_sec = 120
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--random", action="store_true")
+parser.add_argument("--start-line", type=int)
+parser.add_argument("--stop-line", type=int)
 args = parser.parse_args()
 
 dev = usb.core.find(idVendor=VID, idProduct=PID)
@@ -102,6 +104,11 @@ def do_collection(integ_ms, gain_db):
               f"{edc_avg}, {edc_px[0]}, {edc_px[1]}, {edc_px[2]}, {edc_px[3]}, " +
               f"{shift_warning}")
         last_corr_med = corr_med
+
+if args.start_line is not None and args.stop_line is not None:
+    print(f"setting vertical ROI ({args.start_line}, {args.stop_line})")
+    send_cmd(0xff, 0x21, args.start_line)
+    send_cmd(0xff, 0x23, args.stop_line)
 
 print("timestamp, elapsed_sec, integ_ms, gain_db, spectrum, median, mean, corrected median, corrected mean, edc_avg, edc_0, edc_1, edc_2, edc_3, warning")
 

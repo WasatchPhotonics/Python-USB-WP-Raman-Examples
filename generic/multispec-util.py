@@ -10,6 +10,7 @@ import re
 import os
 from time import sleep
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 import traceback
 import usb.core
@@ -68,6 +69,30 @@ class Fixture(object):
         parser.add_argument("--serial-number",       type=str,            help="desired serial number")
         parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
         parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
+
+        group = parser.add_argument_group("Auto-Raman")
+        group.add_argument("--auto-raman",          action="store_true", help="use Auto-Raman measurments")
+        for name, default in [ ("ar-max-ms",         20000),
+                               ("ar-start-integ-ms",   100),
+                               ("ar-start-gain-db",      0),
+                               ("ar-max-integ-ms",    2000),
+                               ("ar-min-integ-ms",      10),
+                               ("ar-max-gain-db",       30),
+                               ("ar-min-gain-db",        0),
+                               ("ar-tgt-counts",     50000),
+                               ("ar-max-counts",     55000),
+                               ("ar-min-counts",     40000),
+                               ("ar-max-factor",         5),
+                               ("ar-saturation",     60000),
+                               ("ar-max-avg",          125)]:
+            group.add_argument(f"--{name}", type=int, default=default)
+        group.add_argument(f"--ar-drop-factor", type=float, default=0.5)
+
+        group = parser.add_argument_group("Post-Processing")
+        group.add_argument("--bin-2x2",             action="store_true", help="apply 2x2 binning")
+        group.add_argument("--plot",                action="store_true", help="graph spectra")
+        group.add_argument("--overlay",             action="store_true", help="overlay graphed spectra")
+
         self.args = parser.parse_args()
 
         if self.args.integration_times is None:
@@ -467,13 +492,22 @@ class Fixture(object):
             print(f"  {key} had {failures[key]} failures")
 
     def do_acquisitions(self):
-        outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
+        if self.args.outfile:
+            outfile = open(self.args.outfile, 'w') 
+            # tricky to write wavelengths / wavenumbers here, since technically we support multiple devices...
+        else:
+            outfile = None
+
+        if self.args.plot:
+            plt.ion()
+
         for i in range(self.args.spectra):
             for dev in self.devices:
                 for j in range(self.args.continuous_count):
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
                     send_trigger = (j == 0) and not self.args.hardware_trigger
-                    spectrum = self.get_spectrum(dev, send_trigger)
+                    acq_type = 3 if self.args.auto_raman else 0
+                    spectrum = self.get_spectrum(dev, send_trigger, acq_type)
 
                     now = datetime.now()
                     print("%s Spectrum %3d/%3d/%3d %s ..." % (now, j+1, i+1, self.args.spectra, spectrum[:10]))
@@ -486,26 +520,51 @@ class Fixture(object):
                     if self.args.frame_id:
                         self.get_frame_count(dev)
 
+                    if self.args.plot:
+                        if not self.args.overlay:
+                            plt.clf()
+                        plt.plot(spectrum)
+                        plt.draw()
+                        plt.pause(0.01)
+
             self.debug(f"sleeping {self.args.delay_ms}ms")
             sleep(self.args.delay_ms / 1000.0 )
 
         if outfile is not None:
             outfile.close()
 
-    def get_spectrum(self, dev, send_trigger=True):
+    def get_spectrum(self, dev, send_trigger=True, acq_type=0):
         if send_trigger:
-            return self.get_spectrum_sw_trigger(dev)
+            spectrum = self.get_spectrum_sw_trigger(dev, acq_type)
         else:
-            return self.get_spectrum_hw_trigger(dev)
+            spectrum = self.get_spectrum_hw_trigger(dev)
 
-    def get_spectrum_sw_trigger(self, dev):
+        if dev.idProduct == 0x4000:
+            for i in range(4):
+                spectrum[i] = spectrum[4]
+
+        if self.args.bin_2x2:
+            # note, this needs updated for 633XS
+            binned = []
+            for i in range(len(spectrum)-1):
+                binned.append((spectrum[i] + spectrum[i+1]) / 2.0)
+            binned.append(spectrum[-1])
+            spectrum = binned
+        
+        return spectrum
+
+    def get_spectrum_sw_trigger(self, dev, acq_type=0):
         if self.args.integration_time_ms:
             timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         else:
             timeout_ms = TIMEOUT_MS + 100 * 2
 
-        print(f"{datetime.now()} sending trigger...")
-        self.send_cmd(dev, 0xad, 0) # MZ: remind me, what was the '1' supposed to indicate?
+        if acq_type == 3:
+            print(f"{datetime.now()} requesting Auto-Raman measurement...")
+            self.test_auto_raman(dev)
+        else:
+            print(f"{datetime.now()} sending trigger...")
+            self.send_cmd(dev, 0xad, acq_type)
 
         bytes_to_read = dev.pixels * 2
         block_size = 64
@@ -520,7 +579,7 @@ class Fixture(object):
                 if len(data) >= bytes_to_read:
                     break
             except usb.core.USBTimeoutError as ex:
-                if not self.args.keep_trying:
+                if not (self.args.keep_trying or self.args.auto_raman):
                     raise 
 
         return self.demarshal_spectrum(data)
@@ -550,6 +609,38 @@ class Fixture(object):
             for i in range(0, len(data), 2):
                 spectrum.append(data[i] | (data[i+1] << 8))
         return spectrum
+
+    ############################################################################
+    # Firmware Auto-Raman (USB)
+    ############################################################################
+
+    # compare to wasatch.AutoRamanRequest
+    def test_auto_raman(self, dev):
+        buf = []
+        buf.extend([self.args.ar_max_ms           & 0xff, (self.args.ar_max_ms        >> 8) & 0xff])
+        buf.extend([self.args.ar_start_integ_ms   & 0xff, (self.args.ar_start_integ_ms>> 8) & 0xff])
+        buf.extend([self.args.ar_start_gain_db    & 0xff                                             ])
+        buf.extend([self.args.ar_max_integ_ms     & 0xff, (self.args.ar_max_integ_ms  >> 8) & 0xff])
+        buf.extend([self.args.ar_min_integ_ms     & 0xff, (self.args.ar_min_integ_ms  >> 8) & 0xff])
+        buf.extend([self.args.ar_max_gain_db      & 0xff                                             ])
+        buf.extend([self.args.ar_min_gain_db      & 0xff                                             ])
+        buf.extend([self.args.ar_tgt_counts       & 0xff, (self.args.ar_tgt_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_counts       & 0xff, (self.args.ar_max_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_min_counts       & 0xff, (self.args.ar_min_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_factor       & 0xff                                             ])
+        buf.extend([int(self.args.ar_drop_factor) & 0xff, int((self.args.ar_drop_factor - int(self.args.ar_drop_factor)) * 256)])
+        buf.extend([self.args.ar_saturation       & 0xff, (self.args.ar_saturation    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_avg          & 0xff                                             ]) 
+
+        print(f"params len {len(buf)}: {self.to_hex(buf)}")
+        for name, value in vars(self.args).items():
+            if name.startswith("ar_"):
+                print(f"  {name:17s} {str(value):8s} " + ("" if name == "ar_drop_factor" else f"0x{value:04x}"))
+
+        self.send_cmd(dev, 0xfd, 0, 0, buf)
+
+    def to_hex(self, a):
+        return "[ " + ", ".join([f"{v:02x}" for v in a]) + " ]"
 
     ############################################################################
     # Utility Methods
