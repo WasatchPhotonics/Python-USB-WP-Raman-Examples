@@ -49,6 +49,7 @@ class Fixture:
         self.last_spectrum_received = None
         self.laser_enable = False
         self.laser_warning_delay_sec = 3
+        self.notifications = set()
 
         self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
                               "GAIN_DB":             0xff02,
@@ -188,9 +189,11 @@ class Fixture:
         elif self.args.spectra:
             await self.perform_collection()
 
-        # explicit laser control
+        # shutdown
         if self.args.laser_enable:
             await self.set_laser_enable(False)
+        if self.notifications:
+            await self.stop_notifications()
 
     ############################################################################
     # BLE Connection
@@ -318,15 +321,21 @@ class Fixture:
                     if name == "BATTERY_STATUS":
                         self.debug(f"starting {name} notifications")
                         await self.client.start_notify(char.uuid, self.battery_notification)
+                        self.notifications.add(char.uuid)
                     elif name == "LASER_STATE":
                         self.debug(f"starting {name} notifications")
                         await self.client.start_notify(char.uuid, self.laser_state_notification)
+                        self.notifications.add(char.uuid)
+
+    async def stop_notifications(self):
+        for uuid in self.notifications:
+            await self.client.stop_notify(uuid)
 
     def battery_notification(self, sender, data):
-        print(f"received BATTERY_STATUS notification: sender {sender}, data {data}")
+        print(f"{datetime.now()} received BATTERY_STATUS notification: sender {sender}, data {data}")
 
     def laser_state_notification(self, sender, data):
-        print(f"received LASER_STATE notification: sender {sender}, data {data}")
+        print(f"{datetime.now()} received LASER_STATE notification: sender {sender}, data {data}")
 
     async def read_char(self, name, min_len=None, quiet=False):
         uuid = self.get_uuid_by_name(name)
