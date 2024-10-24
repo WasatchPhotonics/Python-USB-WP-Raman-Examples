@@ -29,8 +29,9 @@ class Fixture:
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
 
     LASER_TEC_MODES = ['OFF', 'ON', 'AUTO', 'AUTO_ON']
-    ACQUIRE_ERRORS = ['NONE', 'BATT_SOC_INFO_NOT_RCVD', 'BATT_SOC_TOO_LOW', 'LASER_DIS_FLR', 'LASER_ENA_FLR', 
+    ACQUIRE_ERRORS  = ['NONE', 'BATT_SOC_INFO_NOT_RCVD', 'BATT_SOC_TOO_LOW', 'LASER_DIS_FLR', 'LASER_ENA_FLR', 
                       'IMG_SNSR_IN_BAD_STATE', 'IMG_SNSR_STATE_TRANS_FLR', 'SPEC_ACQ_SIG_WAIT_TMO', 'UNKNOWN']
+    GENERIC_RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
 
     ############################################################################
     # Lifecycle
@@ -46,10 +47,14 @@ class Fixture:
         self.eeprom_field_loc = EEPROMFields.get_eeprom_fields()
         self.integration_time_ms = 0 # read from EEPROM startup field
         self.last_integration_time_ms = 2000
+        self.ambient_temperature_deg_c = None
+        self.scans_to_average = 1
         self.last_spectrum_received = None
         self.laser_enable = False
         self.laser_warning_delay_sec = 3
         self.notifications = set()
+        self.generic_seq = 0
+        self.request_callbacks = {}
 
         self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
                               "GAIN_DB":             0xff02,
@@ -106,6 +111,7 @@ class Fixture:
         group.add_argument("--outfile",                 type=str,            help="save spectra to CSV file")
         group.add_argument("--plot",                    action="store_true", help="graph spectra")
         group.add_argument("--overlay",                 action="store_true", help="overlay spectra on graph")
+        group.add_argument("--delay-ms",                type=int,            help="intra-spectra delay", default=0)
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
         group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
@@ -129,8 +135,9 @@ class Fixture:
         group.add_argument("--ramp-roi",                action="store_true", help="ramp vertical roi")
         group.add_argument("--ramp-repeats",            type=int,            help="spectra at each ramp step", default=5)
 
-        group = parser.add_argument_group('Timing')
+        group = parser.add_argument_group('Misc')
         group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (uint16 sec)")
+        group.add_argument("--accessors",               action="store_true", help="exercise getter/setters")
 
         self.args = parser.parse_args()
 
@@ -182,6 +189,10 @@ class Fixture:
             await self.set_start_line(self.args.start_line)
         if self.args.stop_line is not None:
             await self.set_stop_line(self.args.stop_line)
+
+        # exercise accessors
+        if self.args.accessors:
+            await self.exercise_accessors()
 
         # take spectra or monitor
         if self.args.monitor:
@@ -295,18 +306,18 @@ class Fixture:
 
     async def load_characteristics(self):
         # find the primary service
-        self.primary_service = None
+        primary_service = None
         for service in self.client.services:
             if service.uuid.lower() == self.WASATCH_SERVICE.lower():
-                self.primary_service = service
+                primary_service = service
                 
-        if self.primary_service is None:
+        if primary_service is None:
             return
 
         # iterate over standard Characteristics
         # @see https://bleak.readthedocs.io/en/latest/api/client.html#gatt-characteristics
         self.debug("Characteristics:")
-        for char in self.primary_service.characteristics:
+        for char in primary_service.characteristics:
             name = self.get_name_by_uuid(char.uuid)
             extra = ""
 
@@ -326,16 +337,42 @@ class Fixture:
                         self.debug(f"starting {name} notifications")
                         await self.client.start_notify(char.uuid, self.laser_state_notification)
                         self.notifications.add(char.uuid)
+                    elif name == "GENERIC":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.generic_notification)
+                        self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
             await self.client.stop_notify(uuid)
 
+    async def generic_notification(self, sender, data):
+        self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {self.to_hex(data)}")
+        if len(data) < 3:
+            print("ERROR: received GENERIC response with only {len(data)} bytes")
+            return
+
+        seq, err, result = data[0], data[1], data[2:]
+
+        generic_response_error = self.GENERIC_RESPONSE_ERRORS[err]
+        if generic_response_error != "OK":
+            print(f"ERROR: GENERIC notification included error code {err} ({generic_response_error}); data {self.to_hex(data)}")
+
+        if seq not in self.request_callbacks:
+            print("ERROR: received GENERIC response to unknown seq {seq}")
+            return
+
+        callback = self.request_callbacks[seq]
+        await callback(result)
+        
     def battery_notification(self, sender, data):
-        print(f"{datetime.now()} received BATTERY_STATUS notification: sender {sender}, data {data}")
+        charging = data[0] != 0
+        perc = int(data[1])
+        print(f"{datetime.now()} received BATTERY_STATUS notification: level {perc}%, charging {charging} (data {data})")
 
     def laser_state_notification(self, sender, data):
-        print(f"{datetime.now()} received LASER_STATE notification: sender {sender}, data {data}")
+        status = self.parse_laser_state(data)
+        print(f"{datetime.now()} received LASER_STATE notification: sender {sender}, data {data}: {status}")
 
     async def read_char(self, name, min_len=None, quiet=False):
         uuid = self.get_uuid_by_name(name)
@@ -350,48 +387,57 @@ class Fixture:
         if not quiet:
             self.debug(f"<< read_char({name}, min_len {min_len}): {response}")
             if min_len is not None and len(response) < min_len:
-                self.debug(f"WARNING: characteristic {name} returned insufficient data ({len(response)} < {min_len})")
+                print(f"\nERROR: characteristic {name} returned insufficient data ({len(response)} < {min_len})\n")
 
         buf = bytearray()
         for byte in response:
             buf.append(byte)
         return buf
 
-    async def write_char(self, name, data, quiet=False):
-        """
-        Although write_gatt_char takes a 'response' flag, that is used to request
-        an ACK for purpose of delivery verification; BLE writes don't ever 
-        generate a "data" response.
-        """
+    async def write_char(self, name, data, quiet=False, callback=None):
         name = name.upper()
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
             raise RuntimeError(f"invalid characteristic {name}")
+        extra = []
 
-        if isinstance(data, list):
-            data = bytearray(data)
-        extra = self.expand_path(name, data) if name == "GENERIC" else ""
+        if name == "GENERIC":
+            self.generic_seq = (self.generic_seq + 1) % 256
+            self.request_callbacks[self.generic_seq] = callback
+
+            prefixed = [ self.generic_seq ]
+            for v in data:
+                prefixed.append(v)
+            data = prefixed
+            extra.append(self.expand_path(name, data))
 
         if not quiet:
             code = self.code_by_name.get(name)
-            self.debug(f">> write_char({name} 0x{code:02x}, {self.to_hex(data)}){extra}")
-        await self.client.write_gatt_char(uuid, data, response=True) # ack all writes
+            self.debug(f">> write_char({name} 0x{code:02x}, {self.to_hex(data)}){', '.join(extra)}")
+
+        if isinstance(data, list):
+            data = bytearray(data)
+
+        # MZ: I'm not sure why all writes require a response, but empirical 
+        # testing indicates we reliably get randomly scrambled EEPROM contents 
+        # without this.
+        await self.client.write_gatt_char(uuid, data, response=True)
 
     def expand_path(self, name, data):
         if name != "GENERIC":
             return [ f"0x{v:02x}" for v in data ]
-        path = []
+        path = [ f"SEQ 0x{data[0]:02x}" ]
         header = True
-        for i in range(len(data)):
-            code = data[i]
+        for i in range(1, len(data)):
             if header:
+                code = data[i]
                 name = self.generic_by_code[code]
                 path.append(name)
                 if code != 0xff:
                     header = False
             else:
-                path.append(f"0x{code:02x}")
-        return " [" + ", ".join(path) + "]"
+                path.append(f"0x{data[i]:02x}")
+        return "[" + ", ".join(path) + "]"
 
     ############################################################################
     # Timeouts
@@ -437,6 +483,23 @@ class Fixture:
                  (laser_warning_delay_ms     ) & 0xff ]
                # 0xff                    # status mask
         await self.write_char("LASER_STATE", data)
+
+    def parse_laser_state(self, data):
+        result = { 'laser_enable': False, 'laser_watchdog_sec': 0, 'status_mask': 0, 'laser_firing': False, 'interlock_closed': False }
+        sz = len(data)
+        # if sz > 0: result['mode']               = data[0]
+        # if sz > 1: result['type']               = data[1]
+        if sz > 2: result['laser_enable']       = data[2] != 0
+        if sz > 3: result['laser_watchdog_sec'] = data[3]
+        # ignore bytes 4-5 (reserved)
+        if sz > 6: 
+            result['status_mask']               = data[6]
+            result['interlock_closed']          = data[6] & 0x01 != 0
+            result['laser_firing']              = data[6] & 0x02 != 0
+        return result
+
+        # (b'\x00 \x00 \x00 \x00 \x0b \xb8')
+        #    mode type  ena dog   delay_ms     0xbb8 = 3000ms = 3sec = correct
 
     async def set_laser_tec_mode(self, mode: str):
         try:
@@ -487,6 +550,7 @@ class Fixture:
         lsb = (n     ) & 0xff
 
         await self.write_char("GENERIC", [tier, cmd, msb, lsb])
+        self.scans_to_average = n
 
     async def set_start_line(self, n):
         print(f"setting start line to {n}")
@@ -517,6 +581,13 @@ class Fixture:
     ############################################################################
 
     async def get_battery_state(self):
+        """
+        These will be pushed automatically 1/min from Central, if-and-only-if
+        no acquisition is occuring at the time of the scheduled event. However,
+        at least some(?) clients (Bleak on MacOS) don't seem to receive the
+        notifications until the next explicit read/write of a Characteristic 
+        (any Chararacteristic? seemingly observed with ACQUIRE_CMD).
+        """
         buf = await self.read_char("BATTERY_STATUS", 2)
         self.debug(f"battery response: {buf}")
         return { 'charging': buf[0] != 0,
@@ -525,7 +596,7 @@ class Fixture:
     async def get_laser_state(self):
         retval = {}
         for k in [ 'mode', 'type', 'enable', 'watchdog_sec', 'mask', 'interlock_closed', 'laser_firing' ]:
-            retval[k] = None
+            retval[k] = 'UNKNOWN'
             
         buf = await self.read_char("LASER_STATE", 7)
         if len(buf) >= 4:
@@ -552,7 +623,22 @@ class Fixture:
         las_firing = las['laser_firing']
         intlock = 'closed (armed)' if las['interlock_closed'] else 'open (safe)'
 
-        return f"Battery {bat_perc} ({bat_chg}), Laser {las_firing}, Interlock {intlock}"
+        # Send a WRITE to request an updated temperature; however, even if we
+        # awaited the WRITE completion, we wouldn't necessarily have received
+        # the response yet. Rather than blocking on the request and response,
+        # let's just return our last-cached temperature, and trust that 
+        # everything will be 'eventually consistent.'
+        #
+        # (This is in contrast to BATTERY_STATUS and LASER_STATE, both of which
+        # have their own READ-capable Characteristics. GENERIC uses a slightly
+        # more asynchronous request-response model, so let's let it 'be async.')
+        await self.write_char("GENERIC", [ 0xff, 0x2a ], callback=self.process_ambient_temperature)
+
+        return f"Battery {bat_perc} ({bat_chg}), Laser {las_firing}, Interlock {intlock}, Amb {self.ambient_temperature_deg_c}°C"
+
+    async def process_ambient_temperature(self, result):
+        self.ambient_temperature_deg_c = int(result[0])
+        self.debug(f"process_ambient_temperature: deg_c {self.ambient_temperature_deg_c}")
 
     async def monitor(self):
         try:
@@ -675,6 +761,8 @@ class Fixture:
                         plt.draw()
                         plt.pause(0.01)
 
+                    sleep(self.args.delay_ms / 1000.0)
+
                 if repeats > 1:
                     # if we're doing some kind of ramping, compute the average pixel stdev (pixel noise over time, not space)
                     stds = []
@@ -704,8 +792,7 @@ class Fixture:
         await self.write_char("ACQUIRE_SPECTRUM", [arg], quiet=True)
 
         # compute timeout
-        avg = self.args.scans_to_average if self.args.scans_to_average is not None else 1
-        timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * avg + 6000 # 4sec latency + 2sec buffer
+        timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
         start_time = datetime.now()
 
         # read the spectral data
@@ -746,7 +833,8 @@ class Fixture:
                     if len(response) > 3:
                         print("ERROR: trailing data after NAK error code: {self.to_hex(response)}")
                 elif first_pixel != pixels_read:
-                    self.debug(f"WARNING: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
+                    # this still happens on 2.8.7
+                    # self.debug(f"WARNING: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
                     ok = False
                 elif (response_len < header_len or response_len % 2 != 0):
                     print(f"ERROR: received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
@@ -886,6 +974,49 @@ class Fixture:
 
         # self.debug(f"Unpacked page {page:02d}, offset {start_byte:02d}, len {length:02d}, datatype {data_type}: {unpack_result} {field}")
         self.eeprom[field] = unpack_result
+
+    ############################################################################
+    # Accessors
+    ############################################################################
+
+    async def exercise_accessors(self):
+
+        # integration time
+
+        # gain
+
+        # laser state (enable, watchdog, ...)
+
+        # generic ##############################################################
+
+        generic_tests = [
+            [ 0, [ 'SET_LASER_TEC_MODE',      'GET_LASER_TEC_MODE'      ], 1, range(0, 4) ],
+            [ 0, [ 'SET_CCD_GAIN',            'GET_CCD_GAIN'            ], 2, [ 0, 8, 24, 30 ] ],
+            [ 0, [ 'SET_INTEGRATION_TIME',    'GET_INTEGRATION_TIME'    ], 4, [ 1, 10, 100, 1000, 2000 ] ],
+            [ 0, [ 'SET_LASER_WARNING_DELAY', 'GET_LASER_WARNING_DELAY' ], 2, [ 0, 5, 10 ] ],
+            [ 1, [ 'SET_START_LINE',          'GET_START_LINE'          ], 2, [ 0, 400, 800 ] ],
+            [ 1, [ 'SET_STOP_LINE',           'GET_STOP_LINE'           ], 2, [ 1, 400, 1080 ] ],
+            [ 1, [ 'SET_POWER_WATCHDOG_SEC',  'GET_POWER_WATCHDOG_SEC'  ], 2, [ 0, 30, 120 ] ],
+            [ 1, [ 'SET_SCANS_TO_AVERAGE',    'GET_SCANS_TO_AVERAGE'    ], 2, [ 1, 5, 25 ] ],
+        ]
+
+        # laser tec mode
+
+        # ccd gain
+
+        # integration time
+
+        # laser warning delay
+
+        # start line
+
+        # stop line
+
+        # ambient temperature
+
+        # power watchdog
+
+        # scans to average
 
     ############################################################################
     # Utility
