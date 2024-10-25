@@ -11,6 +11,98 @@ from datetime import datetime
 
 import EEPROMFields
 
+class Generic:
+    def __init__(self, name, tier, setter, getter, size, epsilon):
+        self.name    = name
+        self.tier    = tier # 0, 1 or 2
+        self.setter  = setter
+        self.getter  = getter
+        self.size    = size
+        self.epsilon = epsilon
+
+        self.value = None
+        self.event = asyncio.Event()
+    
+    def serialize(self, value):
+        data = []
+        if self.name == "CCD_GAIN":
+            data.append(int(value) & 0xff)
+            data.append(int((value - int(value)) * 256) & 0xff)
+        else: 
+            # assume big-endian uint[size]            
+            for i in range(self.size):
+                data.append((value >> (8 * (self.size - (i+1)))) & 0xff)
+        return data
+
+    def deserialize(self, data):
+        if self.name == "CCD_GAIN":
+            return data[0] + data[1] / 256.0
+        else:
+            value = 0
+            for byte in data:
+                value <<= 8
+                value |= byte
+            return value
+
+    def generate_write_request(self, value):
+        if self.setter is None:
+            raise RuntimeError(f"Generic {self.name} is read-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.setter)
+        request.extend(self.serialize(value))
+        return request
+
+    def generate_read_request(self):
+        if self.getter is None:
+            raise RuntimeError(f"Generic {self.name} is write-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.getter)
+        return request
+
+class Generics:
+    def __init__(self):
+        self.generics = {}
+
+    def add(self, name, tier, setter, getter, size, epsilon=0):
+        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
+
+    def generate_write_request(self, name, value):
+        return self.generics[name].generate_write_request(value)
+
+    def generate_read_request(self, name):
+        return self.generics[name].generate_read_request()
+
+    def deserialize(self, name, value):
+        return self.generics[name].deserialize(value)
+
+    def store(self, name, value):
+        self.generics[name].value = value
+
+    def get_value(self, name):
+        return self.generics[name].value
+
+    async def wait(self, name):
+        await self.generics[name].event.wait()
+        self.generics[name].event.clear()
+
+    def set_received(self, name):
+        self.generics[name].event.set()
+
+    def get_name(self, code):
+        for name, generic in self.generics.items():
+            if code == generic.setter:
+                return f"SET_{name}"
+            elif code == generic.getter:
+                return f"GET_{name}"
+        return "UNKNOWN"
+
+    def equals(self, name, expected):
+        actual  = self.generics[name].value
+        epsilon = self.generics[name].epsilon
+        delta   = abs(actual - expected)
+        # print("Generics.equals: name {name}, actual {actual}, expected {expected}, delta {delta}, epsilon {epsilon}")
+        return delta <= epsilon
+
 class Fixture:
     """
     Known issues:
@@ -71,33 +163,22 @@ class Fixture:
                               "GENERIC":                 0xff0a }
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
 
-        # Generic Characteristic
-        self.generics = { "SET_LASER_TEC_MODE":          { "code": 0x84, "tier": 0, "size": 1 }, # tier 0
-                          "GET_LASER_TEC_MODE":          { "code": 0x85, "tier": 0, "size": 1 },
-                          "SET_CCD_GAIN":                { "code": 0xb7, "tier": 0, "size": 2 },
-                          "GET_CCD_GAIN":                { "code": 0xc5, "tier": 0, "size": 2 },
-                          "SET_INTEGRATION_TIME_MS":     { "code": 0xb2, "tier": 0, "size": 3 },
-                          "GET_INTEGRATION_TIME_MS":     { "code": 0xbf, "tier": 0, "size": 3 },
-                          "SET_LASER_WARNING_DELAY_SEC": { "code": 0x8a, "tier": 0, "size": 1 },
-                          "GET_LASER_WARNING_DELAY_SEC": { "code": 0x8b, "tier": 0, "size": 1 },
-                          "NEXT_TIER":                   { "code": 0xff, "tier": 0, "size": 1 },
-                                                                       
-                          "SET_START_LINE":              { "code": 0x21, "tier": 1, "size": 2 }, # tier 1
-                          "GET_START_LINE":              { "code": 0x22, "tier": 1, "size": 2 },
-                          "SET_STOP_LINE":               { "code": 0x23, "tier": 1, "size": 2 },
-                          "GET_STOP_LINE":               { "code": 0x24, "tier": 1, "size": 2 },
-                          "GET_AMBIENT_TEMPERATURE":     { "code": 0x2a, "tier": 1, "size": 1 },
-                          "SET_POWER_WATCHDOG_SEC":      { "code": 0x30, "tier": 1, "size": 2 },
-                          "GET_POWER_WATCHDOG_SEC":      { "code": 0x31, "tier": 1, "size": 2 },
-                          "SET_SCANS_TO_AVERAGE":        { "code": 0x62, "tier": 1, "size": 2 },
-                          "GET_SCANS_TO_AVERAGE":        { "code": 0x63, "tier": 1, "size": 2 } }
-        self.generic_by_code = { d["code"]: name for name, d in self.generics.items() }
+        #                  Name                      Tier   Set   Get Size
+        self.generics = Generics()
+        self.generics.add("LASER_TEC_MODE",             0, 0x84, 0x85, 1)
+        self.generics.add("CCD_GAIN",                   0, 0xb7, 0xc5, 2, epsilon=0.01)
+        self.generics.add("INTEGRATION_TIME_MS",        0, 0xb2, 0xbf, 3)
+        self.generics.add("LASER_WARNING_DELAY_SEC",    0, 0x8a, 0x8b, 1)
+        self.generics.add("START_LINE",                 1, 0x21, 0x22, 2)
+        self.generics.add("STOP_LINE",                  1, 0x23, 0x24, 2)
+        self.generics.add("AMBIENT_TEMPERATURE_DEG_C",  1, None, 0x2a, 1)
+        self.generics.add("POWER_WATCHDOG_SEC",         1, 0x30, 0x31, 2)
+        self.generics.add("SCANS_TO_AVERAGE",           1, 0x62, 0x63, 2)
 
         # more Generic
         self.generic_seq = 0                                # rotating sequence ID for generic requests
         self.request_callbacks = {}                         # the registered callback for each sequence ID
         self.generic_response_received = None
-        self.last_received_value = {}
 
         self.parse_args()
 
@@ -149,7 +230,7 @@ class Fixture:
         group = parser.add_argument_group('Misc')
         group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (uint16 sec)")
         group.add_argument("--accessors",               action="store_true", help="exercise getter/setters")
-        group.add_argument("--setter-delay-ms",         type=int,            help="minimum delay / settle time after writing generic setter", default=100)
+        group.add_argument("--setter-delay-ms",         type=int,            help="minimum delay / settle time after writing generic setter", default=1000)
 
         self.args = parser.parse_args()
 
@@ -449,7 +530,7 @@ class Fixture:
         for i in range(1, len(data)):
             if header:
                 code = data[i]
-                name = self.generic_by_code[code]
+                name = self.generics.get_name(code)
                 path.append(name)
                 if code != 0xff:
                     header = False
@@ -462,20 +543,10 @@ class Fixture:
     ############################################################################
 
     async def set_power_watchdog_sec(self, sec):
-        tier = self.generics["NEXT_TIER"]["code"]
-        code = self.generics["SET_POWER_WATCHDOG_SEC"]["code"]
-
-        msb = (sec >> 8) & 0xff
-        lsb = (sec     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, code, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("POWER_WATCHDOG_SEC", sec))
 
     async def set_laser_warning_delay_sec(self, sec):
-        code = self.generics["SET_LASER_WARNING_DELAY_SEC"]["code"]
-        await self.write_char("GENERIC", [code, sec])
-
-        self.laser_warning_delay_sec = sec
-        # I don't _think_ I need to call sync_laser_state() here...
+        await self.write_char("GENERIC", self.generics.generate_write_request("LASER_WARNING_DELAY_SEC", sec))
 
     ############################################################################
     # Laser Control
@@ -520,13 +591,8 @@ class Fixture:
         #    mode type  ena dog   delay_ms     0xbb8 = 3000ms = 3sec = correct
 
     async def set_laser_tec_mode(self, mode: str):
-        try:
-            index = self.LASER_TEC_MODES.index(mode)
-        except:
-            raise RuntimeError(f"invalid laser TEC mode {mode}")
-
-        code = self.generics["SET_LASER_TEC_MODE"]["code"]
-        await self.write_char("GENERIC", [code, index])
+        index = self.LASER_TEC_MODES.index(mode)
+        await self.write_char("GENERIC", self.generics.generate_write_request("LASER_TEC_MODE", index))
 
     ############################################################################
     # Acquisition Parameters
@@ -560,34 +626,16 @@ class Fixture:
 
     async def set_scans_to_average(self, n):
         print(f"setting scan averaging to {n}")
-        tier = self.generics["NEXT_TIER"]["code"]
-        code = self.generics["SET_SCANS_TO_AVERAGE"]["code"]
-
-        msb = (n >> 8) & 0xff
-        lsb = (n     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, code, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("SCANS_TO_AVERAGE", n))
         self.scans_to_average = n
 
     async def set_start_line(self, n):
         print(f"setting start line to {n}")
-        tier = self.generics["NEXT_TIER"]["code"]
-        code = self.generics["SET_START_LINE"]["code"]
-
-        msb = (n >> 8) & 0xff
-        lsb = (n     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("START_LINE", n))
 
     async def set_stop_line(self, n):
         print(f"setting stop line to {n}")
-        tier = self.generics["NEXT_TIER"]["code"]
-        code = self.generics["SET_STOP_LINE"]["code"]
-
-        msb = (n >> 8) & 0xff
-        lsb = (n     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, code, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("STOP_LINE", n))
 
     async def set_vertical_roi(self, pair):
         await self.set_start_line(pair[0])
@@ -640,22 +688,30 @@ class Fixture:
         laser_firing = laser_state['laser_firing']
         interlock_closed = 'closed (armed)' if laser_state['interlock_closed'] else 'open (safe)'
 
-        amb_temp = await self.get_generic("GET_AMBIENT_TEMPERATURE", tier=1)
+        amb_temp = await self.get_generic("GET_AMBIENT_TEMPERATURE")
         return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
 
-    async def get_generic(self, name, tier=0):
-        data = [ 0xff for _ in range(tier) ]
-        data.append(self.generics[name]["code"])
-        self.debug(f"get_generic: querying {name} ({self.to_hex(data)})")
+    async def get_generic(self, name):
+        request = self.generics.generate_read_request(name)
+        self.debug(f"get_generic: querying {name} ({self.to_hex(request)})")
 
         self.generic_response_received = asyncio.Event()
-        await self.write_char("GENERIC", data, callback=lambda data: self.process_generic_response(name, data))
-        await self.generic_response_received.wait()
-        self.generic_response_received = None
+        await self.write_char("GENERIC", request, callback=lambda data: self.process_generic_response(name, data))
+        await self.generics.wait(name)
 
-        value = self.last_received_value.get(name, None)
+        value = self.generics.get_value(name)
         self.debug(f"get_generic: received {value}")
         return value
+
+    async def process_generic_response(self, name, data):
+        self.debug(f"process_generic_response(name {name}, data {data}")
+
+        value = self.generics.deserialize(name, data)
+        self.debug(f"storing last_received_value[{name}] = {value}")
+        self.generics.store(name, value)
+
+        # signal that the result is now available
+        self.generics.set_received(name)
 
     async def monitor(self):
         try:
@@ -994,48 +1050,6 @@ class Fixture:
     # Accessors
     ############################################################################
 
-    async def process_generic_response(self, name, data):
-        self.debug(f"process_generic_response(name {name}, data {data}")
-
-        def parse_uint(expected):
-            if len(data) != expected:
-                raise RuntimeError(f"{name} length was {len(data)}, expected {expected}")
-
-            if expected == 1: 
-                return data[0]
-            elif expected == 2: 
-                return (data[0] << 8) + data[1]
-            elif expected == 3: 
-                return (data[0] << 16) + (data[1] << 8) + data[2]
-            elif expected == 4: 
-                return (data[0] << 24) + (data[1] << 16) + (data[2] << 8) + data[3]
-            else:
-                raise RuntimeError(f"unsupported parse_uint length {expected}")
-
-        if   name == 'GET_LASER_TEC_MODE':          value = parse_uint(1)
-        elif name == 'GET_INTEGRATION_TIME_MS':     value = parse_uint(3)
-        elif name == 'GET_LASER_WARNING_DELAY':     value = parse_uint(1)
-        elif name == 'GET_START_LINE':              value = parse_uint(2)
-        elif name == 'GET_STOP_LINE':               value = parse_uint(2)
-        elif name == 'GET_POWER_WATCHDOG_SEC':      value = parse_uint(2)
-        elif name == 'GET_SCANS_TO_AVERAGE':        value = parse_uint(2)
-        elif name == "GET_AMBIENT_TEMPERATURE":     value = parse_uint(1)
-        elif name == "GET_LASER_WARNING_DELAY_SEC": value = parse_uint(1)
-        elif name == 'GET_CCD_GAIN':
-            parse_uint(2) # validate length
-            value = (data[0] << 8) + data[0] / 256.0
-        else: 
-            raise RuntimeError(f"unrecognized generic request {name}")
-
-        # store the received value for whoever is awaiting the event
-        self.debug(f"storing last_received_value[{name}] = {value}")
-        self.last_received_value[name] = value
-
-        # signal whoever requested the data that the result is now available
-        if self.generic_response_received is None:
-            raise RuntimeError("process_generic_response called with no-one waiting on the result?")
-        self.generic_response_received.set()
-
     async def exercise_accessors(self):
         # integration time
         # gain
@@ -1047,50 +1061,34 @@ class Fixture:
         await self.set_scans_to_average(1)
 
     async def exercise_generic_accessors(self):
-        # don't do CCD_GAIN here -- integers only
-        for setter_name, getter_name, values in [
-            [ 'SET_LASER_TEC_MODE',          'GET_LASER_TEC_MODE'         , [ 0, 1, 2, 3             ] ],
-            [ 'SET_INTEGRATION_TIME_MS',     'GET_INTEGRATION_TIME_MS'    , [ 1, 10, 100, 1000, 2000 ] ],
-            [ 'SET_LASER_WARNING_DELAY_SEC', 'GET_LASER_WARNING_DELAY_SEC', [ 0, 5, 10               ] ],
-            [ 'SET_START_LINE',              'GET_START_LINE'             , [ 0, 400, 800            ] ],
-            [ 'SET_STOP_LINE',               'GET_STOP_LINE'              , [ 1, 400, 1080           ] ],
-            [ 'SET_POWER_WATCHDOG_SEC',      'GET_POWER_WATCHDOG_SEC'     , [ 0, 30, 120             ] ],
-            [ 'SET_SCANS_TO_AVERAGE',        'GET_SCANS_TO_AVERAGE'       , [ 1, 5, 25               ] ] ]:
+        print("Exercising Generic Accessors")
+        for name, values in [ [ 'LASER_TEC_MODE',          [ 0, 1, 2, 3                 ] ],
+                              [ 'INTEGRATION_TIME_MS',     [ 1, 10, 100, 1000, 2000     ] ],
+                              [ 'LASER_WARNING_DELAY_SEC', [ 0, 5, 10                   ] ],
+                              [ 'CCD_GAIN',                [ 0, 0.1, 0.9, 8, 16, 24, 30 ] ],
+                              [ 'START_LINE',              [ 0, 400, 800                ] ],
+                              [ 'STOP_LINE',               [ 1, 400, 1080               ] ],
+                              [ 'POWER_WATCHDOG_SEC',      [ 0, 30, 120                 ] ],
+                              [ 'SCANS_TO_AVERAGE',        [ 1, 5, 25, 125, 625         ] ] ]:
 
-            tier        = self.generics[setter_name]["tier"]
-            setter_code = self.generics[setter_name]["code"]
-            length      = self.generics[setter_name]["size"]
-            
+            print(f"  {name}")
             for value in values:
-                # assemble setter payload
-                write_data = [ 0xff for _ in range(tier) ]
-                if len(write_data) > tier:
-                    raise RuntimeError(f"failed to correctly initialize tier {tier} for {setter_name}")
-                write_data.append(setter_code)
-                if   length == 1: write_data.extend([ (value) ])
-                elif length == 2: write_data.extend([ (value >> 8) & 0xff, (value & 0xff) ])
-                elif length == 3: write_data.extend([ (value >> 16) & 0xff, (value >> 8) & 0xff, (value & 0xff) ])
-                elif length == 4: write_data.extend([ (value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, (value & 0xff) ])
-                else:
-                    raise RuntimeError(f"Unsupported length {length} for setter {setter_name}")
-
                 # write value
-                self.debug(f"sending GENERIC setter {setter_name} with value {value}")
-                await self.write_char("GENERIC", write_data)
+                self.debug(f"setting GENERIC {name} to value {value}")
+                await self.write_char("GENERIC", self.generics.generate_write_request(name, value))
 
                 self.debug(f"waiting {self.args.setter_delay_ms}ms for setter to 'take'")
                 await asyncio.sleep(self.args.setter_delay_ms / 1000)
 
                 # read-back value from device
-                received_value = await self.get_generic(getter_name, tier=tier)
+                received_value = await self.get_generic(name)
 
                 # validate response
-                received_value = self.last_received_value.get(getter_name, None)
-                if value == received_value:
-                    print(f"SUCCESS: {setter_name} {value} -> {getter_name}")
+                if self.generics.equals(name, value):
+                    print(f"    SUCCESS: {name} --> {value}")
                     self.debug("")
                 else:
-                    raise RuntimeError(f"sent {setter_name} (0x{setter_code:02x}) value {value}, but read {getter_name} value {received_value}")
+                    raise RuntimeError(f"sent {name} value {value}, but read {received_value}")
 
     ############################################################################
     # Utility
