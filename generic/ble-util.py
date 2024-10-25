@@ -688,7 +688,7 @@ class Fixture:
         laser_firing = laser_state['laser_firing']
         interlock_closed = 'closed (armed)' if laser_state['interlock_closed'] else 'open (safe)'
 
-        amb_temp = await self.get_generic("GET_AMBIENT_TEMPERATURE")
+        amb_temp = await self.get_generic_value("GET_AMBIENT_TEMPERATURE")
         return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
 
     async def monitor(self):
@@ -708,7 +708,7 @@ class Fixture:
     # these methods belong in the Fixture, rather than Generics, because they
     # use self.debug, .write_char etc
     
-    async def get_generic(self, name):
+    async def get_generic_value(self, name):
         request = self.generics.generate_read_request(name)
         self.debug(f"get_generic: querying {name} ({to_hex(request)})")
 
@@ -1077,7 +1077,7 @@ class Fixture:
                 await asyncio.sleep(self.args.setter_delay_ms / 1000)
 
                 # read-back value from device
-                received_value = await self.get_generic(name)
+                received_value = await self.get_generic_value(name)
 
                 # validate response
                 if self.generics.equals(name, value):
