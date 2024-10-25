@@ -11,7 +11,13 @@ from datetime import datetime
 
 import EEPROMFields
 
+def to_hex(a):
+    if a is None:
+        return "[ ]"
+    return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
+
 class Generic:
+    """ encapsulates paired setter and getter accessors for a single attribute """
     def __init__(self, name, tier, setter, getter, size, epsilon):
         self.name    = name
         self.tier    = tier # 0, 1 or 2
@@ -60,8 +66,25 @@ class Generic:
         return request
 
 class Generics:
+    """ Facade to access all Generic attributes in the BLE interface """
+
+    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
+
     def __init__(self):
+        self.seq = 0
         self.generics = {}
+        self.callbacks = {}
+
+    def next_seq(self, callback=None):
+        self.seq = (self.seq + 1) % 256
+        if self.seq in self.callbacks:
+            raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
+        elif callback:
+            self.callbacks[self.seq] = callback
+        return self.seq
+
+    def get_callback(self, seq):
+        return self.callbacks.pop(seq)
 
     def add(self, name, tier, setter, getter, size, epsilon=0):
         self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
@@ -72,12 +95,6 @@ class Generics:
     def generate_read_request(self, name):
         return self.generics[name].generate_read_request()
 
-    def deserialize(self, name, value):
-        return self.generics[name].deserialize(value)
-
-    def store(self, name, value):
-        self.generics[name].value = value
-
     def get_value(self, name):
         return self.generics[name].value
 
@@ -85,9 +102,27 @@ class Generics:
         await self.generics[name].event.wait()
         self.generics[name].event.clear()
 
-    def set_received(self, name):
-        self.generics[name].event.set()
+    async def process_response(self, name, data):
+        generic = self.generics[name]
+        generic.value = generic.deserialize(data)
+        generic.event.set()
 
+    async def notification_callback(self, sender, data):
+        # self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {to_hex(data)}")
+        if len(data) < 3:
+            raise RuntimeError(f"received GENERIC response with only {len(data)} bytes")
+
+        seq, err, result = data[0], data[1], data[2:]
+
+        response_error = self.RESPONSE_ERRORS[err]
+        if response_error != "OK":
+            raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
+
+        # pass the response data, minus the sequence and error-code header, to 
+        # the registered callback function for that sequence ID
+        callback = self.get_callback(seq)
+        await callback(result)
+        
     def get_name(self, code):
         for name, generic in self.generics.items():
             if code == generic.setter:
@@ -123,7 +158,6 @@ class Fixture:
     LASER_TEC_MODES = ['OFF', 'ON', 'AUTO', 'AUTO_ON']
     ACQUIRE_ERRORS  = ['NONE', 'BATT_SOC_INFO_NOT_RCVD', 'BATT_SOC_TOO_LOW', 'LASER_DIS_FLR', 'LASER_ENA_FLR', 
                       'IMG_SNSR_IN_BAD_STATE', 'IMG_SNSR_STATE_TRANS_FLR', 'SPEC_ACQ_SIG_WAIT_TMO', 'UNKNOWN']
-    GENERIC_RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
 
     ############################################################################
     # Lifecycle
@@ -174,11 +208,6 @@ class Fixture:
         self.generics.add("AMBIENT_TEMPERATURE_DEG_C",  1, None, 0x2a, 1)
         self.generics.add("POWER_WATCHDOG_SEC",         1, 0x30, 0x31, 2)
         self.generics.add("SCANS_TO_AVERAGE",           1, 0x62, 0x63, 2)
-
-        # more Generic
-        self.generic_seq = 0                                # rotating sequence ID for generic requests
-        self.request_callbacks = {}                         # the registered callback for each sequence ID
-        self.generic_response_received = None
 
         self.parse_args()
 
@@ -432,34 +461,13 @@ class Fixture:
                         self.notifications.add(char.uuid)
                     elif name == "GENERIC":
                         self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.generic_notification)
+                        await self.client.start_notify(char.uuid, self.generics.notification_callback)
                         self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
             await self.client.stop_notify(uuid)
 
-    async def generic_notification(self, sender, data):
-        self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {self.to_hex(data)}")
-        if len(data) < 3:
-            raise RuntimeError(f"received GENERIC response with only {len(data)} bytes")
-
-        seq, err, result = data[0], data[1], data[2:]
-
-        generic_response_error = self.GENERIC_RESPONSE_ERRORS[err]
-        if generic_response_error != "OK":
-            raise RuntimeError(f"GENERIC notification included error code {err} ({generic_response_error}); data {self.to_hex(data)}")
-
-        if seq not in self.request_callbacks:
-            raise RuntimeError(f"received GENERIC response to unknown seq {seq}")
-
-        # pass the response data, minus the sequence and error-code header, to 
-        # the registered callback function for that sequence ID
-        callback = self.request_callbacks.pop(seq)
-
-        self.debug(f"generic_notification: calling callback {callback} with result {result}")
-        await callback(result)
-        
     def battery_notification(self, sender, data):
         charging = data[0] != 0
         perc = int(data[1])
@@ -498,13 +506,8 @@ class Fixture:
         extra = []
 
         if name == "GENERIC":
-            self.generic_seq = (self.generic_seq + 1) % 256
-
-            if callback:
-                self.debug(f"storing callback for read seq {self.generic_seq} = {callback}")
-                self.request_callbacks[self.generic_seq] = callback
-
-            prefixed = [ self.generic_seq ]
+            seq = self.generics.next_seq(callback)
+            prefixed = [ seq ]
             for v in data:
                 prefixed.append(v)
             data = prefixed
@@ -512,7 +515,7 @@ class Fixture:
 
         if not quiet:
             code = self.code_by_name.get(name)
-            self.debug(f">> write_char({name} 0x{code:02x}, {self.to_hex(data)}){', '.join(extra)}")
+            self.debug(f">> write_char({name} 0x{code:02x}, {to_hex(data)}){', '.join(extra)}")
 
         if isinstance(data, list):
             data = bytearray(data)
@@ -575,20 +578,17 @@ class Fixture:
 
     def parse_laser_state(self, data):
         result = { 'laser_enable': False, 'laser_watchdog_sec': 0, 'status_mask': 0, 'laser_firing': False, 'interlock_closed': False }
-        sz = len(data)
-        # if sz > 0: result['mode']               = data[0]
-        # if sz > 1: result['type']               = data[1]
-        if sz > 2: result['laser_enable']       = data[2] != 0
-        if sz > 3: result['laser_watchdog_sec'] = data[3]
+        size = len(data)
+        #if size > 0: result['mode']              = data[0]
+        #if size > 1: result['type']              = data[1]
+        if size > 2: result['laser_enable']       = data[2] != 0
+        if size > 3: result['laser_watchdog_sec'] = data[3]
         # ignore bytes 4-5 (reserved)
-        if sz > 6: 
-            result['status_mask']               = data[6]
-            result['interlock_closed']          = data[6] & 0x01 != 0
-            result['laser_firing']              = data[6] & 0x02 != 0
+        if size > 6: 
+            result['status_mask']                 = data[6]
+            result['interlock_closed']            = data[6] & 0x01 != 0
+            result['laser_firing']                = data[6] & 0x02 != 0
         return result
-
-        # (b'\x00 \x00 \x00 \x00 \x0b \xb8')
-        #    mode type  ena dog   delay_ms     0xbb8 = 3000ms = 3sec = correct
 
     async def set_laser_tec_mode(self, mode: str):
         index = self.LASER_TEC_MODES.index(mode)
@@ -691,28 +691,6 @@ class Fixture:
         amb_temp = await self.get_generic("GET_AMBIENT_TEMPERATURE")
         return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
 
-    async def get_generic(self, name):
-        request = self.generics.generate_read_request(name)
-        self.debug(f"get_generic: querying {name} ({self.to_hex(request)})")
-
-        self.generic_response_received = asyncio.Event()
-        await self.write_char("GENERIC", request, callback=lambda data: self.process_generic_response(name, data))
-        await self.generics.wait(name)
-
-        value = self.generics.get_value(name)
-        self.debug(f"get_generic: received {value}")
-        return value
-
-    async def process_generic_response(self, name, data):
-        self.debug(f"process_generic_response(name {name}, data {data}")
-
-        value = self.generics.deserialize(name, data)
-        self.debug(f"storing last_received_value[{name}] = {value}")
-        self.generics.store(name, value)
-
-        # signal that the result is now available
-        self.generics.set_received(name)
-
     async def monitor(self):
         try:
             print("\nPress ctrl-C to exit...\n")
@@ -722,6 +700,24 @@ class Fixture:
                 sleep(1)
         except KeyboardInterrupt:
             print()
+
+    ############################################################################
+    # Generics
+    ############################################################################
+
+    # these methods belong in the Fixture, rather than Generics, because they
+    # use self.debug, .write_char etc
+    
+    async def get_generic(self, name):
+        request = self.generics.generate_read_request(name)
+        self.debug(f"get_generic: querying {name} ({to_hex(request)})")
+
+        await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
+        await self.generics.wait(name)
+
+        value = self.generics.get_value(name)
+        self.debug(f"get_generic: received {value}")
+        return value
 
     ############################################################################
     # Ramps
@@ -903,7 +899,7 @@ class Fixture:
                         else:
                             raise RuntimeError(f"unknown READ_SPECTRUM error_code {error_code}")
                     if len(response) > 3:
-                        print("trailing data after NAK error code: {self.to_hex(response)}")
+                        print("trailing data after NAK error code: {to_hex(response)}")
                 elif first_pixel != pixels_read:
                     # this still happens on 2.8.7
                     # self.debug(f"WARNING: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
@@ -1097,11 +1093,6 @@ class Fixture:
     def debug(self, msg):
         if self.args.debug:
             print(f"{datetime.now()} DEBUG: {msg}")
-
-    def to_hex(self, a):
-        if a is None:
-            return "[ ]"
-        return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
 
     def wrap_uuid(self, code):
         return f"d1a7{code:04x}-af78-4449-a34f-4da1afaf51bc".lower()
