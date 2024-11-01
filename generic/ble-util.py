@@ -11,6 +11,133 @@ from datetime import datetime
 
 import EEPROMFields
 
+def to_hex(a):
+    if a is None:
+        return "[ ]"
+    return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
+
+class Generic:
+    """ encapsulates paired setter and getter accessors for a single attribute """
+    def __init__(self, name, tier, setter, getter, size, epsilon):
+        self.name    = name
+        self.tier    = tier # 0, 1 or 2
+        self.setter  = setter
+        self.getter  = getter
+        self.size    = size
+        self.epsilon = epsilon
+
+        self.value = None
+        self.event = asyncio.Event()
+    
+    def serialize(self, value):
+        data = []
+        if self.name == "CCD_GAIN":
+            data.append(int(value) & 0xff)
+            data.append(int((value - int(value)) * 256) & 0xff)
+        else: 
+            # assume big-endian uint[size]            
+            for i in range(self.size):
+                data.append((value >> (8 * (self.size - (i+1)))) & 0xff)
+        return data
+
+    def deserialize(self, data):
+        if self.name == "CCD_GAIN":
+            return data[0] + data[1] / 256.0
+        else:
+            value = 0
+            for byte in data:
+                value <<= 8
+                value |= byte
+            return value
+
+    def generate_write_request(self, value):
+        if self.setter is None:
+            raise RuntimeError(f"Generic {self.name} is read-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.setter)
+        request.extend(self.serialize(value))
+        return request
+
+    def generate_read_request(self):
+        if self.getter is None:
+            raise RuntimeError(f"Generic {self.name} is write-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.getter)
+        return request
+
+class Generics:
+    """ Facade to access all Generic attributes in the BLE interface """
+
+    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
+
+    def __init__(self):
+        self.seq = 0
+        self.generics = {}
+        self.callbacks = {}
+
+    def next_seq(self, callback=None):
+        self.seq = (self.seq + 1) % 256
+        if self.seq in self.callbacks:
+            raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
+        elif callback:
+            self.callbacks[self.seq] = callback
+        return self.seq
+
+    def get_callback(self, seq):
+        return self.callbacks.pop(seq)
+
+    def add(self, name, tier, setter, getter, size, epsilon=0):
+        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
+
+    def generate_write_request(self, name, value):
+        return self.generics[name].generate_write_request(value)
+
+    def generate_read_request(self, name):
+        return self.generics[name].generate_read_request()
+
+    def get_value(self, name):
+        return self.generics[name].value
+
+    async def wait(self, name):
+        await self.generics[name].event.wait()
+        self.generics[name].event.clear()
+
+    async def process_response(self, name, data):
+        generic = self.generics[name]
+        generic.value = generic.deserialize(data)
+        generic.event.set()
+
+    async def notification_callback(self, sender, data):
+        # self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {to_hex(data)}")
+        if len(data) < 3:
+            raise RuntimeError(f"received GENERIC response with only {len(data)} bytes")
+
+        seq, err, result = data[0], data[1], data[2:]
+
+        response_error = self.RESPONSE_ERRORS[err]
+        if response_error != "OK":
+            raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
+
+        # pass the response data, minus the sequence and error-code header, to 
+        # the registered callback function for that sequence ID
+        callback = self.get_callback(seq)
+        await callback(result)
+        
+    def get_name(self, code):
+        for name, generic in self.generics.items():
+            if code == generic.setter:
+                return f"SET_{name}"
+            elif code == generic.getter:
+                return f"GET_{name}"
+        return "UNKNOWN"
+
+    def equals(self, name, expected):
+        actual  = self.generics[name].value
+        epsilon = self.generics[name].epsilon
+        delta   = abs(actual - expected)
+        # print("Generics.equals: name {name}, actual {actual}, expected {expected}, delta {delta}, epsilon {epsilon}")
+        return delta <= epsilon
+
 class Fixture:
     """
     Known issues:
@@ -31,7 +158,6 @@ class Fixture:
     LASER_TEC_MODES = ['OFF', 'ON', 'AUTO', 'AUTO_ON']
     ACQUIRE_ERRORS  = ['NONE', 'BATT_SOC_INFO_NOT_RCVD', 'BATT_SOC_TOO_LOW', 'LASER_DIS_FLR', 'LASER_ENA_FLR', 
                       'IMG_SNSR_IN_BAD_STATE', 'IMG_SNSR_STATE_TRANS_FLR', 'SPEC_ACQ_SIG_WAIT_TMO', 'UNKNOWN']
-    GENERIC_RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
 
     ############################################################################
     # Lifecycle
@@ -39,54 +165,49 @@ class Fixture:
 
     def __init__(self):
 
-        self.stop_event = asyncio.Event()
-
-        self.client = None
+        # scanning
+        self.client = None                                  # instantiated BleakClient
         self.keep_scanning = True
+        self.stop_scanning_event = asyncio.Event()
+
+        # EEPROM
         self.eeprom = None
         self.eeprom_field_loc = EEPROMFields.get_eeprom_fields()
+
+        # Device Settings
         self.integration_time_ms = 0 # read from EEPROM startup field
         self.last_integration_time_ms = 2000
-        self.ambient_temperature_deg_c = None
         self.scans_to_average = 1
         self.last_spectrum_received = None
         self.laser_enable = False
         self.laser_warning_delay_sec = 3
-        self.notifications = set()
-        self.generic_seq = 0
-        self.request_callbacks = {}
 
-        self.code_by_name = { "INTEGRATION_TIME_MS": 0xff01, 
-                              "GAIN_DB":             0xff02,
-                              "LASER_STATE":         0xff03,
-                              "ACQUIRE_SPECTRUM":    0xff04,
-                              "SPECTRUM_CMD":        0xff05,
-                              "READ_SPECTRUM":       0xff06,
-                              "EEPROM_CMD":          0xff07,
-                              "EEPROM_DATA":         0xff08,
-                              "BATTERY_STATUS":      0xff09,
-                              "GENERIC":             0xff0a }
+        self.notifications = set()                          # all Characteristics to which we're subscribed for notifications
 
-        self.generics = { "SET_GAIN_DB":                 0xb7, # first-tier
-                          "GET_GAIN_DB":                 0xc5,
-                          "SET_INTEGRATION_TIME_MS":     0xb2,
-                          "GET_INTEGRATION_TIME_MS":     0xbf,
-                          "GET_LASER_WARNING_DELAY_SEC": 0x8b,
-                          "SET_LASER_WARNING_DELAY_SEC": 0x8a,
-                          "SET_LASER_TEC_MODE":          0x84,
-                          "NEXT_TIER":                   0xff,
-                                                         
-                          "SET_START_LINE":              0x21, # second-tier
-                          "SET_STOP_LINE":               0x23,
-                          "GET_AMBIENT_TEMPERATURE":     0x2a,
-                          "GET_POWER_WATCHDOG_SEC":      0x31,
-                          "SET_POWER_WATCHDOG_SEC":      0x30,
-                          "SET_SCANS_TO_AVERAGE":        0x62,
-                          "GET_SCANS_TO_AVERAGE":        0x63 }
-
-        # reverse lookups
+        # Characteristics
+        self.code_by_name = { "INTEGRATION_TIME_MS":     0xff01, 
+                              "GAIN_DB":                 0xff02,
+                              "LASER_STATE":             0xff03,
+                              "ACQUIRE_SPECTRUM":        0xff04,
+                              "SPECTRUM_CMD":            0xff05,
+                              "READ_SPECTRUM":           0xff06,
+                              "EEPROM_CMD":              0xff07,
+                              "EEPROM_DATA":             0xff08,
+                              "BATTERY_STATUS":          0xff09,
+                              "GENERIC":                 0xff0a }
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
-        self.generic_by_code = { code: name for name, code in self.generics.items() }
+
+        #                  Name                      Tier   Set   Get Size
+        self.generics = Generics()
+        self.generics.add("LASER_TEC_MODE",             0, 0x84, 0x85, 1)
+        self.generics.add("CCD_GAIN",                   0, 0xb7, 0xc5, 2, epsilon=0.01)
+        self.generics.add("INTEGRATION_TIME_MS",        0, 0xb2, 0xbf, 3)
+        self.generics.add("LASER_WARNING_DELAY_SEC",    0, 0x8a, 0x8b, 1)
+        self.generics.add("START_LINE",                 1, 0x21, 0x22, 2)
+        self.generics.add("STOP_LINE",                  1, 0x23, 0x24, 2)
+        self.generics.add("AMBIENT_TEMPERATURE_DEG_C",  1, None, 0x2a, 1)
+        self.generics.add("POWER_WATCHDOG_SEC",         1, 0x30, 0x31, 2)
+        self.generics.add("SCANS_TO_AVERAGE",           1, 0x62, 0x63, 2)
 
         self.parse_args()
 
@@ -138,6 +259,7 @@ class Fixture:
         group = parser.add_argument_group('Misc')
         group.add_argument("--power-watchdog-sec",      type=int,            help="set power watchdog (uint16 sec)")
         group.add_argument("--accessors",               action="store_true", help="exercise getter/setters")
+        group.add_argument("--setter-delay-ms",         type=int,            help="minimum delay / settle time after writing generic setter", default=1000)
 
         self.args = parser.parse_args()
 
@@ -178,6 +300,10 @@ class Fixture:
         if self.args.laser_enable:
             await self.set_laser_enable(True)
 
+        # exercise accessors
+        if self.args.accessors:
+            await self.exercise_accessors()
+
         # apply acquisition parameters
         if self.args.integration_time_ms is not None and not self.args.ramp_integ:
             await self.set_integration_time_ms(self.args.integration_time_ms)
@@ -189,10 +315,6 @@ class Fixture:
             await self.set_start_line(self.args.start_line)
         if self.args.stop_line is not None:
             await self.set_stop_line(self.args.stop_line)
-
-        # exercise accessors
-        if self.args.accessors:
-            await self.exercise_accessors()
 
         # take spectra or monitor
         if self.args.monitor:
@@ -221,7 +343,7 @@ class Fixture:
 
         print(f"{datetime.now()} rssi local_name")
         async with BleakScanner(detection_callback=self.detection_callback, service_uuids=[self.WASATCH_SERVICE]) as scanner:
-            await self.stop_event.wait()
+            await self.stop_scanning_event.wait()
 
         # scanner stops when block exits
         self.debug("scanner stopped")
@@ -283,7 +405,7 @@ class Fixture:
 
     def stop_scanning(self):
         self.keep_scanning = False
-        self.stop_event.set()
+        self.stop_scanning_event.set()
 
     def disconnected_callback(self):
         print("\ndisconnected")
@@ -339,32 +461,13 @@ class Fixture:
                         self.notifications.add(char.uuid)
                     elif name == "GENERIC":
                         self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.generic_notification)
+                        await self.client.start_notify(char.uuid, self.generics.notification_callback)
                         self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
             await self.client.stop_notify(uuid)
 
-    async def generic_notification(self, sender, data):
-        self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {self.to_hex(data)}")
-        if len(data) < 3:
-            print("ERROR: received GENERIC response with only {len(data)} bytes")
-            return
-
-        seq, err, result = data[0], data[1], data[2:]
-
-        generic_response_error = self.GENERIC_RESPONSE_ERRORS[err]
-        if generic_response_error != "OK":
-            print(f"ERROR: GENERIC notification included error code {err} ({generic_response_error}); data {self.to_hex(data)}")
-
-        if seq not in self.request_callbacks:
-            print("ERROR: received GENERIC response to unknown seq {seq}")
-            return
-
-        callback = self.request_callbacks[seq]
-        await callback(result)
-        
     def battery_notification(self, sender, data):
         charging = data[0] != 0
         perc = int(data[1])
@@ -386,8 +489,9 @@ class Fixture:
 
         if not quiet:
             self.debug(f"<< read_char({name}, min_len {min_len}): {response}")
-            if min_len is not None and len(response) < min_len:
-                print(f"\nERROR: characteristic {name} returned insufficient data ({len(response)} < {min_len})\n")
+
+        if min_len is not None and len(response) < min_len:
+            raise RuntimeError(f"characteristic {name} returned insufficient data ({len(response)} < {min_len})")
 
         buf = bytearray()
         for byte in response:
@@ -402,10 +506,8 @@ class Fixture:
         extra = []
 
         if name == "GENERIC":
-            self.generic_seq = (self.generic_seq + 1) % 256
-            self.request_callbacks[self.generic_seq] = callback
-
-            prefixed = [ self.generic_seq ]
+            seq = self.generics.next_seq(callback)
+            prefixed = [ seq ]
             for v in data:
                 prefixed.append(v)
             data = prefixed
@@ -413,7 +515,7 @@ class Fixture:
 
         if not quiet:
             code = self.code_by_name.get(name)
-            self.debug(f">> write_char({name} 0x{code:02x}, {self.to_hex(data)}){', '.join(extra)}")
+            self.debug(f">> write_char({name} 0x{code:02x}, {to_hex(data)}){', '.join(extra)}")
 
         if isinstance(data, list):
             data = bytearray(data)
@@ -431,7 +533,7 @@ class Fixture:
         for i in range(1, len(data)):
             if header:
                 code = data[i]
-                name = self.generic_by_code[code]
+                name = self.generics.get_name(code)
                 path.append(name)
                 if code != 0xff:
                     header = False
@@ -444,20 +546,10 @@ class Fixture:
     ############################################################################
 
     async def set_power_watchdog_sec(self, sec):
-        tier = self.generics.get("NEXT_TIER")
-        cmd = self.generics.get("SET_POWER_WATCHDOG_SEC")
-
-        msb = (sec >> 8) & 0xff
-        lsb = (sec     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("POWER_WATCHDOG_SEC", sec))
 
     async def set_laser_warning_delay_sec(self, sec):
-        cmd = self.generics.get("SET_LASER_WARNING_DELAY_SEC")
-        await self.write_char("GENERIC", [cmd, sec])
-
-        self.laser_warning_delay_sec = sec
-        # I don't _think_ I need to call sync_laser_state() here...
+        await self.write_char("GENERIC", self.generics.generate_write_request("LASER_WARNING_DELAY_SEC", sec))
 
     ############################################################################
     # Laser Control
@@ -486,30 +578,21 @@ class Fixture:
 
     def parse_laser_state(self, data):
         result = { 'laser_enable': False, 'laser_watchdog_sec': 0, 'status_mask': 0, 'laser_firing': False, 'interlock_closed': False }
-        sz = len(data)
-        # if sz > 0: result['mode']               = data[0]
-        # if sz > 1: result['type']               = data[1]
-        if sz > 2: result['laser_enable']       = data[2] != 0
-        if sz > 3: result['laser_watchdog_sec'] = data[3]
+        size = len(data)
+        #if size > 0: result['mode']              = data[0]
+        #if size > 1: result['type']              = data[1]
+        if size > 2: result['laser_enable']       = data[2] != 0
+        if size > 3: result['laser_watchdog_sec'] = data[3]
         # ignore bytes 4-5 (reserved)
-        if sz > 6: 
-            result['status_mask']               = data[6]
-            result['interlock_closed']          = data[6] & 0x01 != 0
-            result['laser_firing']              = data[6] & 0x02 != 0
+        if size > 6: 
+            result['status_mask']                 = data[6]
+            result['interlock_closed']            = data[6] & 0x01 != 0
+            result['laser_firing']                = data[6] & 0x02 != 0
         return result
 
-        # (b'\x00 \x00 \x00 \x00 \x0b \xb8')
-        #    mode type  ena dog   delay_ms     0xbb8 = 3000ms = 3sec = correct
-
     async def set_laser_tec_mode(self, mode: str):
-        try:
-            index = self.LASER_TEC_MODES.index(mode)
-        except:
-            print(f"ERROR: invalid laser TEC mode {mode}")
-            return
-
-        cmd = self.generics.get("SET_LASER_TEC_MODE")
-        await self.write_char("GENERIC", [cmd, index])
+        index = self.LASER_TEC_MODES.index(mode)
+        await self.write_char("GENERIC", self.generics.generate_write_request("LASER_TEC_MODE", index))
 
     ############################################################################
     # Acquisition Parameters
@@ -543,34 +626,16 @@ class Fixture:
 
     async def set_scans_to_average(self, n):
         print(f"setting scan averaging to {n}")
-        tier = self.generics.get("NEXT_TIER")
-        cmd = self.generics.get("SET_SCANS_TO_AVERAGE")
-
-        msb = (n >> 8) & 0xff
-        lsb = (n     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("SCANS_TO_AVERAGE", n))
         self.scans_to_average = n
 
     async def set_start_line(self, n):
         print(f"setting start line to {n}")
-        tier = self.generics.get("NEXT_TIER")
-        cmd = self.generics.get("SET_START_LINE")
-
-        msb = (n >> 8) & 0xff
-        lsb = (n     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("START_LINE", n))
 
     async def set_stop_line(self, n):
         print(f"setting stop line to {n}")
-        tier = self.generics.get("NEXT_TIER")
-        cmd = self.generics.get("SET_STOP_LINE")
-
-        msb = (n >> 8) & 0xff
-        lsb = (n     ) & 0xff
-
-        await self.write_char("GENERIC", [tier, cmd, msb, lsb])
+        await self.write_char("GENERIC", self.generics.generate_write_request("STOP_LINE", n))
 
     async def set_vertical_roi(self, pair):
         await self.set_start_line(pair[0])
@@ -615,30 +680,16 @@ class Fixture:
         return retval
 
     async def get_status(self):
-        bat = await self.get_battery_state()
-        bat_perc = f"{bat['perc']:3d}%"
-        bat_chg = 'charging' if bat['charging'] else 'discharging'
+        battery_state = await self.get_battery_state()
+        battery_perc = f"{battery_state['perc']:3d}%"
+        battery_charging = 'charging' if battery_state['charging'] else 'discharging'
 
-        las = await self.get_laser_state()
-        las_firing = las['laser_firing']
-        intlock = 'closed (armed)' if las['interlock_closed'] else 'open (safe)'
+        laser_state = await self.get_laser_state()
+        laser_firing = laser_state['laser_firing']
+        interlock_closed = 'closed (armed)' if laser_state['interlock_closed'] else 'open (safe)'
 
-        # Send a WRITE to request an updated temperature; however, even if we
-        # awaited the WRITE completion, we wouldn't necessarily have received
-        # the response yet. Rather than blocking on the request and response,
-        # let's just return our last-cached temperature, and trust that 
-        # everything will be 'eventually consistent.'
-        #
-        # (This is in contrast to BATTERY_STATUS and LASER_STATE, both of which
-        # have their own READ-capable Characteristics. GENERIC uses a slightly
-        # more asynchronous request-response model, so let's let it 'be async.')
-        await self.write_char("GENERIC", [ 0xff, 0x2a ], callback=self.process_ambient_temperature)
-
-        return f"Battery {bat_perc} ({bat_chg}), Laser {las_firing}, Interlock {intlock}, Amb {self.ambient_temperature_deg_c}°C"
-
-    async def process_ambient_temperature(self, result):
-        self.ambient_temperature_deg_c = int(result[0])
-        self.debug(f"process_ambient_temperature: deg_c {self.ambient_temperature_deg_c}")
+        amb_temp = await self.get_generic_value("GET_AMBIENT_TEMPERATURE")
+        return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
 
     async def monitor(self):
         try:
@@ -649,6 +700,24 @@ class Fixture:
                 sleep(1)
         except KeyboardInterrupt:
             print()
+
+    ############################################################################
+    # Generics
+    ############################################################################
+
+    # these methods belong in the Fixture, rather than Generics, because they
+    # use self.debug, .write_char etc
+    
+    async def get_generic_value(self, name):
+        request = self.generics.generate_read_request(name)
+        self.debug(f"get_generic: querying {name} ({to_hex(request)})")
+
+        await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
+        await self.generics.wait(name)
+
+        value = self.generics.get_value(name)
+        self.debug(f"get_generic: received {value}")
+        return value
 
     ############################################################################
     # Ramps
@@ -761,7 +830,7 @@ class Fixture:
                         plt.draw()
                         plt.pause(0.01)
 
-                    sleep(self.args.delay_ms / 1000.0)
+                    await asyncio.sleep(self.args.delay_ms / 1000.0)
 
                 if repeats > 1:
                     # if we're doing some kind of ramping, compute the average pixel stdev (pixel noise over time, not space)
@@ -814,8 +883,7 @@ class Fixture:
             ok = True
             response_len = len(response)
             if (response_len < header_len):
-                print(f"ERROR: received invalid READ_SPECTRUM response of {response_len} bytes (missing header): {response}")
-                ok = False
+                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (missing header): {response}")
             else:
                 # check for official NAK
                 first_pixel = int((response[0] << 8) | response[1]) # big-endian int16
@@ -827,21 +895,20 @@ class Fixture:
                         if error_code < len(self.ACQUIRE_ERRORS):
                             error_str = self.ACQUIRE_ERRORS[error_code]
                             if error_str != "NONE":
-                                print(f"ERROR: READ_SPECTRUM returned {error_str}")
+                                raise RuntimeError(f"READ_SPECTRUM returned {error_str}")
                         else:
-                            print(f"ERROR: unknown READ_SPECTRUM error_code {error_code}")
+                            raise RuntimeError(f"unknown READ_SPECTRUM error_code {error_code}")
                     if len(response) > 3:
-                        print("ERROR: trailing data after NAK error code: {self.to_hex(response)}")
+                        print("trailing data after NAK error code: {to_hex(response)}")
                 elif first_pixel != pixels_read:
                     # this still happens on 2.8.7
                     # self.debug(f"WARNING: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
                     ok = False
                 elif (response_len < header_len or response_len % 2 != 0):
-                    print(f"ERROR: received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
-                    ok = False
+                    raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
 
             if not ok:
-                sleep(0.2)
+                await asyncio.sleep(0.2)
                 continue
             
             ####################################################################
@@ -860,7 +927,7 @@ class Fixture:
                 if pixels_read == self.pixels:
                     # self.debug("read complete spectrum")
                     if (i + 1 != pixels_in_packet):
-                        print(f"ERROR: ignoring {pixels_in_packet - (i + 1)} trailing pixels")
+                        raise RuntimeError(f"trailing pixels in packet")
 
         if self.args.bin_2x2:
             # note, this needs updated for 633XS
@@ -980,43 +1047,44 @@ class Fixture:
     ############################################################################
 
     async def exercise_accessors(self):
-
         # integration time
-
         # gain
-
         # laser state (enable, watchdog, ...)
 
-        # generic ##############################################################
+        await self.exercise_generic_accessors()
 
-        generic_tests = [
-            [ 0, [ 'SET_LASER_TEC_MODE',      'GET_LASER_TEC_MODE'      ], 1, range(0, 4) ],
-            [ 0, [ 'SET_CCD_GAIN',            'GET_CCD_GAIN'            ], 2, [ 0, 8, 24, 30 ] ],
-            [ 0, [ 'SET_INTEGRATION_TIME',    'GET_INTEGRATION_TIME'    ], 4, [ 1, 10, 100, 1000, 2000 ] ],
-            [ 0, [ 'SET_LASER_WARNING_DELAY', 'GET_LASER_WARNING_DELAY' ], 2, [ 0, 5, 10 ] ],
-            [ 1, [ 'SET_START_LINE',          'GET_START_LINE'          ], 2, [ 0, 400, 800 ] ],
-            [ 1, [ 'SET_STOP_LINE',           'GET_STOP_LINE'           ], 2, [ 1, 400, 1080 ] ],
-            [ 1, [ 'SET_POWER_WATCHDOG_SEC',  'GET_POWER_WATCHDOG_SEC'  ], 2, [ 0, 30, 120 ] ],
-            [ 1, [ 'SET_SCANS_TO_AVERAGE',    'GET_SCANS_TO_AVERAGE'    ], 2, [ 1, 5, 25 ] ],
-        ]
+        # reset this to avoid crazy timeout
+        await self.set_scans_to_average(1)
 
-        # laser tec mode
+    async def exercise_generic_accessors(self):
+        print("Exercising Generic Accessors")
+        for name, values in [ [ 'LASER_TEC_MODE',          [ 0, 1, 2, 3                 ] ],
+                              [ 'INTEGRATION_TIME_MS',     [ 1, 10, 100, 1000, 2000     ] ],
+                              [ 'LASER_WARNING_DELAY_SEC', [ 0, 5, 10                   ] ],
+                              [ 'CCD_GAIN',                [ 0, 0.1, 0.9, 8, 16, 24, 30 ] ],
+                              [ 'START_LINE',              [ 0, 400, 800                ] ],
+                              [ 'STOP_LINE',               [ 1, 400, 1080               ] ],
+                              [ 'POWER_WATCHDOG_SEC',      [ 0, 30, 120                 ] ],
+                              [ 'SCANS_TO_AVERAGE',        [ 1, 5, 25, 125, 625         ] ] ]:
 
-        # ccd gain
+            print(f"  {name}")
+            for value in values:
+                # write value
+                self.debug(f"setting GENERIC {name} to value {value}")
+                await self.write_char("GENERIC", self.generics.generate_write_request(name, value))
 
-        # integration time
+                self.debug(f"waiting {self.args.setter_delay_ms}ms for setter to 'take'")
+                await asyncio.sleep(self.args.setter_delay_ms / 1000)
 
-        # laser warning delay
+                # read-back value from device
+                received_value = await self.get_generic_value(name)
 
-        # start line
-
-        # stop line
-
-        # ambient temperature
-
-        # power watchdog
-
-        # scans to average
+                # validate response
+                if self.generics.equals(name, value):
+                    print(f"    SUCCESS: {name} --> {value}")
+                    self.debug("")
+                else:
+                    raise RuntimeError(f"sent {name} value {value}, but read {received_value}")
 
     ############################################################################
     # Utility
@@ -1025,9 +1093,6 @@ class Fixture:
     def debug(self, msg):
         if self.args.debug:
             print(f"{datetime.now()} DEBUG: {msg}")
-
-    def to_hex(self, a):
-        return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
 
     def wrap_uuid(self, code):
         return f"d1a7{code:04x}-af78-4449-a34f-4da1afaf51bc".lower()
