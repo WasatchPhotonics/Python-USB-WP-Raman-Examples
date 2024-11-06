@@ -11,6 +11,7 @@ import os
 from time import sleep
 from datetime import datetime
 import matplotlib.pyplot as plt
+import numpy as np
 
 import traceback
 import usb.core
@@ -43,32 +44,26 @@ class Fixture(object):
         self.last_acquire = datetime.now()
 
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-        parser.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
-        parser.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
         parser.add_argument("--debug",               action="store_true", help="debug output")
-        parser.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
-        parser.add_argument("--dump",                action="store_true", help="dump basic getters")
-        parser.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
-        parser.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
-        parser.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
-        parser.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
-        parser.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
-        parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
-        parser.add_argument("--integration-times",   type=str,            help="list of integration times (ms)")
-        parser.add_argument("--keep-trying",         action="store_true", help="ignore timeouts")
-        parser.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
-        parser.add_argument("--list",                action="store_true", help="list all spectrometers")
-        parser.add_argument("--loop",                type=int,            help="repeat n times", default=1)
-        parser.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
-        parser.add_argument("--model",               type=str,            help="desired model")
-        parser.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
-        parser.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
-        parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
-        parser.add_argument("--pixels",              type=int,            help="override pixel count")
-        parser.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
-        parser.add_argument("--serial-number",       type=str,            help="desired serial number")
-        parser.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
-        parser.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
+
+        group = parser.add_argument_group("Connection")
+        group.add_argument("--list",                action="store_true", help="list all spectrometers")
+        group.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
+        group.add_argument("--serial-number",       type=str,            help="desired serial number")
+        group.add_argument("--model",               type=str,            help="desired model")
+        group.add_argument("--pixels",              type=int,            help="override pixel count")
+        group.add_argument("--set-dfu",             action="store_true", help="set matching spectrometers to DFU mode")
+        group.add_argument("--keep-trying",         action="store_true", help="ignore timeouts")
+
+        group = parser.add_argument_group("Acquisition Parameters")
+        group.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
+        group.add_argument("--integration-times",   type=str,            help="list of integration times (ms)")
+        group.add_argument("--scans-to-average",    type=int,            help="set scan averaging (XS-only)")
+        group.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
+        group.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
+        group.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
+        group.add_argument("--loop",                type=int,            help="repeat n times", default=1)
+        group.add_argument("--inner-loop",          type=int,            help="repeat n times", default=10)
 
         group = parser.add_argument_group("Auto-Raman")
         group.add_argument("--auto-raman",          action="store_true", help="use Auto-Raman measurments")
@@ -92,6 +87,19 @@ class Fixture(object):
         group.add_argument("--bin-2x2",             action="store_true", help="apply 2x2 binning")
         group.add_argument("--plot",                action="store_true", help="graph spectra")
         group.add_argument("--overlay",             action="store_true", help="overlay graphed spectra")
+        group.add_argument("--outfile",             type=str,            help="outfile to save full spectra")
+
+        group = parser.add_argument_group("Testing")
+        group.add_argument("--reset-fpga",          action="store_true", help="reset FPGA")
+        group.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
+        group.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
+        group.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
+        group.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
+        group.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
+        group.add_argument("--dump",                action="store_true", help="dump basic getters")
+        group.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
+        group.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
+        group.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
 
         self.args = parser.parse_args()
 
@@ -215,6 +223,10 @@ class Fixture(object):
 
         # [self.get_fpga_configuration_register(dev) for dev in self.devices]
 
+        if self.args.scans_to_average:
+            for dev in self.devices:
+                self.set_scans_to_average(dev, self.args.scans_to_average)
+
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 1) for dev in self.devices]
 
@@ -244,6 +256,10 @@ class Fixture(object):
                     (raw, percentage, charging) = self.get_battery_level(dev)
                     print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
                 sleep(1)
+
+        if self.args.plot and self.args.spectra:
+            print("Press return to exit...", end='')
+            foo = input()
 
     def list(self):
         print("%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA"))
@@ -344,6 +360,11 @@ class Fixture(object):
         print("setting selectedADC to %d" % n)
         self.send_cmd(dev, 0xed, n)
 
+    def set_scans_to_average(self, dev, n):
+        if dev.idProduct != 0x4000:
+            return
+        self.send_cmd(dev, 0xff, 0x62, n)
+
     def set_integration_time_ms(self, dev, n):
         if n < 1 or n > 0xffff:
             print("ERROR: script only supports positive uint16 integration time")
@@ -351,6 +372,18 @@ class Fixture(object):
 
         print("setting integrationTimeMS to %d" % n)
         self.send_cmd(dev, 0xb2, n)
+
+    def get_integration_time_ms(self, dev):
+        return self.get_cmd(dev, 0xbf, lsb_len=3)
+
+    def get_detector_gain(self, dev):
+        result = self.get_cmd(dev, 0xc5)
+        lsb = result[0]
+        msb = result[1]
+        return msb + lsb / 256.0
+
+    def get_scans_to_average(self, dev):
+        return self.get_cmd(dev, 0xff, 0x63, msb_len=2)
 
     def set_modulation_enable(self, dev, flag):
         print("setting laserModulationEnable to %s" % ("on" if flag else "off"))
@@ -501,6 +534,7 @@ class Fixture(object):
         if self.args.plot:
             plt.ion()
 
+        spectra = []
         for i in range(self.args.spectra):
             for dev in self.devices:
                 for j in range(self.args.continuous_count):
@@ -511,6 +545,7 @@ class Fixture(object):
 
                     now = datetime.now()
                     print("%s Spectrum %3d/%3d/%3d %s ..." % (now, j+1, i+1, self.args.spectra, spectrum[:10]))
+                    spectra.append(spectrum)
                     if outfile is not None:
                         outfile.write("%s, %s\n" % (now, ", ".join([str(x) for x in spectrum])))
 
@@ -529,6 +564,16 @@ class Fixture(object):
 
             self.debug(f"sleeping {self.args.delay_ms}ms")
             sleep(self.args.delay_ms / 1000.0 )
+
+        if len(spectra):
+            stdevs = []
+            for px in range(len(spectra[0])):
+                values = []
+                for t in range(len(spectra)):
+                    values.append(spectra[t][px])
+                stdevs.append(np.std(values))
+            avg_std = sum(stdevs) / len(stdevs)
+            print(f"Mean pixel stdev over {len(spectra)} spectra: {avg_std:.2f}")
 
         if outfile is not None:
             outfile.close()
@@ -555,7 +600,10 @@ class Fixture(object):
 
     def get_spectrum_sw_trigger(self, dev, acq_type=0):
         if self.args.integration_time_ms:
-            timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+            if self.args.scans_to_average:
+                timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * (self.args.scans_to_average + 1)
+            else:
+                timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
         else:
             timeout_ms = TIMEOUT_MS + 100 * 2
 
@@ -581,6 +629,12 @@ class Fixture(object):
             except usb.core.USBTimeoutError as ex:
                 if not (self.args.keep_trying or self.args.auto_raman):
                     raise 
+
+        if acq_type == 3:
+            final_integ_ms = self.get_integration_time_ms(dev)
+            final_gain_db  = self.get_detector_gain(dev)
+            final_scan_avg = self.get_scans_to_average(dev)
+            print(f"Integration Time {final_integ_ms}ms, Gain {final_gain_db}dB, Avg {final_scan_avg} scans")
 
         return self.demarshal_spectrum(data)
 
@@ -638,6 +692,7 @@ class Fixture(object):
                 print(f"  {name:17s} {str(value):8s} " + ("" if name == "ar_drop_factor" else f"0x{value:04x}"))
 
         self.send_cmd(dev, 0xfd, 0, 0, buf)
+        print(f"back from sending params")
 
     def to_hex(self, a):
         return "[ " + ", ".join([f"{v:02x}" for v in a]) + " ]"
