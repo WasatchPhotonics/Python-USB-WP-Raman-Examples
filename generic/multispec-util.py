@@ -224,8 +224,12 @@ class Fixture(object):
         # [self.get_fpga_configuration_register(dev) for dev in self.devices]
 
         if self.args.scans_to_average:
+            n = self.args.scans_to_average
             for dev in self.devices:
-                self.set_scans_to_average(dev, self.args.scans_to_average)
+                self.set_scans_to_average(dev, n)
+                check = self.get_scans_to_average(dev)
+                if check != n:
+                    print(f"WARNING: failed to set {n} scan averaging (read {check})")
 
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 1) for dev in self.devices]
@@ -383,7 +387,7 @@ class Fixture(object):
         return msb + lsb / 256.0
 
     def get_scans_to_average(self, dev):
-        return self.get_cmd(dev, 0xff, 0x63, msb_len=2)
+        return self.get_cmd(dev, 0xff, 0x63, lsb_len=2)
 
     def set_modulation_enable(self, dev, flag):
         print("setting laserModulationEnable to %s" % ("on" if flag else "off"))
