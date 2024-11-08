@@ -63,6 +63,7 @@ class Generic:
             raise RuntimeError(f"Generic {self.name} is write-only")
         request = [ 0xff for _ in range(self.tier) ]
         request.append(self.getter)
+        # self.event.clear()
         return request
 
 class Generics:
@@ -124,6 +125,9 @@ class Generics:
         await callback(result)
         
     def get_name(self, code):
+        if code == 0xff:
+            return "NEXT_TIER"
+
         for name, generic in self.generics.items():
             if code == generic.setter:
                 return f"SET_{name}"
@@ -135,20 +139,14 @@ class Generics:
         actual  = self.generics[name].value
         epsilon = self.generics[name].epsilon
         delta   = abs(actual - expected)
-        # print("Generics.equals: name {name}, actual {actual}, expected {expected}, delta {delta}, epsilon {epsilon}")
         return delta <= epsilon
 
 class Fixture:
     """
     Known issues:
-        - advertisement_data.local_name seems cropped to 10char ("WP-XS:WP-0") on 
-          Windows (bleak.backends.winrt), making connection by serial number 
-          impossible?
-
         - enable notifications on:
           ?READ_SPECTRUM       (read,write,indicate)
           ?EEPROM_DATA         (read,indicate)
-          ?GENERIC             (read,write,indicate)
     """
     VERSION = "1.0.3"
 
@@ -197,7 +195,7 @@ class Fixture:
                               "GENERIC":                 0xff0a }
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
 
-        #                  Name                      Tier   Set   Get Size
+        #                  Name                        Lvl  Set   Get Size
         self.generics = Generics()
         self.generics.add("LASER_TEC_MODE",             0, 0x84, 0x85, 1)
         self.generics.add("CCD_GAIN",                   0, 0xb7, 0xc5, 2, epsilon=0.01)
@@ -222,7 +220,6 @@ class Fixture:
         group.add_argument("--first",                   action="store_true", help="connect to first-discovered 'WP-XS' device (required for Windows?)")
         group.add_argument("--eeprom",                  action="store_true", help="display EEPROM and exit")
         group.add_argument("--monitor",                 action="store_true", help="monitor battery, laser state etc")
-        group.add_argument("--notifications",           action="store_true", help="enable notifications")
         group.add_argument("--search-timeout-sec",      type=int,            help="how long to search for spectrometers", default=30)
 
         group = parser.add_argument_group('Spectra')
@@ -233,6 +230,7 @@ class Fixture:
         group.add_argument("--plot",                    action="store_true", help="graph spectra")
         group.add_argument("--overlay",                 action="store_true", help="overlay spectra on graph")
         group.add_argument("--delay-ms",                type=int,            help="intra-spectra delay", default=0)
+        group.add_argument("--keep-waiting",            action="store_true", help="don't timeout")
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
         group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
@@ -325,8 +323,7 @@ class Fixture:
         # shutdown
         if self.args.laser_enable:
             await self.set_laser_enable(False)
-        if self.notifications:
-            await self.stop_notifications()
+        await self.stop_notifications()
 
     ############################################################################
     # BLE Connection
@@ -449,20 +446,19 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
-            if self.args.notifications:
-                if "notify" in char.properties or "indicate" in char.properties:
-                    if name == "BATTERY_STATUS":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.battery_notification)
-                        self.notifications.add(char.uuid)
-                    elif name == "LASER_STATE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.laser_state_notification)
-                        self.notifications.add(char.uuid)
-                    elif name == "GENERIC":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.generics.notification_callback)
-                        self.notifications.add(char.uuid)
+            if "notify" in char.properties or "indicate" in char.properties:
+                if name == "BATTERY_STATUS":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.battery_notification)
+                    self.notifications.add(char.uuid)
+                elif name == "LASER_STATE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.laser_state_notification)
+                    self.notifications.add(char.uuid)
+                elif name == "GENERIC":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.generics.notification_callback)
+                    self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
@@ -688,7 +684,8 @@ class Fixture:
         laser_firing = laser_state['laser_firing']
         interlock_closed = 'closed (armed)' if laser_state['interlock_closed'] else 'open (safe)'
 
-        amb_temp = await self.get_generic_value("GET_AMBIENT_TEMPERATURE")
+        amb_temp = await self.get_generic_value("AMBIENT_TEMPERATURE_DEG_C")
+
         return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
 
     async def monitor(self):
@@ -713,10 +710,12 @@ class Fixture:
         self.debug(f"get_generic: querying {name} ({to_hex(request)})")
 
         await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
+        self.debug(f"get_generic: waiting on {name}")
         await self.generics.wait(name)
 
+        self.debug(f"get_generic: taking response from {name}")
         value = self.generics.get_value(name)
-        self.debug(f"get_generic: received {value}")
+        self.debug(f"get_generic: done (value {value})")
         return value
 
     ############################################################################
@@ -866,7 +865,7 @@ class Fixture:
 
         # read the spectral data
         while pixels_read < self.pixels:
-            if (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
+            if not self.args.keep_waiting and (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
                 raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
 
             # self.debug(f"requesting spectrum packet starting at pixel {pixels_read}")
