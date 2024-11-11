@@ -282,7 +282,8 @@ class Fixture(object):
                 dev.fpga_version)
             if self.args.list_eeprom:
                 for foo in self.args.list_eeprom:
-                    row += "%-10s" % dev.eeprom[foo]
+                    if foo in dev.eeprom:
+                        row += "%-10s" % dev.eeprom[foo]
             print(row)
 
     def dump(self):
@@ -686,7 +687,7 @@ class Fixture(object):
                     ms_since_last = (now - self.last_acquire).total_seconds() * 1000.0
                     self.last_acquire = now
 
-                    print(f"\n{now} spectrum received from {sn}! ({ms_since_last:.2f}ms since last)")
+                    print(f"received ({ms_since_last:.2f}ms since last)")
                     return self.demarshal_spectrum(data)
 
             except usb.core.USBTimeoutError as ex:
