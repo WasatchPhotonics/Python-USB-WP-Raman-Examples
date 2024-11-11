@@ -345,7 +345,8 @@ class Fixture(object):
         self.send_cmd(dev, 0xbe, 1 if flag else 0)
 
     def set_trigger_source(self, dev, n):
-        self.debug(f"setting triggerSource to {n}")
+        sn = dev.eeprom["serial_number"]
+        self.debug(f"setting triggerSource to {n} on {sn}")
         self.send_cmd(dev, 0xd2, n)
 
     def set_continuous_acquisition(self, dev, flag):
@@ -537,6 +538,16 @@ class Fixture(object):
         for key in failures:
             print(f"  {key} had {failures[key]} failures")
 
+    def pulse_laser_trigger(self):
+        sn = self.args.laser_trigger_sn
+        if sn:
+            dev = self.dev_by_sn.get(self.args.laser_trigger_sn, None)
+            if dev:
+                print(f"\n{datetime.now()} pulsing laser on {sn}")
+                self.set_laser_enable(dev, True)
+                sleep(0.005)
+                self.set_laser_enable(dev, False)
+
     def do_acquisitions(self):
         if self.args.outfile:
             outfile = open(self.args.outfile, 'w') 
@@ -549,8 +560,12 @@ class Fixture(object):
 
         spectra = []
         for i in range(self.args.spectra):
-            for j in range(self.args.continuous_count):
-                for dev in self.devices:
+
+            if self.args.laser_trigger_sn:
+                self.pulse_laser_trigger()
+
+            for dev in self.devices:
+                for j in range(self.args.continuous_count):
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
                     send_trigger = (j == 0) and not self.args.hardware_trigger
                     acq_type = 3 if self.args.auto_raman else 0
@@ -655,22 +670,21 @@ class Fixture(object):
         return self.demarshal_spectrum(data)
 
     def get_spectrum_hw_trigger(self, dev):
-        now = datetime.now()
-        print(f"{now} not sending trigger..", end='')  # note we don't send an ACQUIRE
+        sn = dev.eeprom["serial_number"]
+        print(f"{datetime.now()} waiting for trigger on {sn}...", end='')  # don't send an ACQUIRE
         while True:
             try:
                 print(".", end='')
-                data = dev.read(0x82, dev.pixels * 2, timeout=1000)
+                data = dev.read(0x82, dev.pixels * 2, timeout=1000) # timeout doesn't really matter, because we're in a loop that ignores timeouts
                 if data is not None:
+                    now = datetime.now()
                     ms_since_last = (now - self.last_acquire).total_seconds() * 1000.0
                     self.last_acquire = now
 
-                    print()
-                    print(f"{datetime.now()} received! ({ms_since_last:.2f}ms since last)")
-
+                    print(f"\n{now} spectrum received from {sn}! ({ms_since_last:.2f}ms since last)")
                     return self.demarshal_spectrum(data)
-            except Exception as ex:
-                #print(ex)
+
+            except usb.core.USBTimeoutError as ex:
                 pass
 
     def demarshal_spectrum(self, data):
