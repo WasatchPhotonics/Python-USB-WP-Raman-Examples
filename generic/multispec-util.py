@@ -382,7 +382,8 @@ class Fixture(object):
             print("ERROR: script only supports positive uint16 integration time")
             return
 
-        print("setting integrationTimeMS to %d" % n)
+        sn = dev.eeprom["serial_number"]
+        print(f"{datetime.now()} setting integrationTimeMS to {n} on {sn}")
         self.send_cmd(dev, 0xb2, n)
 
     def get_integration_time_ms(self, dev):
@@ -611,11 +612,13 @@ class Fixture(object):
         return spectrum
 
     def get_spectrum_sw_trigger(self, dev, acq_type=0):
+        sn = dev.eeprom["serial_number"]
+        num_dev = len(self.devices)
         if self.args.integration_time_ms:
             if self.args.scans_to_average:
-                timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * (self.args.scans_to_average + 1)
+                timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * (self.args.scans_to_average + 1) + 500 * num_dev
             else:
-                timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+                timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2 + 1000 * num_dev
         else:
             timeout_ms = TIMEOUT_MS + 100 * 2
 
@@ -623,14 +626,15 @@ class Fixture(object):
             print(f"{datetime.now()} requesting Auto-Raman measurement...")
             self.test_auto_raman(dev)
         else:
-            print(f"{datetime.now()} sending trigger...")
+            print(f"{datetime.now()} sending trigger to {sn}...")
             self.send_cmd(dev, 0xad, acq_type)
 
         bytes_to_read = dev.pixels * 2
         block_size = 64
+        block_size = bytes_to_read # testing multi-channel
         data = []
 
-        print(f"{datetime.now()} trying to read {dev.pixels} ({bytes_to_read} bytes) in chunks of {block_size} bytes")
+        print(f"{datetime.now()} trying to read {dev.pixels} ({bytes_to_read} bytes) in chunks of {block_size} bytes with timeout {timeout_ms}ms from {sn}")
         while True:
             try:
                 self.debug(f"{datetime.now()} have {len(data)}/{bytes_to_read} bytes, reading next {block_size}")
