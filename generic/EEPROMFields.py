@@ -1,3 +1,5 @@
+import struct
+
 class EEPROMField:
     def __init__(self, pos, data_type, name):
         self.pos        = pos
@@ -24,6 +26,7 @@ EEPROM_FIELDS = [
     ((0, 52,  2), "h", "offset"), 
     ((0, 54,  4), "f", "gain_odd"), 
     ((0, 58,  2), "h", "offset_odd"), 
+    ((0, 63,  1), "B", "format"), 
     ((1,  0,  4), "f", "wavecal_c0"),
     ((1,  4,  4), "f", "wavecal_c1"),
     ((1,  8,  4), "f", "wavecal_c2"),
@@ -85,3 +88,46 @@ def get_eeprom_fields():
         pos, data_type, name = rec
         fields[name] = EEPROMField(pos, data_type, name)
     return fields
+
+def parse_eeprom_pages(pages):
+    """ @param pages char[8][64] """
+    fields = get_eeprom_fields()
+    eeprom = {}
+    for name, field in fields.items():
+        eeprom[name] = unpack(field.pos, field.data_type, name, pages)
+    return eeprom
+
+def unpack(address, data_type, field, pages):
+    page       = address[0]
+    start_byte = address[1]
+    length     = address[2]
+    end_byte   = start_byte + length
+
+    if page > len(pages):
+        print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
+            page, start_byte, length, data_type, field))
+        return
+
+    buf = pages[page]
+    if buf is None or end_byte > len(buf):
+        print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
+            page, start_byte, length, data_type, buf, field))
+        return
+
+    if data_type == "s":
+        # This stops at the first NULL, so is not appropriate for binary data (user_data).
+        # OTOH, it doesn't currently enforce "printable" characters either (nor support Unicode).
+        unpack_result = ""
+        for c in buf[start_byte:end_byte]:
+            if c == 0:
+                break
+            unpack_result += chr(c)
+    else:
+        unpack_result = 0 
+        try:
+            unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
+        except:
+            print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+            return
+
+    return unpack_result

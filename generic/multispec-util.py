@@ -18,6 +18,8 @@ import usb.core
 import argparse
 import struct
 
+from EEPROMFields import parse_eeprom_pages
+
 if platform.system() == "Darwin":
     import usb.backend.libusb1 as backend
 else:
@@ -29,7 +31,6 @@ TIMEOUT_MS = 1000
 
 MAX_PAGES = 8
 PAGE_SIZE = 64
-EEPROM_FORMAT = 8
 
 # An extensible, stateful "Test Fixture" 
 class Fixture(object):
@@ -40,9 +41,46 @@ class Fixture(object):
 
     def __init__(self):
         self.eeprom_pages = None
-        self.subformat = None
         self.last_acquire = datetime.now()
+        self.dev_by_sn = {}
 
+        self.args = self.parse_args()
+
+        self.devices = []
+        for pid in [0x1000, 0x2000, 0x4000]:
+            if self.args.pid is not None:
+                if pid != int(self.args.pid, 16):
+                    continue
+            self.devices.extend(usb.core.find(find_all=True, idVendor=0x24aa, idProduct=pid, backend=backend.get_backend()))
+
+        for dev in self.devices:
+            self.connect(dev)
+
+        # read settings for each unit
+        for dev in self.devices:
+            dev.fw_version = self.get_firmware_version(dev)
+            dev.fpga_version = self.get_fpga_version(dev)
+
+            self.read_eeprom(dev)
+
+            dev.pixels = dev.eeprom["active_pixels_horizontal"] if self.args.pixels is None else self.args.pixels
+            self.dev_by_sn[dev.eeprom["serial_number"]] = dev
+
+        # apply filters
+        self.filter_by_serial()
+        self.filter_by_model()
+
+        if len(self.devices) == 0:
+            print("No spectrometers found")
+
+        if self.args.integration_times is None:
+            if self.args.integration_time_ms is not None:
+                self.args.integration_times = [ self.args.integration_time_ms ]
+        else:
+            self.args.integration_times = [ int(ms) for ms in self.args.integration_times.split(",") ]
+
+
+    def parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--debug",               action="store_true", help="debug output")
 
@@ -94,6 +132,8 @@ class Fixture(object):
         group.add_argument("--laser-enable",        action="store_true", help="enable laser during collection")
         group.add_argument("--frame-id",            action="store_true", help="display internal frame ID for each spectrum")
         group.add_argument("--hardware-trigger",    action="store_true", help="enable triggering")
+        group.add_argument("--laser-trigger-sn",    type=str,            help="serial number of the multi-channel unit whose laserEnable serves as group trigger")
+        group.add_argument("--list-eeprom",         action="append",     help="list additional EEPROM fields")
         group.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
         group.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
         group.add_argument("--dump",                action="store_true", help="dump basic getters")
@@ -101,41 +141,7 @@ class Fixture(object):
         group.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
         group.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
 
-        self.args = parser.parse_args()
-
-        if self.args.integration_times is None:
-            if self.args.integration_time_ms is not None:
-                self.args.integration_times = [ self.args.integration_time_ms ]
-        else:
-            self.args.integration_times = [ int(ms) for ms in self.args.integration_times.split(",") ]
-
-        self.devices = []
-        for pid in [0x1000, 0x2000, 0x4000]:
-            if self.args.pid is not None:
-                if pid != int(self.args.pid, 16):
-                    continue
-            self.devices.extend(usb.core.find(find_all=True, idVendor=0x24aa, idProduct=pid, backend=backend.get_backend()))
-
-        for dev in self.devices:
-            self.connect(dev)
-
-        # read configuration
-        for dev in self.devices:
-            dev.fw_version = self.get_firmware_version(dev)
-            #print(f"firmware version: {dev.fw_version}")
-
-            dev.fpga_version = self.get_fpga_version(dev)
-            #print(f"FPGA version: {dev.fpga_version}")
-
-            self.read_eeprom(dev)
-            dev.pixels = dev.eeprom["pixels"] if self.args.pixels is None else self.args.pixels
-
-        # apply filters
-        self.filter_by_serial()
-        self.filter_by_model()
-
-        if len(self.devices) == 0:
-            print("No spectrometers found")
+        return parser.parse_args()
 
     def filter_by_serial(self):
         if self.args.serial_number is not None:
@@ -166,13 +172,7 @@ class Fixture(object):
 
     def read_eeprom(self, dev):
         dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
-
-        # parse key fields (extend as needed)
-        dev.eeprom = {}
-        dev.eeprom["format"]        = self.unpack(dev, (0, 63,  1), "B")
-        dev.eeprom["model"]         = self.unpack(dev, (0,  0, 16), "s")
-        dev.eeprom["serial_number"] = self.unpack(dev, (0, 16, 16), "s")
-        dev.eeprom["pixels"]        = self.unpack(dev, (2, 16,  2), "H")
+        dev.eeprom = parse_eeprom_pages(dev.buffers)
 
         # save each page as hex string
         dev.eeprom["hexdump"] = {}
@@ -266,16 +266,24 @@ class Fixture(object):
             foo = input()
 
     def list(self):
-        print("%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA"))
+        header = "%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA")
+        if self.args.list_eeprom:
+            for foo in self.args.list_eeprom:
+                header += "%-10s" % foo
+        print(header)
         for dev in self.devices:
-            print("0x%04x %-16s %-16s %3d %6d %-10s %-10s" % (
+            row = "0x%04x %-16s %-16s %3d %6d %-10s %-10s" % (
                 dev.idProduct, 
                 dev.eeprom["model"], 
                 dev.eeprom["serial_number"],
                 dev.eeprom["format"],
                 dev.pixels,
                 dev.fw_version,
-                dev.fpga_version))
+                dev.fpga_version)
+            if self.args.list_eeprom:
+                for foo in self.args.list_eeprom:
+                    row += "%-10s" % dev.eeprom[foo]
+            print(row)
 
     def dump(self):
         # consider adding more later...will need more logic regarding msb, datatype etc
@@ -540,8 +548,8 @@ class Fixture(object):
 
         spectra = []
         for i in range(self.args.spectra):
-            for dev in self.devices:
-                for j in range(self.args.continuous_count):
+            for j in range(self.args.continuous_count):
+                for dev in self.devices:
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
                     send_trigger = (j == 0) and not self.args.hardware_trigger
                     acq_type = 3 if self.args.auto_raman else 0
