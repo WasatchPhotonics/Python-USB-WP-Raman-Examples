@@ -41,9 +41,11 @@ class Generic:
         return data
 
     def deserialize(self, data):
+        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
         if self.name == "CCD_GAIN":
             return data[0] + data[1] / 256.0
         else:
+            # by default, treat as big-endian uint
             value = 0
             for byte in data:
                 value <<= 8
@@ -59,11 +61,11 @@ class Generic:
         return request
 
     def generate_read_request(self):
+        # STEP THREE: generate the "read request" payload for this attribute
         if self.getter is None:
             raise RuntimeError(f"Generic {self.name} is write-only")
         request = [ 0xff for _ in range(self.tier) ]
         request.append(self.getter)
-        # self.event.clear()
         return request
 
 class Generics:
@@ -81,10 +83,12 @@ class Generics:
         if self.seq in self.callbacks:
             raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
         elif callback:
+            # STEP SIX: store the callback function in a table, keyed on the new sequence number
             self.callbacks[self.seq] = callback
         return self.seq
 
     def get_callback(self, seq):
+        # STEP ELEVEN: remove the stored callback from the table, so it won't accidentally be re-used
         return self.callbacks.pop(seq)
 
     def add(self, name, tier, setter, getter, size, epsilon=0):
@@ -94,6 +98,7 @@ class Generics:
         return self.generics[name].generate_write_request(value)
 
     def generate_read_request(self, name):
+        # STEP TWO: generate the "read request" payload for the named attribute
         return self.generics[name].generate_read_request()
 
     def get_value(self, name):
@@ -104,24 +109,41 @@ class Generics:
         self.generics[name].event.clear()
 
     async def process_response(self, name, data):
+        # STEP THIRTEEN: this is the standard callback triggered after receiving
+        # a notification from the Generic Characteristic
+
+        # STEP FOURTEEN: lookup the specific Generic attribute (AMBIENT_TEMPERATURE_DEG_C, etc) associated with this transaction
         generic = self.generics[name]
+
+        # STEP FIFTEEN: parse the response payload according to the attribute
         generic.value = generic.deserialize(data)
+
+        # STEP SEVENTEEN: raise the asynchronous "event" flag to tell the 
+        # await'ing requester that the response value is now available and stored
+        # in the Generic object
         generic.event.set()
 
     async def notification_callback(self, sender, data):
+        # STEP EIGHT: we have received a response notification from the Generic Characteristic
+
         # self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {to_hex(data)}")
         if len(data) < 3:
             raise RuntimeError(f"received GENERIC response with only {len(data)} bytes")
 
+        # STEP NINE: extract the sequence number from the notification response
         seq, err, result = data[0], data[1], data[2:]
 
         response_error = self.RESPONSE_ERRORS[err]
         if response_error != "OK":
             raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
 
+        # STEP TEN: lookup the stored callback for this sequence number
+        #
         # pass the response data, minus the sequence and error-code header, to 
         # the registered callback function for that sequence ID
         callback = self.get_callback(seq)
+
+        # STEP TWELVE: actually call the callback
         await callback(result)
         
     def get_name(self, code):
@@ -502,6 +524,7 @@ class Fixture:
         extra = []
 
         if name == "GENERIC":
+            # STEP FIVE: allocate a new sequence number, and associate it with the passed callback
             seq = self.generics.next_seq(callback)
             prefixed = [ seq ]
             for v in data:
@@ -519,6 +542,8 @@ class Fixture:
         # MZ: I'm not sure why all writes require a response, but empirical 
         # testing indicates we reliably get randomly scrambled EEPROM contents 
         # without this.
+
+        # STEP SEVEN: actually write the "read request" to the Peripheral
         await self.client.write_gatt_char(uuid, data, response=True)
 
     def expand_path(self, name, data):
@@ -706,16 +731,25 @@ class Fixture:
     # use self.debug, .write_char etc
     
     async def get_generic_value(self, name):
+        # STEP ONE: generate the payload for writing the "read request" for this particular attribute to the Generic characteristic
         request = self.generics.generate_read_request(name)
         self.debug(f"get_generic: querying {name} ({to_hex(request)})")
 
+        # STEP FOUR: write the "read request" to the attribute. Store a callback
+        # which should be triggered when the response notification (carrying the
+        # same sequence number) is returned.
         await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
+
+        # STEP EIGHTEEN: this blocking wait will be satisfied after steps 4-17 are complete
         self.debug(f"get_generic: waiting on {name}")
         await self.generics.wait(name)
 
+        # STEP NINETEEN: read the deserialized response value we stored in the notification callback
         self.debug(f"get_generic: taking response from {name}")
         value = self.generics.get_value(name)
         self.debug(f"get_generic: done (value {value})")
+
+        # STEP TWENTY: return the value to whoever called this function.
         return value
 
     ############################################################################
