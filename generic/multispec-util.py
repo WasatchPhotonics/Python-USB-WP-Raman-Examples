@@ -564,6 +564,7 @@ class Fixture(object):
             if self.args.laser_trigger_sn:
                 self.pulse_laser_trigger()
 
+            start = None
             for dev in self.devices:
                 for j in range(self.args.continuous_count):
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
@@ -572,6 +573,8 @@ class Fixture(object):
                     spectrum = self.get_spectrum(dev, send_trigger, acq_type)
 
                     now = datetime.now()
+                    if not start:
+                        start = now
                     print("%s Spectrum %3d/%3d/%3d %s ..." % (now, j+1, i+1, self.args.spectra, spectrum[:10]))
                     spectra.append(spectrum)
                     if outfile is not None:
@@ -590,6 +593,8 @@ class Fixture(object):
                         plt.draw()
                         plt.pause(0.01)
 
+            if len(self.devices) > 1:
+                print(f"All spectra received within {(datetime.now() - start).total_seconds() * 1000:.2f}ms (first to last)")
             self.debug(f"sleeping {self.args.delay_ms}ms")
             sleep(self.args.delay_ms / 1000.0 )
 
