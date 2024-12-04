@@ -61,6 +61,9 @@ class Fixture(object):
             dev.fw_version = self.get_firmware_version(dev)
             dev.fpga_version = self.get_fpga_version(dev)
 
+            if self.args.ble:
+                dev.ble_version = self.get_ble_firmware_version(dev)
+
             self.read_eeprom(dev)
 
             dev.pixels = dev.eeprom["active_pixels_horizontal"] if self.args.pixels is None else self.args.pixels
@@ -86,6 +89,7 @@ class Fixture(object):
 
         group = parser.add_argument_group("Connection")
         group.add_argument("--list",                action="store_true", help="list all spectrometers")
+        group.add_argument("--ble",                 action="store_true", help="include BLE options")
         group.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         group.add_argument("--serial-number",       type=str,            help="desired serial number")
         group.add_argument("--model",               type=str,            help="desired model")
@@ -267,6 +271,8 @@ class Fixture(object):
 
     def list(self):
         header = "%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA")
+        if self.args.ble:
+            header += "%-10s" % "BLE"
         if self.args.list_eeprom:
             for foo in self.args.list_eeprom:
                 header += "%-10s" % foo
@@ -280,6 +286,8 @@ class Fixture(object):
                 dev.pixels,
                 dev.fw_version,
                 dev.fpga_version)
+            if self.args.ble:
+                row += "%-10s" % dev.ble_version
             if self.args.list_eeprom:
                 for foo in self.args.list_eeprom:
                     if foo in dev.eeprom:
@@ -331,6 +339,18 @@ class Fixture(object):
                 c = result[i]
                 if 0x20 <= c < 0x7f:
                     s += chr(c)
+        return s
+
+    def get_ble_firmware_version(self, dev):
+        result = self.get_cmd(dev, 0xff, 0x2d, length=32, label="GET_BLE_FIRMWARE_VERSION")
+        if result is None:
+            return None
+
+        s = ""
+        for c in result:
+            if c == 0:
+                break
+            s += chr(c)
         return s
 
     def set_dfu(self, dev):
