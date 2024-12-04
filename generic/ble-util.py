@@ -1,3 +1,4 @@
+import platform
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
@@ -10,6 +11,11 @@ from bleak import BleakScanner, BleakClient
 from datetime import datetime
 
 import EEPROMFields
+
+debugging = False
+def debug(msg):
+    if debugging:
+        print(f"{datetime.now()} DEBUG: {msg}")
 
 def to_hex(a):
     if a is None:
@@ -126,12 +132,13 @@ class Generics:
     async def notification_callback(self, sender, data):
         # STEP EIGHT: we have received a response notification from the Generic Characteristic
 
-        # self.debug(f"{datetime.now()} received GENERIC notification from sender {sender}, data {to_hex(data)}")
-        if len(data) < 3:
-            raise RuntimeError(f"received GENERIC response with only {len(data)} bytes")
+        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
 
         # STEP NINE: extract the sequence number from the notification response
-        seq, err, result = data[0], data[1], data[2:]
+        if len(data) < 3:
+            seq, err = data[0], data[1]
+        else:
+            seq, err, result = data[0], data[1], data[2:]
 
         response_error = self.RESPONSE_ERRORS[err]
         if response_error != "OK":
@@ -165,12 +172,14 @@ class Generics:
 
 class Fixture:
     """
-    Known issues:
-        - enable notifications on:
-          ?READ_SPECTRUM       (read,write,indicate)
-          ?EEPROM_DATA         (read,indicate)
+    Note this script is currently coded to ENG-0120 BLE API rev 6.
+
+    It _does not_ currently support "fast spectral readout," and still 
+    uses the "old" Characteristics for Integration Time, Gain, EEPROM etc.
+
+    @todo It appears notifications don't work on Windows?!?
     """
-    VERSION = "1.0.3"
+    VERSION = "1.0.4"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -232,6 +241,8 @@ class Fixture:
         self.parse_args()
 
     def parse_args(self):
+        global debugging
+
         parser = argparse.ArgumentParser(
             description="Command-line utility for testing and characterizing BLE spectrometers",
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -282,6 +293,9 @@ class Fixture:
         group.add_argument("--setter-delay-ms",         type=int,            help="minimum delay / settle time after writing generic setter", default=1000)
 
         self.args = parser.parse_args()
+
+        if self.args.debug:
+            debugging = True
 
     async def run(self):
 
@@ -413,8 +427,7 @@ class Fixture:
         self.debug("stopping scanner")
         self.stop_scanning()
 
-        if self.args.debug:
-            self.dump(device, advertisement_data)
+        self.dump(device, advertisement_data)
 
         self.debug("instantiating BleakClient")
         self.client = BleakClient(address_or_ble_device=device, 
@@ -457,6 +470,7 @@ class Fixture:
 
         # iterate over standard Characteristics
         # @see https://bleak.readthedocs.io/en/latest/api/client.html#gatt-characteristics
+        sys = platform.system()
         self.debug("Characteristics:")
         for char in primary_service.characteristics:
             name = self.get_name_by_uuid(char.uuid)
@@ -468,19 +482,21 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
-            if "notify" in char.properties or "indicate" in char.properties:
-                if name == "BATTERY_STATUS":
-                    self.debug(f"starting {name} notifications")
-                    await self.client.start_notify(char.uuid, self.battery_notification)
-                    self.notifications.add(char.uuid)
-                elif name == "LASER_STATE":
-                    self.debug(f"starting {name} notifications")
-                    await self.client.start_notify(char.uuid, self.laser_state_notification)
-                    self.notifications.add(char.uuid)
-                elif name == "GENERIC":
-                    self.debug(f"starting {name} notifications")
-                    await self.client.start_notify(char.uuid, self.generics.notification_callback)
-                    self.notifications.add(char.uuid)
+            if sys == "Darwin":
+                if "notify" in char.properties or "indicate" in char.properties:
+                    if name == "BATTERY_STATUS":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.battery_notification)
+                        self.notifications.add(char.uuid)
+                    elif name == "LASER_STATE":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.laser_state_notification)
+                        self.debug(f"back from start_notify")
+                        self.notifications.add(char.uuid)
+                    elif name == "GENERIC":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.generics.notification_callback)
+                        self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
@@ -543,7 +559,7 @@ class Fixture:
         # testing indicates we reliably get randomly scrambled EEPROM contents 
         # without this.
 
-        # STEP SEVEN: actually write the "read request" to the Peripheral
+        # STEP SEVEN: actually write the cmd (or for Generic reads, "read request") to the Peripheral
         await self.client.write_gatt_char(uuid, data, response=True)
 
     def expand_path(self, name, data):
@@ -830,6 +846,7 @@ class Fixture:
 
         try:
             # collect however many spectra were requested
+            collection = []
             for step in range(self.args.spectra):
                 await self.update_ramps(step)
 
@@ -837,11 +854,12 @@ class Fixture:
                 repeats = self.args.ramp_repeats if self.ramping else 1
                 spectra = []
                 for repeat in range(repeats):
+                    start_time = datetime.now()
                     spectrum = await self.get_spectrum()
 
                     # compute total start-to-start period
                     now = datetime.now()
-                    start_time = self.last_spectrum_received if self.last_spectrum_received else self.start_time
+                    # start_time = self.last_spectrum_received if self.last_spectrum_received else self.start_time
                     elapsed_ms = int(round((now - start_time).total_seconds() * 1000, 0))
                     self.last_spectrum_received = now
 
@@ -849,6 +867,7 @@ class Fixture:
                     avg = sum(spectrum) / len(spectrum)
                     std = np.std(spectrum)
                     spectra.append(spectrum)
+                    collection.append(spectrum)
 
                     print(f"{now} received spectrum {step+1:3d}/{self.args.spectra} (elapsed {elapsed_ms:5d}ms, max {hi:8.2f}, avg {avg:8.2f}, std {std:8.2f}) {spectrum[:10]}")
 
@@ -873,6 +892,15 @@ class Fixture:
                         stds.append(px_std)
                     avg_std = np.mean(stds)
                     print(f"average PIXEL stdev (over repeats) over the entire spectrum: {avg_std:.2f}\n")
+
+            if repeats > 1:
+                # if we're doing some kind of ramping, compute the average pixel stdev (pixel noise over time, not space)
+                stds = []
+                for px in range(len(collection[0])):
+                    px_std = np.std([ spectrum[px] for spectrum in collection ])
+                    stds.append(px_std)
+                avg_std = np.mean(stds)
+                print(f"average PIXEL stdev (over collection) over the entire spectrum: {avg_std:.2f}\n")
 
         except KeyboardInterrupt:
             print()
@@ -941,8 +969,18 @@ class Fixture:
                     raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
 
             if not ok:
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
                 continue
+
+            """
+            gs: charlie, pixels_read 8000
+            gs: delta
+            gs: echo
+            gs: foxtrot
+            gs: hotel
+            gs: india
+            gs: lima
+            """
             
             ####################################################################
             # apparently it was a valid response
@@ -1009,7 +1047,7 @@ class Fixture:
                   + coeffs[4] * i * i * i * i)
             self.wavelengths.append(nm)
 
-        self.excitation = self.eeprom["excitation_nm_float"]
+        self.excitation = self.eeprom["excitation_nm_float"] # @todo update for MultiWavelengthCalibration
         self.wavenumbers = None
         if self.excitation:
             self.wavenumbers = [ (1e7/self.excitation - 1e7/nm) for nm in self.wavelengths ]
@@ -1124,8 +1162,7 @@ class Fixture:
     ############################################################################
 
     def debug(self, msg):
-        if self.args.debug:
-            print(f"{datetime.now()} DEBUG: {msg}")
+        debug(msg)
 
     def wrap_uuid(self, code):
         return f"d1a7{code:04x}-af78-4449-a34f-4da1afaf51bc".lower()
@@ -1170,3 +1207,8 @@ class Fixture:
 if __name__ == "__main__":
     fixture = Fixture()
     asyncio.run(fixture.run())
+
+#    loop = asyncio.get_event_loop()
+#    asyncio.ensure_future(fixture.run())
+#    loop.run_forever()
+#    loop.close()
