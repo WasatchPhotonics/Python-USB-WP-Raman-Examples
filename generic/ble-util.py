@@ -9,6 +9,7 @@ import re
 from time import sleep
 from bleak import BleakScanner, BleakClient
 from datetime import datetime
+from functools import partial
 
 import EEPROMFields
 
@@ -37,7 +38,7 @@ class Generic:
     
     def serialize(self, value):
         data = []
-        if self.name == "CCD_GAIN":
+        if self.name == "GAIN_DB":
             data.append(int(value) & 0xff)
             data.append(int((value - int(value)) * 256) & 0xff)
         else: 
@@ -48,8 +49,10 @@ class Generic:
 
     def deserialize(self, data):
         # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
-        if self.name == "CCD_GAIN":
+        if self.name == "GAIN_DB":
             return data[0] + data[1] / 256.0
+        elif self.name == "EEPROM_DATA":
+            return data
         else:
             # by default, treat as big-endian uint
             value = 0
@@ -95,7 +98,11 @@ class Generics:
 
     def get_callback(self, seq):
         # STEP ELEVEN: remove the stored callback from the table, so it won't accidentally be re-used
-        return self.callbacks.pop(seq)
+        if seq in self.callbacks:
+            return self.callbacks.pop(seq)
+
+        # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
+        debug(f"get_callback: seq {seq} not found in callbacks")
 
     def add(self, name, tier, setter, getter, size, epsilon=0):
         self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
@@ -113,6 +120,11 @@ class Generics:
     async def wait(self, name):
         await self.generics[name].event.wait()
         self.generics[name].event.clear()
+
+    async def process_acknowledgement(self, data, name):
+        debug(f"received acknowledgement for {name}")
+        generic = self.generics[name]
+        generic.event.set()
 
     async def process_response(self, name, data):
         # STEP THIRTEEN: this is the standard callback triggered after receiving
@@ -135,12 +147,17 @@ class Generics:
         debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
 
         # STEP NINE: extract the sequence number from the notification response
+        result = None
         if len(data) < 3:
             seq, err = data[0], data[1]
         else:
             seq, err, result = data[0], data[1], data[2:]
 
-        response_error = self.RESPONSE_ERRORS[err]
+        if err < len(self.RESPONSE_ERRORS):
+            response_error = self.RESPONSE_ERRORS[err]
+        else:
+            response_error = f"UNSUPPORTED RESPONSE_ERROR: 0x{err}"
+
         if response_error != "OK":
             raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
 
@@ -151,7 +168,8 @@ class Generics:
         callback = self.get_callback(seq)
 
         # STEP TWELVE: actually call the callback
-        await callback(result)
+        if callback:
+            await callback(result)
         
     def get_name(self, code):
         if code == 0xff:
@@ -172,21 +190,32 @@ class Generics:
 
 class Fixture:
     """
-    Note this script is currently coded to ENG-0120 BLE API rev 6.
-
-    It _does not_ currently support "fast spectral readout," and still 
-    uses the "old" Characteristics for Integration Time, Gain, EEPROM etc.
+    Note this script is currently coded to ENG-0120 BLE API rev 7.
 
     @todo It appears notifications don't work on Windows?!?
     """
-    VERSION = "1.0.4"
+    VERSION = "1.0.5"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
 
     LASER_TEC_MODES = ['OFF', 'ON', 'AUTO', 'AUTO_ON']
-    ACQUIRE_ERRORS  = ['NONE', 'BATT_SOC_INFO_NOT_RCVD', 'BATT_SOC_TOO_LOW', 'LASER_DIS_FLR', 'LASER_ENA_FLR', 
-                      'IMG_SNSR_IN_BAD_STATE', 'IMG_SNSR_STATE_TRANS_FLR', 'SPEC_ACQ_SIG_WAIT_TMO', 'UNKNOWN']
+
+    ACQUIRE_STATUS_CODES = {
+         0: ("NAK",                         "No error, the spectrum just isn't ready yet"),
+         1: ("ERR_BATT_SOC_INFO_NOT_RCVD",  "Can't read battery, and therefore can't take Auto-Dark or Auto-Raman spectra"),
+         2: ("ERR_BATT_SOC_TOO_LOW",        "Battery is too low to take Auto-Dark or Auto-Raman spectra"),
+         3: ("ERR_LASER_DIS_FLR",           "Failure disabling the laser"),
+         4: ("ERR_LASER_ENA_FLR",           "Failure enabling the laser"),
+         5: ("ERR_IMG_SNSR_IN_BAD_STATE",   "The sensor is not able to take spectra"),
+         6: ("ERR_IMG_SNSR_STATE_TRANS_FLR","The sensor failed to apply acquisition parameters"),
+         7: ("ERR_SPEC_ACQ_SIG_WAIT_TMO",   "The sensor failed to take a spectrum (timeout exceeded)"),
+        32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"),
+        33: ("AUTO_TAKING_DARK",            "Auto-Dark/Raman is taking dark spectra"),
+        34: ("AUTO_LASER_WARNING_DELAY",    "Auto-Dark/Raman is paused during laser warning delay period"),
+        35: ("AUTO_LASER_WARMUP",           "Auto-Dark/Raman is paused during laser warmup period"),
+        36: ("AUTO_TAKING_RAMAN",           "Auto-Dark/Raman is taking Raman measurements"),
+    }
 
     ############################################################################
     # Lifecycle
@@ -214,24 +243,19 @@ class Fixture:
         self.notifications = set()                          # all Characteristics to which we're subscribed for notifications
 
         # Characteristics
-        self.code_by_name = { "INTEGRATION_TIME_MS":     0xff01, 
-                              "GAIN_DB":                 0xff02,
-                              "LASER_STATE":             0xff03,
-                              "ACQUIRE_SPECTRUM":        0xff04,
-                              "SPECTRUM_CMD":            0xff05,
-                              "READ_SPECTRUM":           0xff06,
-                              "EEPROM_CMD":              0xff07,
-                              "EEPROM_DATA":             0xff08,
-                              "BATTERY_STATUS":          0xff09,
+        self.code_by_name = { "LASER_STATE":             0xff03,
+                              "ACQUIRE":                 0xff04,
+                              "BATTERY_STATE":           0xff09,
                               "GENERIC":                 0xff0a }
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
 
         #                  Name                        Lvl  Set   Get Size
         self.generics = Generics()
         self.generics.add("LASER_TEC_MODE",             0, 0x84, 0x85, 1)
-        self.generics.add("CCD_GAIN",                   0, 0xb7, 0xc5, 2, epsilon=0.01)
+        self.generics.add("GAIN_DB",                    0, 0xb7, 0xc5, 2, epsilon=0.01)
         self.generics.add("INTEGRATION_TIME_MS",        0, 0xb2, 0xbf, 3)
         self.generics.add("LASER_WARNING_DELAY_SEC",    0, 0x8a, 0x8b, 1)
+        self.generics.add("EEPROM_DATA",                1, None, 0x01, 1)
         self.generics.add("START_LINE",                 1, 0x21, 0x22, 2)
         self.generics.add("STOP_LINE",                  1, 0x23, 0x24, 2)
         self.generics.add("AMBIENT_TEMPERATURE_DEG_C",  1, None, 0x2a, 1)
@@ -484,7 +508,7 @@ class Fixture:
     
             if sys == "Darwin":
                 if "notify" in char.properties or "indicate" in char.properties:
-                    if name == "BATTERY_STATUS":
+                    if name == "BATTERY_STATE":
                         self.debug(f"starting {name} notifications")
                         await self.client.start_notify(char.uuid, self.battery_notification)
                         self.notifications.add(char.uuid)
@@ -497,6 +521,10 @@ class Fixture:
                         self.debug(f"starting {name} notifications")
                         await self.client.start_notify(char.uuid, self.generics.notification_callback)
                         self.notifications.add(char.uuid)
+                    elif name == "ACQUIRE":
+                        self.debug(f"starting {name} notifications")
+                        await self.client.start_notify(char.uuid, self.acquire_notification)
+                        self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
@@ -505,7 +533,7 @@ class Fixture:
     def battery_notification(self, sender, data):
         charging = data[0] != 0
         perc = int(data[1])
-        print(f"{datetime.now()} received BATTERY_STATUS notification: level {perc}%, charging {charging} (data {data})")
+        print(f"{datetime.now()} received BATTERY_STATE notification: level {perc}%, charging {charging} (data {data})")
 
     def laser_state_notification(self, sender, data):
         status = self.parse_laser_state(data)
@@ -532,7 +560,7 @@ class Fixture:
             buf.append(byte)
         return buf
 
-    async def write_char(self, name, data, quiet=False, callback=None):
+    async def write_char(self, name, data, quiet=False, callback=None, ack_name=None):
         name = name.upper()
         uuid = self.get_uuid_by_name(name)
         if uuid is None:
@@ -541,6 +569,11 @@ class Fixture:
 
         if name == "GENERIC":
             # STEP FIVE: allocate a new sequence number, and associate it with the passed callback
+            if callback is None and ack_name is not None:
+                # we weren't given an explicit callback, but this GENERIC opcode 
+                # generates an acknowledgement, so setup a lambda to catch it (so
+                # we can block on it before returning)
+                callback = partial(self.generics.process_acknowledgement, name=ack_name)
             seq = self.generics.next_seq(callback)
             prefixed = [ seq ]
             for v in data:
@@ -561,6 +594,11 @@ class Fixture:
 
         # STEP SEVEN: actually write the cmd (or for Generic reads, "read request") to the Peripheral
         await self.client.write_gatt_char(uuid, data, response=True)
+
+        if ack_name is not None:
+            # block on the acknowledgement we created above
+            self.debug(f"write_char: waiting for {ack_name} ack")
+            await self.generics.wait(ack_name)
 
     def expand_path(self, name, data):
         if name != "GENERIC":
@@ -644,26 +682,22 @@ class Fixture:
         # don't worry about startup_temp_degC (should be set by FW)
 
     async def set_integration_time_ms(self, ms):
-        # using dedicated Characteristic, although 2nd-tier version now exists
-        print(f"setting integration time to {ms}ms")
-        data = [ 0x00,               # fixed
-                 (ms >> 16) & 0xff,  # MSB
-                 (ms >>  8) & 0xff,
-                 (ms      ) & 0xff ] # LSB
-        await self.write_char("INTEGRATION_TIME_MS", data)
+        name = "INTEGRATION_TIME_MS"
+        print(f"setting {name} to {ms}ms")
+        await self.write_char("GENERIC", self.generics.generate_write_request(name, ms), ack_name=name)
+
         self.last_integration_time_ms = self.integration_time_ms
         self.integration_time_ms = ms
 
     async def set_gain_db(self, db):
-        # using dedicated Characteristic, although 2nd-tier version now exists
-        print(f"setting gain to {db}dB")
-        msb = int(db) & 0xff
-        lsb = int((db - int(db)) * 256) & 0xff
-        await self.write_char("GAIN_DB", [msb, lsb])
+        name = "GAIN_DB"
+        print(f"setting {name} to {db}dB")
+        await self.write_char("GENERIC", self.generics.generate_write_request(name, db), ack_name=name)
 
     async def set_scans_to_average(self, n):
-        print(f"setting scan averaging to {n}")
-        await self.write_char("GENERIC", self.generics.generate_write_request("SCANS_TO_AVERAGE", n))
+        name = "SCANS_TO_AVERAGE"
+        print(f"setting {name} to {n}")
+        await self.write_char("GENERIC", self.generics.generate_write_request(name, n), ack_name=name)
         self.scans_to_average = n
 
     async def set_start_line(self, n):
@@ -690,7 +724,7 @@ class Fixture:
         notifications until the next explicit read/write of a Characteristic 
         (any Chararacteristic? seemingly observed with ACQUIRE_CMD).
         """
-        buf = await self.read_char("BATTERY_STATUS", 2)
+        buf = await self.read_char("BATTERY_STATE", 2)
         self.debug(f"battery response: {buf}")
         return { 'charging': buf[0] != 0,
                  'perc': int(buf[1]) }
@@ -905,10 +939,66 @@ class Fixture:
         except KeyboardInterrupt:
             print()
 
+    def parse_acquire_status(self, status, payload):
+        if status not in self.ACQUIRE_STATUS_CODES:
+            raise RuntimeError("ACQUIRE notification included unsupported status code 0x{status:02x}, payload {payload}")
+
+        short, long = self.ACQUIRE_STATUS_CODES[status]
+        msg = f"{short}: {long}"
+
+        # special handling for status codes including payload
+        if status == 32: 
+            targetRatio = int(payload[0])
+            msg += f" (target ratio {targetRatio}%)"
+        elif status in [33, 34, 35, 36]:
+            currentStep = int(payload[0] << 8 | payload[1])
+            totalSteps  = int(payload[2] << 8 | payload[3])
+            msg += f" (step {currentStep}/{totalSteps})" 
+
+        return msg
+    
+    def acquire_notification(self, sender, data):
+        ok = True
+        if (len(data) < 3):
+            raise RuntimeError(f"received invalid ACQUIRE notification of {len(data)} bytes: {data}")
+
+        # first two bytes declare whether it's a status message or spectral data
+        first_pixel = int((data[0] << 8) | data[1]) # big-endian int16
+
+        if first_pixel == 0xffff:
+            status = data[2]
+            payload = data[3:]
+            msg = self.parse_acquire_status(status, payload)
+            self.debug(f"acquire_notification: {msg}")
+            return
+
+        ########################################################################
+        # apparently it's spectral data
+        ########################################################################
+
+        # validate first_pixel
+        if first_pixel != self.pixels_read:
+            raise RuntimeError(f"received first_pixel {first_pixel} when pixels_read {self.pixels_read}")
+
+        spectral_data = data[2:]
+        pixels_in_packet = int(len(spectral_data) / 2)
+
+        for i in range(pixels_in_packet):
+            # pixel intensities are little-endian uint16
+            offset = i * 2
+            intensity = int((spectral_data[offset+1] << 8) | spectral_data[offset])
+
+            self.spectrum[self.pixels_read] = intensity
+            self.pixels_read += 1
+
+            if self.pixels_read == self.pixels:
+                # self.debug("read complete spectrum")
+                if (i + 1 != pixels_in_packet):
+                    raise RuntimeError(f"trailing pixels in packet")
+
     async def get_spectrum(self):
-        header_len = 2 # the 2-byte first_pixel
-        pixels_read = 0
-        spectrum = [0] * self.pixels
+        self.pixels_read = 0
+        self.spectrum = [0] * self.pixels
 
         # determine which type of measurement
         if self.args.auto_raman: 
@@ -919,86 +1009,23 @@ class Fixture:
             arg = 0
 
         # send the ACQUIRE
-        await self.write_char("ACQUIRE_SPECTRUM", [arg], quiet=True)
+        await self.write_char("ACQUIRE", [arg], quiet=True)
 
         # compute timeout
         timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
-        start_time = datetime.now()
 
-        # read the spectral data
-        while pixels_read < self.pixels:
+        # wait for spectral data to arrive
+        start_time = datetime.now()
+        while self.pixels_read < self.pixels:
             if not self.args.keep_waiting and (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
                 raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
 
-            # self.debug(f"requesting spectrum packet starting at pixel {pixels_read}")
-            data = pixels_read.to_bytes(2, byteorder="big")
-            await self.write_char("SPECTRUM_CMD", data, quiet=True)
+            # self.debug(f"still waiting for spectra ({self.pixels_read}/{self.pixels} read)")
+            await asyncio.sleep(0.2)
 
-            # self.debug(f"reading spectrum data (hopefully from pixels_read {pixels_read})")
-            response = await self.read_char("READ_SPECTRUM", quiet=True)
-
-            ####################################################################
-            # validate response
-            ####################################################################
-
-            ok = True
-            response_len = len(response)
-            if (response_len < header_len):
-                raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (missing header): {response}")
-            else:
-                # check for official NAK
-                first_pixel = int((response[0] << 8) | response[1]) # big-endian int16
-                if first_pixel == 0xffff:
-                    # this is a NAK, check for detail
-                    ok = False
-                    if len(response) > 2:
-                        error_code = response[2]
-                        if error_code < len(self.ACQUIRE_ERRORS):
-                            error_str = self.ACQUIRE_ERRORS[error_code]
-                            if error_str != "NONE":
-                                raise RuntimeError(f"READ_SPECTRUM returned {error_str}")
-                        else:
-                            raise RuntimeError(f"unknown READ_SPECTRUM error_code {error_code}")
-                    if len(response) > 3:
-                        print("trailing data after NAK error code: {to_hex(response)}")
-                elif first_pixel != pixels_read:
-                    # this still happens on 2.8.7
-                    # self.debug(f"WARNING: received unexpected first pixel {first_pixel} (pixels_read {pixels_read})")
-                    ok = False
-                elif (response_len < header_len or response_len % 2 != 0):
-                    raise RuntimeError(f"received invalid READ_SPECTRUM response of {response_len} bytes (odd length): {response}")
-
-            if not ok:
-                await asyncio.sleep(0.5)
-                continue
-
-            """
-            gs: charlie, pixels_read 8000
-            gs: delta
-            gs: echo
-            gs: foxtrot
-            gs: hotel
-            gs: india
-            gs: lima
-            """
-            
-            ####################################################################
-            # apparently it was a valid response
-            ####################################################################
-
-            pixels_in_packet = int((response_len - header_len) / 2)
-            for i in range(pixels_in_packet):
-                # pixel intensities are little-endian uint16
-                offset = header_len + i * 2
-                intensity = int((response[offset+1] << 8) | response[offset])
-
-                spectrum[pixels_read] = intensity
-                pixels_read += 1
-
-                if pixels_read == self.pixels:
-                    # self.debug("read complete spectrum")
-                    if (i + 1 != pixels_in_packet):
-                        raise RuntimeError(f"trailing pixels in packet")
+        ########################################################################
+        # post-processing
+        ########################################################################
 
         if self.args.bin_2x2:
             # note, this needs updated for 633XS
@@ -1009,7 +1036,7 @@ class Fixture:
             binned.append(spectrum[-1])
             spectrum = binned
             
-        return spectrum
+        return self.spectrum
 
     ############################################################################
     # EEPROM
@@ -1053,22 +1080,32 @@ class Fixture:
             self.wavenumbers = [ (1e7/self.excitation - 1e7/nm) for nm in self.wavelengths ]
 
     async def read_eeprom_pages(self):
+        """ tweaked version of get_generic_value """
         start_time = datetime.now()
 
         self.eeprom = {}
         self.pages = []
 
-        cmd_uuid = self.get_uuid_by_name("EEPROM_CMD")
-        data_uuid = self.get_uuid_by_name("EEPROM_DATA")
+        name = "EEPROM_DATA"
         for page in range(8):
             buf = bytearray()
             for subpage in range(4):
-                await self.write_char("EEPROM_CMD", [page, subpage], quiet=True)
-                #await self.client.write_gatt_char(cmd_uuid, page_ids, response = True)
+                
+                request = self.generics.generate_read_request(name)
+                request.append(0) # page is big-endian uint16
+                request.append(page)
+                request.append(subpage)
 
-                response = await self.read_char("EEPROM_DATA", quiet=True)
-                #response = await self.client.read_gatt_char(data_uuid)
-                for byte in response:
+                self.debug(f"read_eeprom_pages: querying {name} ({to_hex(request)})")
+                await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
+
+                self.debug(f"read_eeprom_pages: waiting on {name}")
+                await self.generics.wait(name)
+
+                data = self.generics.get_value(name)
+                self.debug(f"read_eeprom_pages: received page {page}, subpage {subpage}: {data}")
+
+                for byte in data:
                     buf.append(byte)
             self.pages.append(buf)
 
@@ -1132,7 +1169,7 @@ class Fixture:
         for name, values in [ [ 'LASER_TEC_MODE',          [ 0, 1, 2, 3                 ] ],
                               [ 'INTEGRATION_TIME_MS',     [ 1, 10, 100, 1000, 2000     ] ],
                               [ 'LASER_WARNING_DELAY_SEC', [ 0, 5, 10                   ] ],
-                              [ 'CCD_GAIN',                [ 0, 0.1, 0.9, 8, 16, 24, 30 ] ],
+                              [ 'GAIN_DB',                 [ 0, 0.1, 0.9, 8, 16, 24, 30 ] ],
                               [ 'START_LINE',              [ 0, 400, 800                ] ],
                               [ 'STOP_LINE',               [ 1, 400, 1080               ] ],
                               [ 'POWER_WATCHDOG_SEC',      [ 0, 30, 120                 ] ],
