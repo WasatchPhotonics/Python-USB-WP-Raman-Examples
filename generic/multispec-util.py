@@ -144,6 +144,7 @@ class Fixture(object):
         group.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
         group.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
         group.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
+        group.add_argument("--shutdown",            action="store_true", help="turn off spectrometer")
 
         return parser.parse_args()
 
@@ -213,6 +214,11 @@ class Fixture(object):
         if self.args.reset_fpga:
             for dev in self.devices:
                 self.reset_fpga(dev)
+            return
+
+        if self.args.shutdown:
+            for dev in self.devices:
+                self.shutdown(dev)
             return
 
         if self.args.continuous_count != 1:
@@ -319,6 +325,11 @@ class Fixture(object):
     def reset_fpga(self, dev):
         print("resetting FPGA on %s" % dev.eeprom["serial_number"])
         self.send_cmd(dev, 0xb5)
+
+    def shutdown(self, dev):
+        print("shutting down %s" % dev.eeprom["serial_number"])
+        self.send_cmd(dev, 0x87)
+        print("%s has been shutdown" % dev.eeprom["serial_number"])
 
     # only supported on Gen 1.5
     def get_fpga_configuration_register(self, dev):
