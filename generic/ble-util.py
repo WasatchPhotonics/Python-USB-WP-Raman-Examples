@@ -13,6 +13,11 @@ from functools import partial
 
 import EEPROMFields
 
+"""
+To-Do:
+- support Auto-Raman / Auto-Dark progress indications
+"""
+
 debugging = False
 def debug(msg):
     if debugging:
@@ -420,7 +425,7 @@ class Fixture:
         await self.load_characteristics()
 
         elapsed_sec = (datetime.now() - self.start_time).total_seconds()
-        self.debug(f"initial connection took {elapsed_sec:.2f} sec")
+        print(f"initial connection took {elapsed_sec:.2f} sec")
 
     def detection_callback(self, device, advertisement_data):
         """
@@ -1110,7 +1115,7 @@ class Fixture:
             self.pages.append(buf)
 
         elapsed_sec = (datetime.now() - start_time).total_seconds()
-        self.debug(f"reading eeprom took {elapsed_sec:.2f} sec")
+        print(f"reading eeprom took {elapsed_sec:.2f} sec")
 
     def parse_eeprom_pages(self):
         for name, field in self.eeprom_field_loc.items():
