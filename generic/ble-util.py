@@ -13,11 +13,6 @@ from functools import partial
 
 import EEPROMFields
 
-"""
-To-Do:
-- support Auto-Raman / Auto-Dark progress indications
-"""
-
 debugging = False
 def debug(msg):
     if debugging:
@@ -27,171 +22,6 @@ def to_hex(a):
     if a is None:
         return "[ ]"
     return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
-
-class Generic:
-    """ encapsulates paired setter and getter accessors for a single attribute """
-    def __init__(self, name, tier, setter, getter, size, epsilon):
-        self.name    = name
-        self.tier    = tier # 0, 1 or 2
-        self.setter  = setter
-        self.getter  = getter
-        self.size    = size
-        self.epsilon = epsilon
-
-        self.value = None
-        self.event = asyncio.Event()
-    
-    def serialize(self, value):
-        data = []
-        if self.name == "GAIN_DB":
-            data.append(int(value) & 0xff)
-            data.append(int((value - int(value)) * 256) & 0xff)
-        else: 
-            # assume big-endian uint[size]            
-            for i in range(self.size):
-                data.append((value >> (8 * (self.size - (i+1)))) & 0xff)
-        return data
-
-    def deserialize(self, data):
-        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
-        if self.name == "GAIN_DB":
-            return data[0] + data[1] / 256.0
-        elif self.name == "EEPROM_DATA":
-            return data
-        else:
-            # by default, treat as big-endian uint
-            value = 0
-            for byte in data:
-                value <<= 8
-                value |= byte
-            return value
-
-    def generate_write_request(self, value):
-        if self.setter is None:
-            raise RuntimeError(f"Generic {self.name} is read-only")
-        request = [ 0xff for _ in range(self.tier) ]
-        request.append(self.setter)
-        request.extend(self.serialize(value))
-        return request
-
-    def generate_read_request(self):
-        # STEP THREE: generate the "read request" payload for this attribute
-        if self.getter is None:
-            raise RuntimeError(f"Generic {self.name} is write-only")
-        request = [ 0xff for _ in range(self.tier) ]
-        request.append(self.getter)
-        return request
-
-class Generics:
-    """ Facade to access all Generic attributes in the BLE interface """
-
-    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
-
-    def __init__(self):
-        self.seq = 0
-        self.generics = {}
-        self.callbacks = {}
-
-    def next_seq(self, callback=None):
-        self.seq = (self.seq + 1) % 256
-        if self.seq in self.callbacks:
-            raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
-        elif callback:
-            # STEP SIX: store the callback function in a table, keyed on the new sequence number
-            self.callbacks[self.seq] = callback
-        return self.seq
-
-    def get_callback(self, seq):
-        # STEP ELEVEN: remove the stored callback from the table, so it won't accidentally be re-used
-        if seq in self.callbacks:
-            return self.callbacks.pop(seq)
-
-        # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
-        debug(f"get_callback: seq {seq} not found in callbacks")
-
-    def add(self, name, tier, setter, getter, size, epsilon=0):
-        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
-
-    def generate_write_request(self, name, value):
-        return self.generics[name].generate_write_request(value)
-
-    def generate_read_request(self, name):
-        # STEP TWO: generate the "read request" payload for the named attribute
-        return self.generics[name].generate_read_request()
-
-    def get_value(self, name):
-        return self.generics[name].value
-
-    async def wait(self, name):
-        await self.generics[name].event.wait()
-        self.generics[name].event.clear()
-
-    async def process_acknowledgement(self, data, name):
-        debug(f"received acknowledgement for {name}")
-        generic = self.generics[name]
-        generic.event.set()
-
-    async def process_response(self, name, data):
-        # STEP THIRTEEN: this is the standard callback triggered after receiving
-        # a notification from the Generic Characteristic
-
-        # STEP FOURTEEN: lookup the specific Generic attribute (AMBIENT_TEMPERATURE_DEG_C, etc) associated with this transaction
-        generic = self.generics[name]
-
-        # STEP FIFTEEN: parse the response payload according to the attribute
-        generic.value = generic.deserialize(data)
-
-        # STEP SEVENTEEN: raise the asynchronous "event" flag to tell the 
-        # await'ing requester that the response value is now available and stored
-        # in the Generic object
-        generic.event.set()
-
-    async def notification_callback(self, sender, data):
-        # STEP EIGHT: we have received a response notification from the Generic Characteristic
-
-        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
-
-        # STEP NINE: extract the sequence number from the notification response
-        result = None
-        if len(data) < 3:
-            seq, err = data[0], data[1]
-        else:
-            seq, err, result = data[0], data[1], data[2:]
-
-        if err < len(self.RESPONSE_ERRORS):
-            response_error = self.RESPONSE_ERRORS[err]
-        else:
-            response_error = f"UNSUPPORTED RESPONSE_ERROR: 0x{err}"
-
-        if response_error != "OK":
-            raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
-
-        # STEP TEN: lookup the stored callback for this sequence number
-        #
-        # pass the response data, minus the sequence and error-code header, to 
-        # the registered callback function for that sequence ID
-        callback = self.get_callback(seq)
-
-        # STEP TWELVE: actually call the callback
-        if callback:
-            await callback(result)
-        
-    def get_name(self, code):
-        if code == 0xff:
-            return "NEXT_TIER"
-
-        for name, generic in self.generics.items():
-            if code == generic.setter:
-                return f"SET_{name}"
-            elif code == generic.getter:
-                return f"GET_{name}"
-        return "UNKNOWN"
-
-    def equals(self, name, expected):
-        actual  = self.generics[name].value
-        epsilon = self.generics[name].epsilon
-        delta   = abs(actual - expected)
-        return delta <= epsilon
 
 class Fixture:
     """
@@ -1250,6 +1080,171 @@ class Fixture:
         except:
             pass
         return data
+
+class Generic:
+    """ encapsulates paired setter and getter accessors for a single attribute """
+    def __init__(self, name, tier, setter, getter, size, epsilon):
+        self.name    = name
+        self.tier    = tier # 0, 1 or 2
+        self.setter  = setter
+        self.getter  = getter
+        self.size    = size
+        self.epsilon = epsilon
+
+        self.value = None
+        self.event = asyncio.Event()
+    
+    def serialize(self, value):
+        data = []
+        if self.name == "GAIN_DB":
+            data.append(int(value) & 0xff)
+            data.append(int((value - int(value)) * 256) & 0xff)
+        else: 
+            # assume big-endian uint[size]            
+            for i in range(self.size):
+                data.append((value >> (8 * (self.size - (i+1)))) & 0xff)
+        return data
+
+    def deserialize(self, data):
+        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
+        if self.name == "GAIN_DB":
+            return data[0] + data[1] / 256.0
+        elif self.name == "EEPROM_DATA":
+            return data
+        else:
+            # by default, treat as big-endian uint
+            value = 0
+            for byte in data:
+                value <<= 8
+                value |= byte
+            return value
+
+    def generate_write_request(self, value):
+        if self.setter is None:
+            raise RuntimeError(f"Generic {self.name} is read-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.setter)
+        request.extend(self.serialize(value))
+        return request
+
+    def generate_read_request(self):
+        # STEP THREE: generate the "read request" payload for this attribute
+        if self.getter is None:
+            raise RuntimeError(f"Generic {self.name} is write-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.getter)
+        return request
+
+class Generics:
+    """ Facade to access all Generic attributes in the BLE interface """
+
+    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
+
+    def __init__(self):
+        self.seq = 0
+        self.generics = {}
+        self.callbacks = {}
+
+    def next_seq(self, callback=None):
+        self.seq = (self.seq + 1) % 256
+        if self.seq in self.callbacks:
+            raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
+        elif callback:
+            # STEP SIX: store the callback function in a table, keyed on the new sequence number
+            self.callbacks[self.seq] = callback
+        return self.seq
+
+    def get_callback(self, seq):
+        # STEP ELEVEN: remove the stored callback from the table, so it won't accidentally be re-used
+        if seq in self.callbacks:
+            return self.callbacks.pop(seq)
+
+        # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
+        debug(f"get_callback: seq {seq} not found in callbacks")
+
+    def add(self, name, tier, setter, getter, size, epsilon=0):
+        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
+
+    def generate_write_request(self, name, value):
+        return self.generics[name].generate_write_request(value)
+
+    def generate_read_request(self, name):
+        # STEP TWO: generate the "read request" payload for the named attribute
+        return self.generics[name].generate_read_request()
+
+    def get_value(self, name):
+        return self.generics[name].value
+
+    async def wait(self, name):
+        await self.generics[name].event.wait()
+        self.generics[name].event.clear()
+
+    async def process_acknowledgement(self, data, name):
+        debug(f"received acknowledgement for {name}")
+        generic = self.generics[name]
+        generic.event.set()
+
+    async def process_response(self, name, data):
+        # STEP THIRTEEN: this is the standard callback triggered after receiving
+        # a notification from the Generic Characteristic
+
+        # STEP FOURTEEN: lookup the specific Generic attribute (AMBIENT_TEMPERATURE_DEG_C, etc) associated with this transaction
+        generic = self.generics[name]
+
+        # STEP FIFTEEN: parse the response payload according to the attribute
+        generic.value = generic.deserialize(data)
+
+        # STEP SEVENTEEN: raise the asynchronous "event" flag to tell the 
+        # await'ing requester that the response value is now available and stored
+        # in the Generic object
+        generic.event.set()
+
+    async def notification_callback(self, sender, data):
+        # STEP EIGHT: we have received a response notification from the Generic Characteristic
+
+        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
+
+        # STEP NINE: extract the sequence number from the notification response
+        result = None
+        if len(data) < 3:
+            seq, err = data[0], data[1]
+        else:
+            seq, err, result = data[0], data[1], data[2:]
+
+        if err < len(self.RESPONSE_ERRORS):
+            response_error = self.RESPONSE_ERRORS[err]
+        else:
+            response_error = f"UNSUPPORTED RESPONSE_ERROR: 0x{err}"
+
+        if response_error != "OK":
+            raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
+
+        # STEP TEN: lookup the stored callback for this sequence number
+        #
+        # pass the response data, minus the sequence and error-code header, to 
+        # the registered callback function for that sequence ID
+        callback = self.get_callback(seq)
+
+        # STEP TWELVE: actually call the callback
+        if callback:
+            await callback(result)
+        
+    def get_name(self, code):
+        if code == 0xff:
+            return "NEXT_TIER"
+
+        for name, generic in self.generics.items():
+            if code == generic.setter:
+                return f"SET_{name}"
+            elif code == generic.getter:
+                return f"GET_{name}"
+        return "UNKNOWN"
+
+    def equals(self, name, expected):
+        actual  = self.generics[name].value
+        epsilon = self.generics[name].epsilon
+        delta   = abs(actual - expected)
+        return delta <= epsilon
 
 if __name__ == "__main__":
     fixture = Fixture()
