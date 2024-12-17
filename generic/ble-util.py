@@ -511,25 +511,24 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
-            if sys == "Darwin":
-                if "notify" in char.properties or "indicate" in char.properties:
-                    if name == "BATTERY_STATE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.battery_notification)
-                        self.notifications.add(char.uuid)
-                    elif name == "LASER_STATE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.laser_state_notification)
-                        self.debug(f"back from start_notify")
-                        self.notifications.add(char.uuid)
-                    elif name == "GENERIC":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.generics.notification_callback)
-                        self.notifications.add(char.uuid)
-                    elif name == "ACQUIRE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.acquire_notification)
-                        self.notifications.add(char.uuid)
+            if "notify" in char.properties or "indicate" in char.properties:
+                if name == "BATTERY_STATE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.battery_notification)
+                    self.notifications.add(char.uuid)
+                elif name == "LASER_STATE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.laser_state_notification)
+                    self.debug(f"back from start_notify")
+                    self.notifications.add(char.uuid)
+                elif name == "GENERIC":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.generics.notification_callback)
+                    self.notifications.add(char.uuid)
+                elif name == "ACQUIRE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.acquire_notification)
+                    self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:

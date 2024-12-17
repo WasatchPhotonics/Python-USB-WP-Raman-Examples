@@ -23,14 +23,17 @@ Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
 
 def get_uint(bRequest, wValue, wIndex=0, lsb_len=4):
-    # print(f">> ControlPacket(0x{DEVICE_TO_HOST:02x}, bRequest 0x{bRequest:02x}, wValue 0x{wValue:04x}, wIndex 0x{wIndex:04x}, len {lsb_len})")
-    data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, lsb_len, TIMEOUT_MS)
-    # print(f"<< {data}")
-    value = 0
-    for i in range(len(data)):
-        value |= (data[i] << (8 * i))
-    # print(f"returning 0x{value:04x} ({value})")
-    return value
+    try:
+        # print(f">> ControlPacket(0x{DEVICE_TO_HOST:02x}, bRequest 0x{bRequest:02x}, wValue 0x{wValue:04x}, wIndex 0x{wIndex:04x}, len {lsb_len})")
+        data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, lsb_len, TIMEOUT_MS)
+        # print(f"<< {data}")
+        value = 0
+        for i in range(len(data)):
+            value |= (data[i] << (8 * i))
+        # print(f"returning 0x{value:04x} ({value})")
+        return value
+    except:
+        return f"get_uint failed on bRequest 0x{bRequest:02x}, wValue 0x{wValue:02x}"
 
 def get_string(bRequest, wValue, wIndex=0, length=32):
     data = dev.ctrl_transfer(DEVICE_TO_HOST, bRequest, wValue, wIndex, length, TIMEOUT_MS)
