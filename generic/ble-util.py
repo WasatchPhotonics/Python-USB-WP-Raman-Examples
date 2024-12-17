@@ -216,10 +216,10 @@ class Fixture:
          6: ("ERR_IMG_SNSR_STATE_TRANS_FLR","The sensor failed to apply acquisition parameters"),
          7: ("ERR_SPEC_ACQ_SIG_WAIT_TMO",   "The sensor failed to take a spectrum (timeout exceeded)"),
         32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"),
-        33: ("AUTO_TAKING_DARK",            "Auto-Dark/Raman is taking dark spectra"),
-        34: ("AUTO_LASER_WARNING_DELAY",    "Auto-Dark/Raman is paused during laser warning delay period"),
-        35: ("AUTO_LASER_WARMUP",           "Auto-Dark/Raman is paused during laser warmup period"),
-        36: ("AUTO_TAKING_RAMAN",           "Auto-Dark/Raman is taking Raman measurements"),
+        33: ("TAKING_DARK",                 "taking spectra (no laser)"),
+        34: ("LASER_WARNING_DELAY",         "paused during laser warning delay period"),
+        35: ("LASER_WARMUP",                "paused during laser warmup period"),
+        36: ("TAKING_RAMAN",                "taking spectra (laser enabled)"),
     }
 
     ############################################################################
@@ -916,6 +916,7 @@ class Fixture:
                     if self.args.plot:
                         if not self.ramping and not self.args.overlay:
                             plt.clf()
+                        debug(f"graphing x {xaxis[:5]}, y {spectrum[:5]}")
                         plt.plot(xaxis, spectrum)
                         plt.draw()
                         plt.pause(0.01)
@@ -957,7 +958,8 @@ class Fixture:
         elif status in [33, 34, 35, 36]:
             currentStep = int(payload[0] << 8 | payload[1])
             totalSteps  = int(payload[2] << 8 | payload[3])
-            msg += f" (step {currentStep}/{totalSteps})" 
+            if totalSteps > 1:
+                msg += f" (step {currentStep+1}/{totalSteps})" 
 
         return msg
     
@@ -1057,8 +1059,12 @@ class Fixture:
         msg  = f"Connected to {self.eeprom['model']} {self.eeprom['serial_number']} with {self.pixels} pixels "
         msg += f"from ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)"
         if self.wavenumbers:
-            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
-        print(msg)
+            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f} 1/cm)"
+        try:
+            print(msg)
+        except:
+            msg = msg.encode('ascii', errors='ignore')
+            print(f"simplified: {msg}")
 
     def display_eeprom(self):
         print("EEPROM:")
