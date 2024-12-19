@@ -433,6 +433,8 @@ class Fixture:
         advertisement_data AdvertisementData(local_name='WP-SiG:WP-01791', 
                                              service_uuids=['0000ff00-0000-1000-8000-00805f9b34fb', 'd1a7ff00-af78-4449-a34f-4da1afaf51bc'], 
                                              tx_power=0, rssi=-67)
+
+        @param device is a bleak.backends.device.BLEDevice
         """
         if not self.keep_scanning:
             return
@@ -499,10 +501,15 @@ class Fixture:
 
         # iterate over standard Characteristics
         # @see https://bleak.readthedocs.io/en/latest/api/client.html#gatt-characteristics
-        sys = platform.system()
-        self.debug("Characteristics:")
+        self.char_by_name = {}
         for char in primary_service.characteristics:
             name = self.get_name_by_uuid(char.uuid)
+            self.char_by_name[name] = char
+
+        sys = platform.system()
+        self.debug("Characteristics:")
+        for name in ['GENERIC', 'LASER_STATE', 'ACQUIRE', 'BATTERY_STATE']:
+            char = self.char_by_name[name]
             extra = ""
 
             if "write-without-response" in char.properties:
@@ -511,7 +518,8 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
-            if sys == "Darwin":
+            # if sys == "Darwin" or True:
+            try:
                 if "notify" in char.properties or "indicate" in char.properties:
                     if name == "BATTERY_STATE":
                         self.debug(f"starting {name} notifications")
@@ -530,6 +538,8 @@ class Fixture:
                         self.debug(f"starting {name} notifications")
                         await self.client.start_notify(char.uuid, self.acquire_notification)
                         self.notifications.add(char.uuid)
+            except:
+                print(f"ERROR: failed to start notifications on {name}")
 
     async def stop_notifications(self):
         for uuid in self.notifications:
@@ -1014,7 +1024,7 @@ class Fixture:
             arg = 0
 
         # send the ACQUIRE
-        await self.write_char("ACQUIRE", [arg], quiet=True)
+        await self.write_char("ACQUIRE", [arg]) # , quiet=True)
 
         # compute timeout
         timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
