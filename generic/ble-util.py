@@ -13,11 +13,6 @@ from functools import partial
 
 import EEPROMFields
 
-"""
-To-Do:
-- support Auto-Raman / Auto-Dark progress indications
-"""
-
 debugging = False
 def debug(msg):
     if debugging:
@@ -27,171 +22,6 @@ def to_hex(a):
     if a is None:
         return "[ ]"
     return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
-
-class Generic:
-    """ encapsulates paired setter and getter accessors for a single attribute """
-    def __init__(self, name, tier, setter, getter, size, epsilon):
-        self.name    = name
-        self.tier    = tier # 0, 1 or 2
-        self.setter  = setter
-        self.getter  = getter
-        self.size    = size
-        self.epsilon = epsilon
-
-        self.value = None
-        self.event = asyncio.Event()
-    
-    def serialize(self, value):
-        data = []
-        if self.name == "GAIN_DB":
-            data.append(int(value) & 0xff)
-            data.append(int((value - int(value)) * 256) & 0xff)
-        else: 
-            # assume big-endian uint[size]            
-            for i in range(self.size):
-                data.append((value >> (8 * (self.size - (i+1)))) & 0xff)
-        return data
-
-    def deserialize(self, data):
-        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
-        if self.name == "GAIN_DB":
-            return data[0] + data[1] / 256.0
-        elif self.name == "EEPROM_DATA":
-            return data
-        else:
-            # by default, treat as big-endian uint
-            value = 0
-            for byte in data:
-                value <<= 8
-                value |= byte
-            return value
-
-    def generate_write_request(self, value):
-        if self.setter is None:
-            raise RuntimeError(f"Generic {self.name} is read-only")
-        request = [ 0xff for _ in range(self.tier) ]
-        request.append(self.setter)
-        request.extend(self.serialize(value))
-        return request
-
-    def generate_read_request(self):
-        # STEP THREE: generate the "read request" payload for this attribute
-        if self.getter is None:
-            raise RuntimeError(f"Generic {self.name} is write-only")
-        request = [ 0xff for _ in range(self.tier) ]
-        request.append(self.getter)
-        return request
-
-class Generics:
-    """ Facade to access all Generic attributes in the BLE interface """
-
-    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
-
-    def __init__(self):
-        self.seq = 0
-        self.generics = {}
-        self.callbacks = {}
-
-    def next_seq(self, callback=None):
-        self.seq = (self.seq + 1) % 256
-        if self.seq in self.callbacks:
-            raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
-        elif callback:
-            # STEP SIX: store the callback function in a table, keyed on the new sequence number
-            self.callbacks[self.seq] = callback
-        return self.seq
-
-    def get_callback(self, seq):
-        # STEP ELEVEN: remove the stored callback from the table, so it won't accidentally be re-used
-        if seq in self.callbacks:
-            return self.callbacks.pop(seq)
-
-        # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
-        debug(f"get_callback: seq {seq} not found in callbacks")
-
-    def add(self, name, tier, setter, getter, size, epsilon=0):
-        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
-
-    def generate_write_request(self, name, value):
-        return self.generics[name].generate_write_request(value)
-
-    def generate_read_request(self, name):
-        # STEP TWO: generate the "read request" payload for the named attribute
-        return self.generics[name].generate_read_request()
-
-    def get_value(self, name):
-        return self.generics[name].value
-
-    async def wait(self, name):
-        await self.generics[name].event.wait()
-        self.generics[name].event.clear()
-
-    async def process_acknowledgement(self, data, name):
-        debug(f"received acknowledgement for {name}")
-        generic = self.generics[name]
-        generic.event.set()
-
-    async def process_response(self, name, data):
-        # STEP THIRTEEN: this is the standard callback triggered after receiving
-        # a notification from the Generic Characteristic
-
-        # STEP FOURTEEN: lookup the specific Generic attribute (AMBIENT_TEMPERATURE_DEG_C, etc) associated with this transaction
-        generic = self.generics[name]
-
-        # STEP FIFTEEN: parse the response payload according to the attribute
-        generic.value = generic.deserialize(data)
-
-        # STEP SEVENTEEN: raise the asynchronous "event" flag to tell the 
-        # await'ing requester that the response value is now available and stored
-        # in the Generic object
-        generic.event.set()
-
-    async def notification_callback(self, sender, data):
-        # STEP EIGHT: we have received a response notification from the Generic Characteristic
-
-        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
-
-        # STEP NINE: extract the sequence number from the notification response
-        result = None
-        if len(data) < 3:
-            seq, err = data[0], data[1]
-        else:
-            seq, err, result = data[0], data[1], data[2:]
-
-        if err < len(self.RESPONSE_ERRORS):
-            response_error = self.RESPONSE_ERRORS[err]
-        else:
-            response_error = f"UNSUPPORTED RESPONSE_ERROR: 0x{err}"
-
-        if response_error != "OK":
-            raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
-
-        # STEP TEN: lookup the stored callback for this sequence number
-        #
-        # pass the response data, minus the sequence and error-code header, to 
-        # the registered callback function for that sequence ID
-        callback = self.get_callback(seq)
-
-        # STEP TWELVE: actually call the callback
-        if callback:
-            await callback(result)
-        
-    def get_name(self, code):
-        if code == 0xff:
-            return "NEXT_TIER"
-
-        for name, generic in self.generics.items():
-            if code == generic.setter:
-                return f"SET_{name}"
-            elif code == generic.getter:
-                return f"GET_{name}"
-        return "UNKNOWN"
-
-    def equals(self, name, expected):
-        actual  = self.generics[name].value
-        epsilon = self.generics[name].epsilon
-        delta   = abs(actual - expected)
-        return delta <= epsilon
 
 class Fixture:
     """
@@ -216,10 +46,10 @@ class Fixture:
          6: ("ERR_IMG_SNSR_STATE_TRANS_FLR","The sensor failed to apply acquisition parameters"),
          7: ("ERR_SPEC_ACQ_SIG_WAIT_TMO",   "The sensor failed to take a spectrum (timeout exceeded)"),
         32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"),
-        33: ("AUTO_TAKING_DARK",            "Auto-Dark/Raman is taking dark spectra"),
-        34: ("AUTO_LASER_WARNING_DELAY",    "Auto-Dark/Raman is paused during laser warning delay period"),
-        35: ("AUTO_LASER_WARMUP",           "Auto-Dark/Raman is paused during laser warmup period"),
-        36: ("AUTO_TAKING_RAMAN",           "Auto-Dark/Raman is taking Raman measurements"),
+        33: ("TAKING_DARK",                 "taking spectra (no laser)"),
+        34: ("LASER_WARNING_DELAY",         "paused during laser warning delay period"),
+        35: ("LASER_WARMUP",                "paused during laser warmup period"),
+        36: ("TAKING_RAMAN",                "taking spectra (laser enabled)"),
     }
 
     ############################################################################
@@ -518,28 +348,24 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
-            # if sys == "Darwin" or True:
-            try:
-                if "notify" in char.properties or "indicate" in char.properties:
-                    if name == "BATTERY_STATE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.battery_notification)
-                        self.notifications.add(char.uuid)
-                    elif name == "LASER_STATE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.laser_state_notification)
-                        self.debug(f"back from start_notify")
-                        self.notifications.add(char.uuid)
-                    elif name == "GENERIC":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.generics.notification_callback)
-                        self.notifications.add(char.uuid)
-                    elif name == "ACQUIRE":
-                        self.debug(f"starting {name} notifications")
-                        await self.client.start_notify(char.uuid, self.acquire_notification)
-                        self.notifications.add(char.uuid)
-            except:
-                print(f"ERROR: failed to start notifications on {name}")
+            if "notify" in char.properties or "indicate" in char.properties:
+                if name == "BATTERY_STATE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.battery_notification)
+                    self.notifications.add(char.uuid)
+                elif name == "LASER_STATE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.laser_state_notification)
+                    self.debug(f"back from start_notify")
+                    self.notifications.add(char.uuid)
+                elif name == "GENERIC":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.generics.notification_callback)
+                    self.notifications.add(char.uuid)
+                elif name == "ACQUIRE":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.acquire_notification)
+                    self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
         for uuid in self.notifications:
@@ -927,6 +753,7 @@ class Fixture:
                     if self.args.plot:
                         if not self.ramping and not self.args.overlay:
                             plt.clf()
+                        debug(f"graphing x {xaxis[:5]}, y {spectrum[:5]}")
                         plt.plot(xaxis, spectrum)
                         plt.draw()
                         plt.pause(0.01)
@@ -968,7 +795,8 @@ class Fixture:
         elif status in [33, 34, 35, 36]:
             currentStep = int(payload[0] << 8 | payload[1])
             totalSteps  = int(payload[2] << 8 | payload[3])
-            msg += f" (step {currentStep}/{totalSteps})" 
+            if totalSteps > 1:
+                msg += f" (step {currentStep+1}/{totalSteps})" 
 
         return msg
     
@@ -1068,8 +896,12 @@ class Fixture:
         msg  = f"Connected to {self.eeprom['model']} {self.eeprom['serial_number']} with {self.pixels} pixels "
         msg += f"from ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)"
         if self.wavenumbers:
-            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
-        print(msg)
+            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f} 1/cm)"
+        try:
+            print(msg)
+        except:
+            msg = msg.encode('ascii', errors='ignore')
+            print(f"simplified: {msg}")
 
     def display_eeprom(self):
         print("EEPROM:")
@@ -1255,6 +1087,171 @@ class Fixture:
         except:
             pass
         return data
+
+class Generic:
+    """ encapsulates paired setter and getter accessors for a single attribute """
+    def __init__(self, name, tier, setter, getter, size, epsilon):
+        self.name    = name
+        self.tier    = tier # 0, 1 or 2
+        self.setter  = setter
+        self.getter  = getter
+        self.size    = size
+        self.epsilon = epsilon
+
+        self.value = None
+        self.event = asyncio.Event()
+    
+    def serialize(self, value):
+        data = []
+        if self.name == "GAIN_DB":
+            data.append(int(value) & 0xff)
+            data.append(int((value - int(value)) * 256) & 0xff)
+        else: 
+            # assume big-endian uint[size]            
+            for i in range(self.size):
+                data.append((value >> (8 * (self.size - (i+1)))) & 0xff)
+        return data
+
+    def deserialize(self, data):
+        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
+        if self.name == "GAIN_DB":
+            return data[0] + data[1] / 256.0
+        elif self.name == "EEPROM_DATA":
+            return data
+        else:
+            # by default, treat as big-endian uint
+            value = 0
+            for byte in data:
+                value <<= 8
+                value |= byte
+            return value
+
+    def generate_write_request(self, value):
+        if self.setter is None:
+            raise RuntimeError(f"Generic {self.name} is read-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.setter)
+        request.extend(self.serialize(value))
+        return request
+
+    def generate_read_request(self):
+        # STEP THREE: generate the "read request" payload for this attribute
+        if self.getter is None:
+            raise RuntimeError(f"Generic {self.name} is write-only")
+        request = [ 0xff for _ in range(self.tier) ]
+        request.append(self.getter)
+        return request
+
+class Generics:
+    """ Facade to access all Generic attributes in the BLE interface """
+
+    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
+
+    def __init__(self):
+        self.seq = 0
+        self.generics = {}
+        self.callbacks = {}
+
+    def next_seq(self, callback=None):
+        self.seq = (self.seq + 1) % 256
+        if self.seq in self.callbacks:
+            raise RuntimeError("seq {self.seq} has unprocessed callback {self.callbacks[self.seq]}")
+        elif callback:
+            # STEP SIX: store the callback function in a table, keyed on the new sequence number
+            self.callbacks[self.seq] = callback
+        return self.seq
+
+    def get_callback(self, seq):
+        # STEP ELEVEN: remove the stored callback from the table, so it won't accidentally be re-used
+        if seq in self.callbacks:
+            return self.callbacks.pop(seq)
+
+        # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
+        debug(f"get_callback: seq {seq} not found in callbacks")
+
+    def add(self, name, tier, setter, getter, size, epsilon=0):
+        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
+
+    def generate_write_request(self, name, value):
+        return self.generics[name].generate_write_request(value)
+
+    def generate_read_request(self, name):
+        # STEP TWO: generate the "read request" payload for the named attribute
+        return self.generics[name].generate_read_request()
+
+    def get_value(self, name):
+        return self.generics[name].value
+
+    async def wait(self, name):
+        await self.generics[name].event.wait()
+        self.generics[name].event.clear()
+
+    async def process_acknowledgement(self, data, name):
+        debug(f"received acknowledgement for {name}")
+        generic = self.generics[name]
+        generic.event.set()
+
+    async def process_response(self, name, data):
+        # STEP THIRTEEN: this is the standard callback triggered after receiving
+        # a notification from the Generic Characteristic
+
+        # STEP FOURTEEN: lookup the specific Generic attribute (AMBIENT_TEMPERATURE_DEG_C, etc) associated with this transaction
+        generic = self.generics[name]
+
+        # STEP FIFTEEN: parse the response payload according to the attribute
+        generic.value = generic.deserialize(data)
+
+        # STEP SEVENTEEN: raise the asynchronous "event" flag to tell the 
+        # await'ing requester that the response value is now available and stored
+        # in the Generic object
+        generic.event.set()
+
+    async def notification_callback(self, sender, data):
+        # STEP EIGHT: we have received a response notification from the Generic Characteristic
+
+        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
+
+        # STEP NINE: extract the sequence number from the notification response
+        result = None
+        if len(data) < 3:
+            seq, err = data[0], data[1]
+        else:
+            seq, err, result = data[0], data[1], data[2:]
+
+        if err < len(self.RESPONSE_ERRORS):
+            response_error = self.RESPONSE_ERRORS[err]
+        else:
+            response_error = f"UNSUPPORTED RESPONSE_ERROR: 0x{err}"
+
+        if response_error != "OK":
+            raise RuntimeError(f"GENERIC notification included error code {err} ({response_error}); data {to_hex(data)}")
+
+        # STEP TEN: lookup the stored callback for this sequence number
+        #
+        # pass the response data, minus the sequence and error-code header, to 
+        # the registered callback function for that sequence ID
+        callback = self.get_callback(seq)
+
+        # STEP TWELVE: actually call the callback
+        if callback:
+            await callback(result)
+        
+    def get_name(self, code):
+        if code == 0xff:
+            return "NEXT_TIER"
+
+        for name, generic in self.generics.items():
+            if code == generic.setter:
+                return f"SET_{name}"
+            elif code == generic.getter:
+                return f"GET_{name}"
+        return "UNKNOWN"
+
+    def equals(self, name, expected):
+        actual  = self.generics[name].value
+        epsilon = self.generics[name].epsilon
+        delta   = abs(actual - expected)
+        return delta <= epsilon
 
 if __name__ == "__main__":
     fixture = Fixture()
