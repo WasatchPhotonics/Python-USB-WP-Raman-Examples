@@ -338,13 +338,13 @@ class Fixture(object):
         return raw
 
     def get_firmware_version(self, dev):
-        result = self.get_cmd(dev, 0xc0)
+        result = self.get_cmd(dev, 0xc0, label="GET_FIRMWARE_VERSION")
         if result is not None and len(result) >= 4:
             return "%d.%d.%d.%d" % (result[3], result[2], result[1], result[0]) 
 
     def get_fpga_version(self, dev):
         s = ""
-        result = self.get_cmd(dev, 0xb4, length=7)
+        result = self.get_cmd(dev, 0xb4, length=7, label="GET_FPGA_VERSION")
         if result is not None:
             for i in range(len(result)):
                 c = result[i]
@@ -353,6 +353,7 @@ class Fixture(object):
         return s
 
     def get_ble_firmware_version(self, dev):
+        # note: it takes a few seconds after boot before this returns a reasonable value
         result = self.get_cmd(dev, 0xff, 0x2d, length=32, label="GET_BLE_FIRMWARE_VERSION")
         if result is None:
             return None
@@ -785,9 +786,9 @@ class Fixture(object):
         dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_cmd(self, dev, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d)" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
+        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, label))
         result = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, result))
+        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, self.to_hex(result), label))
 
         value = 0
         if msb_len is not None:
