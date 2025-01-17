@@ -34,32 +34,45 @@ def Get_Value(Command, command2, ByteCount, tblIdx, index=0):
     return dev.ctrl_transfer(DEVICE_TO_HOST, Command, command2, tblIdx, ByteCount, TIMEOUT_MS)
 
 def read_reg(idx):
-    data = Get_Value(0xff, 0x77, 13, idx)
+    data = Get_Value(0xff, 0x77, 17, idx)
     print(data)
-    tblIdx = data[1]
+    
+    snapShotCnt = data[1]
+    snapShotCnt <<= 8
+    snapShotCnt |= data[0]
+
+    print("Snapshot Cnt:", snapShotCnt)
+    
+    regsSavedCnt = data[3]
+    regsSavedCnt <<= 8
+    regsSavedCnt |= data[2]
+    print("Num Regs Saved:", regsSavedCnt)
+
+
+    tblIdx = data[5]
     tblIdx <<= 8
-    tblIdx |= data[0]
+    tblIdx |= data[4]
 
-    errCode = data[2]
+    errCode = data[6]
 
-    regAddr = data[4]
+    regAddr = data[8]
     regAddr <<= 8
-    regAddr |= data[3]
+    regAddr |= data[7]
 
-    regReadOpnSts = data[5]
-    dataMuxSigLvl = data[6]
+    regReadOpnSts = data[9]
+    dataMuxSigLvl = data[10]
 
-    regVal = data[8]
+    regVal = data[12]
     regVal <<= 8
-    regVal |= data[7]
+    regVal |= data[11]
 
-    timeStamp = data[12]
+    timeStamp = data[16]
     timeStamp <<= 8
-    timeStamp |= data[11]
+    timeStamp |= data[15]
     timeStamp <<= 8
-    timeStamp |= data[10]
+    timeStamp |= data[14]
     timeStamp <<= 8
-    timeStamp |= data[9]
+    timeStamp |= data[13]
 
     print("")
     print("Idx: {}, Err: {}, RegAddr: 0x{:02x}, Rd-Sts {}, DATAMUX {}, RegVal: 0x{:04x}, Time-Stamp {}".\
