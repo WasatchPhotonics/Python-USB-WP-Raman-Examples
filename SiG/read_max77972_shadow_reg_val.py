@@ -3,6 +3,7 @@
 import sys
 import usb.core
 import argparse
+import time
 
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
@@ -35,18 +36,17 @@ def Get_Value(Command, command2, ByteCount, tblIdx, index=0):
 
 def read_reg(idx):
     data = Get_Value(0xff, 0x77, 17, idx)
-    print(data)
+    # print(data)
     
     snapShotCnt = data[1]
     snapShotCnt <<= 8
     snapShotCnt |= data[0]
-
-    print("Snapshot Cnt:", snapShotCnt)
+    # print("Snapshot Cnt:", snapShotCnt)
     
     regsSavedCnt = data[3]
     regsSavedCnt <<= 8
     regsSavedCnt |= data[2]
-    print("Num Regs Saved:", regsSavedCnt)
+    # print("Num Regs Saved:", regsSavedCnt)
 
 
     tblIdx = data[5]
@@ -75,8 +75,22 @@ def read_reg(idx):
     timeStamp |= data[13]
 
     print("")
-    print("Idx: {}, Err: {}, RegAddr: 0x{:02x}, Rd-Sts {}, DATAMUX {}, RegVal: 0x{:04x}, Time-Stamp {}".\
-          format(tblIdx, errCode, regAddr, regReadOpnSts, dataMuxSigLvl, regVal, timeStamp))
-    # return val      
+    print("Idx: {}, RegAddr: 0x{:02x}, Err-Code {}, Rd-Sts {}, DATAMUX {}, RegVal: 0x{:04x}, Time-Stamp {}".\
+          format(tblIdx, regAddr, errCode, regReadOpnSts, dataMuxSigLvl, regVal, timeStamp))
+    return errCode, snapShotCnt, regsSavedCnt
 
-read_reg(regTblIdx)
+if regTblIdx < 255:
+   err, snapSvdCnt, regSvdCnt = read_reg(regTblIdx)
+else:
+   regTblIdx = 0
+   while 1:
+     err, snapSvdCnt, regSvdCnt = read_reg(regTblIdx)
+     if err != 0:
+        break
+     else:
+        regTblIdx += 1
+        time.sleep(0.1)
+ 
+print("")
+print("Snapshot Cnt:", snapSvdCnt)
+print("Num Regs Saved:", regSvdCnt)
