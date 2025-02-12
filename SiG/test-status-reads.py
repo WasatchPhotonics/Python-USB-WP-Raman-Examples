@@ -46,6 +46,7 @@ class Fixture:
 
     def get_amb_temp(self):
         value = self.get_cmd(0xff, 0x2a, label="GET_AMBIENT_TEMPERATURE_DEGC_ARM", msb_len=1)
+        print("Ambient Temp {} Deg C".format(value))
         return f"{value:3d}°C"
 
     def get_bat_stat(self):
@@ -113,4 +114,5 @@ class Fixture:
             return result
 
 fixture = Fixture()
-fixture.run()
+fixture.get_amb_temp()
+#fixture.run()
