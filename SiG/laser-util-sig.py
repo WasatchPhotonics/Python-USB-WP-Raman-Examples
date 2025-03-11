@@ -342,8 +342,8 @@ class Fixture(object):
         """
         if raw is None:
             raw = self.get_laser_thermistor_raw()
-
         try:
+            print("LASER Temp ADC raw {}".format(raw))
             degC = 0
             voltage    = 2.5 * raw / 4096
             resistance = 21450.0 * voltage / (2.5 - voltage) 
@@ -673,7 +673,9 @@ class Fixture(object):
 fixture = Fixture()
 if fixture.dev:
     try:
-        fixture.run()
+        temp = fixture.get_laser_thermistor_degC()
+        print("Laser Temp is {} deg C".format(temp))
+        # fixture.run()
     except Exception as ex:
         print(f"caught {ex}")
-    fixture.set_enable(False)
+    # fixture.set_enable(False)

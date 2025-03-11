@@ -51,7 +51,7 @@ def get_battery():
     return f"{perc:5.2f}% ({charging})"
 
 def get_firmware_version():
-    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 4, TIMEOUT_MS)
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xc0, 0, 0, 8, TIMEOUT_MS)
     return ".".join([str(d) for d in reversed(data)])
 
 def get_fpga_version():
@@ -88,8 +88,10 @@ report = { "Timestamp"                                 : datetime.now(),
            "GET_SYSTEM_CORE_CLOCK_RATE"                : get_uint(0xff, 0x70),
            "GET_IMG_SNSR_STATE_TRANS_TIMEOUT"          : get_uint(0xff, 0x72, lsb_len=2),
          }
+           
+print(get_firmware_version())
 
-for label, value in report.items():
-    print("%-40s: %s" % (label, value))
+# for label, value in report.items():
+#    print("%-40s: %s" % (label, value))
 
-print()
+quit()

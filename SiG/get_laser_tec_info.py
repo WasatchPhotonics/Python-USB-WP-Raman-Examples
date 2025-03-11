@@ -26,44 +26,60 @@ def get_uint(bRequest, wValue, wIndex=0, lsb_len=4):
     return value
 
 
-def get_tec_dac_state():
-    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x60, 0, 1, TIMEOUT_MS)
-    tecDACState = data[0]
-    if tecDACState == 0:
-       print("TEC DAC is Off")
-    else:
-       print("TEC DAC is On")
-    return tecDACState
+#def get_tec_dac_state():
+#    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x60, 0, 1, TIMEOUT_MS)
+#    tecDACState = data[0]
+#    if tecDACState == 0:
+#       print("TEC DAC is Off")
+#    else:
+#       print("TEC DAC is On")
+#    return tecDACState
 
 def get_tec_mode():
     data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x61, 0, 1, TIMEOUT_MS)
     tecMode= data[0]
-    print("TEC mode ", tecMode, " [0: Off, 1: On, 2: Auto, 3: Auto-On]")
+    print("TEC mode", tecMode, "[0: Off, 1: On, 2: Auto, 3: Auto-On]")
     return tecMode
 
 def get_tec_state():
-    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0x85, 0x00, 0, 1, TIMEOUT_MS)
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x60, 0, 1, TIMEOUT_MS)
     tecState = data[0]
-    print("TEC state is ", tecState)
+    # print("TEC state is ", tecState)
     if tecState == 0:
-       print("TEC is Off")
+       print("TEC is currently Off")
     else:
-       print("TEC is On")
+       print("TEC is currently On")
     return tecState
 
-def get_laser_state():
+def get_laser_activation_state():
     data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xe2, 0, 0, 1, TIMEOUT_MS)
     laserState = data[0]
     if laserState == 0:
-       print("LASER is Off")
+       print("LASER not activated")
     else:
-       print("LASER is On")
+       print("LASER activated")
     return laserState
 
-print()
+def get_laser_firing_state():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x0d, 0, 1, TIMEOUT_MS)
+    laserState = data[0]
+    if laserState == 0:
+       print("LASER is not currently firing")
+    else:
+       print("LASER is currently firing")
+    return laserState
+
+def get_tec_wd_tmo():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x7e, 0, 2, TIMEOUT_MS)
+    val = data[1]
+    val = val << 8
+    val += data[0]
+    print("TEC watchdog timeout is {} secs".format(val))
 
 
-get_laser_state()
-get_tec_state()
-get_tec_dac_state()
+get_laser_activation_state()
+get_laser_firing_state()
 get_tec_mode()
+get_tec_state()
+get_tec_wd_tmo()
+#get_tec_dac_state()
