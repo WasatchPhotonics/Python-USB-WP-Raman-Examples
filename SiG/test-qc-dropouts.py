@@ -28,6 +28,7 @@ class Fixture:
         parser.add_argument("--debug",                       help="Verbose logging", action="store_true")
         parser.add_argument("--count",             type=int, help="How many spectra to collect at each integration time", default=5)
         parser.add_argument("--pixels",            type=int, help="pixels", default=1952)
+        parser.add_argument("--loops",             type=int, help="how many times to change integration time", default=3)
         parser.add_argument("--start-integ-time",  type=int, help="first integration time (ms)", default=4000)
         parser.add_argument("--stop-integ-time",   type=int, help="second integration time (ms)", default=100)
         parser.add_argument("--sensor-timeout-ms", type=int, help="sensor timeout (ms)", default=0)
@@ -56,23 +57,33 @@ class Fixture:
         fpga_version = self.get_fpga_version()
         print(f"connected to spectrometer with FW {fw_version} and FPGA {fpga_version}")
 
+    def report_sensor_timeout(self):
+        ms = self.get_image_sensor_state_transition_timeout()
+        print(f"\nimage sensor state transition timeout is 0x{ms:04x} ({ms}ms)")
+
     def run(self):
 
         # configure sensor timeout
+        self.report_sensor_timeout()
         if self.args.sensor_timeout_ms > 0:
-            print(f"\nchanging sensor timeout to {self.args.sensor_timeout_ms}")
-            self.set_sensor_timeout(self.args.sensor_timeout_ms)
+            print(f"changing to {self.args.sensor_timeout_ms}")
+            self.set_image_sensor_state_transition_timeout(self.args.sensor_timeout_ms)
+            self.report_sensor_timeout()
 
-        # collect data at first integration time
-        self.take_spectra(self.args.start_integ_time)
+        loops = 0
+        while (loops < self.args.loops or self.args.loops == 0):
+            print(f"\n=== Loop {loops+1} of {self.args.loops} ===")
 
-        # collect data at second integration time
-        self.take_spectra(self.args.stop_integ_time)
+            self.take_spectra(self.args.start_integ_time)
+            self.take_spectra(self.args.stop_integ_time)
+
+            loops += 1
 
     def take_spectra(self, integ_time_ms):
 
         print(f"\nchanging integration time to {integ_time_ms}ms")
         self.set_integ_time(integ_time_ms)
+        self.report_sensor_timeout()
 
         for i in range(self.args.count):
 
@@ -97,7 +108,7 @@ class Fixture:
 
     def get_fpga_version(self):
         s = ""
-        result = self.get_cmd(0xb4, length=7)
+        result = self.get_cmd(0xb4, length=7, label="GET_FPGA_VERSION")
         if result is not None:
             for i in range(len(result)):
                 c = result[i]
@@ -105,7 +116,10 @@ class Fixture:
                     s += chr(c)
         return s
 
-    def set_sensor_timeout(self, ms):
+    def get_image_sensor_state_transition_timeout(self):
+        return self.get_cmd(0xff, 0x72, lsb_len=2, label="GET_IMG_SNSR_STATE_TRANS_TIMEOUT")
+
+    def set_image_sensor_state_transition_timeout(self, ms):
         self.send_cmd(0xff, 0x71, ms, "SET_IMG_SNSR_STATE_TRANS_TIMEOUT")
 
     def set_integ_time(self, ms):
