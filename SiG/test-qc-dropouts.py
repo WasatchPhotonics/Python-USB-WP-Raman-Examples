@@ -33,7 +33,7 @@ class Fixture:
         parser.add_argument("--loops",             type=int, help="how many times to change integration time", default=3)
         parser.add_argument("--start-integ-time",  type=int, help="first integration time (ms)", default=4000)
         parser.add_argument("--stop-integ-time",   type=int, help="second integration time (ms)", default=100)
-        parser.add_argument("--sensor-timeout-ms", type=int, help="sensor timeout (ms)", default=0)
+        parser.add_argument("--sensor-timeout-ms", type=int, help="sensor timeout (ms)")
         self.args = parser.parse_args()
 
         # grab the first enumerated XS
@@ -67,7 +67,7 @@ class Fixture:
 
         # configure sensor timeout
         self.report_sensor_timeout()
-        if self.args.sensor_timeout_ms > 0:
+        if self.args.sensor_timeout_ms is not None:
             print(f"changing to {self.args.sensor_timeout_ms}")
             self.set_image_sensor_state_transition_timeout(self.args.sensor_timeout_ms)
             self.report_sensor_timeout()
