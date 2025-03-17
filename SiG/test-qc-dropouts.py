@@ -8,6 +8,8 @@ import platform
 import usb.core
 import datetime
 import numpy as np
+import threading
+import time
 import os
 
 if platform.system() == "Darwin":
@@ -70,6 +72,8 @@ class Fixture:
             self.set_image_sensor_state_transition_timeout(self.args.sensor_timeout_ms)
             self.report_sensor_timeout()
 
+        bg = threading.Thread(target=self.bg_thread)
+        bg.start()
         loops = 0
         while (loops < self.args.loops or self.args.loops == 0):
             print(f"\n=== Loop {loops+1} of {self.args.loops} ===")
@@ -78,6 +82,16 @@ class Fixture:
             self.take_spectra(self.args.stop_integ_time)
 
             loops += 1
+
+
+    def bg_thread(self):
+        while (True):
+            print(f"checking adc")
+            adc = self.get_adc_raw()
+            print(f"checking battery")
+            battery = self.get_battery_charge()
+            print(f"adc raw {adc}; battery {battery}")
+            time.sleep(1)
 
     def take_spectra(self, integ_time_ms):
 
@@ -118,6 +132,12 @@ class Fixture:
 
     def get_image_sensor_state_transition_timeout(self):
         return self.get_cmd(0xff, 0x72, lsb_len=2, label="GET_IMG_SNSR_STATE_TRANS_TIMEOUT")
+
+    def get_battery_charge(self):
+        return self.get_cmd(0xff, 0x13, lsb_len=3, label="GET_BATTERY_STATE")
+        
+    def get_adc_raw(self):
+        return self.get_cmd(0xd5, msb_len=2, label="GET_ADC_RAW")
 
     def set_image_sensor_state_transition_timeout(self, ms):
         self.send_cmd(0xff, 0x71, ms, "SET_IMG_SNSR_STATE_TRANS_TIMEOUT")
