@@ -34,6 +34,8 @@ class Fixture:
         parser.add_argument("--start-integ-time",  type=int, help="first integration time (ms)", default=4000)
         parser.add_argument("--stop-integ-time",   type=int, help="second integration time (ms)", default=100)
         parser.add_argument("--sensor-timeout-ms", type=int, help="sensor timeout (ms)")
+        parser.add_argument("--threaded",                    help="include a background thread", action="store_true")
+        parser.add_argument("--mutex",                       help="synchronize background thread", action="store_true")
         self.args = parser.parse_args()
 
         # grab the first enumerated XS
@@ -59,21 +61,45 @@ class Fixture:
         fpga_version = self.get_fpga_version()
         print(f"connected to spectrometer with FW {fw_version} and FPGA {fpga_version}")
 
+        # kick-off background thread to poll ADC and battery
+        self.lock = None
+        if self.args.threaded:
+            self.lock = threading.Lock()
+
+            print("kicking-off background loop...")
+            bg = threading.Thread(target=self.bg_thread)
+            bg.start()
+            print(f"letting background loop stabilize...")
+            time.sleep(3)
+
     def report_sensor_timeout(self):
         ms = self.get_image_sensor_state_transition_timeout()
         print(f"\nimage sensor state transition timeout is 0x{ms:04x} ({ms}ms)")
 
+    def LOCK(self, label):
+        if self.args.mutex:
+            print(f"\n{datetime.datetime.now()} acquiring mutex for {label}...")
+            self.lock.acquire()
+            print(f"{datetime.datetime.now()} mutex acquired for {label}!")
+            self.holder = label
+
+    def UNLOCK(self):
+        if self.args.mutex:
+            print(f"{datetime.datetime.now()} releasing mutex from {self.holder}...")
+            self.holder = None
+            self.lock.release()
+
     def run(self):
 
         # configure sensor timeout
+        self.LOCK("configure sensor timeout")
         self.report_sensor_timeout()
         if self.args.sensor_timeout_ms is not None:
             print(f"changing to {self.args.sensor_timeout_ms}")
             self.set_image_sensor_state_transition_timeout(self.args.sensor_timeout_ms)
             self.report_sensor_timeout()
+        self.UNLOCK()
 
-        bg = threading.Thread(target=self.bg_thread)
-        bg.start()
         loops = 0
         while (loops < self.args.loops or self.args.loops == 0):
             print(f"\n=== Loop {loops+1} of {self.args.loops} ===")
@@ -83,33 +109,39 @@ class Fixture:
 
             loops += 1
 
-
     def bg_thread(self):
-        while (True):
-            print(f"checking adc")
+        while True:
+            self.LOCK("polling thread")
+            print(f"{datetime.datetime.now()} checking laser temperature (raw ADC)")
             adc = self.get_adc_raw()
-            print(f"checking battery")
-            battery = self.get_battery_charge()
-            print(f"adc raw {adc}; battery {battery}")
+
+            print(f"{datetime.datetime.now()} checking battery")
+            battery = self.get_battery_state()
+            self.UNLOCK()
+
+            print(f"{datetime.datetime.now()} adc raw %s; battery %s" % (adc, battery))
             time.sleep(1)
 
     def take_spectra(self, integ_time_ms):
 
+        self.LOCK("changing integration time")
         print(f"\nchanging integration time to {integ_time_ms}ms")
         self.set_integ_time(integ_time_ms)
         self.report_sensor_timeout()
+        self.UNLOCK()
 
         for i in range(self.args.count):
 
             start_time = datetime.datetime.now()
-            print(f"{start_time} loop {i+1}/{self.args.count}...", end='')
+            print(f"{start_time} loop {i+1}/{self.args.count} sending ACQUIRE")
 
             # take dark throwaway
             spectrum = self.get_spectrum()
 
             # print stats
-            elapsed_ms = int((datetime.datetime.now() - start_time).total_seconds() * 1000)
-            print(f"took {elapsed_ms}ms at integ_time {integ_time_ms} yielding mean {spectrum.mean():.2f}, max {spectrum.max():.2f}")
+            end_time = datetime.datetime.now()
+            elapsed_ms = int((end_time - start_time).total_seconds() * 1000)
+            print(f"{end_time} took {elapsed_ms}ms at integ_time {integ_time_ms} yielding mean {spectrum.mean():.2f}, max {spectrum.max():.2f}")
 
     ############################################################################
     # opcodes
@@ -133,11 +165,16 @@ class Fixture:
     def get_image_sensor_state_transition_timeout(self):
         return self.get_cmd(0xff, 0x72, lsb_len=2, label="GET_IMG_SNSR_STATE_TRANS_TIMEOUT")
 
-    def get_battery_charge(self):
-        return self.get_cmd(0xff, 0x13, lsb_len=3, label="GET_BATTERY_STATE")
-        
+    def get_battery_state(self):
+        data = self.get_cmd(0xff, 0x13, msb_len=3, label="GET_BATTERY_STATE")
+        charging = (0 != (data & 0xff))
+        lsb = (data >> 16) & 0xff
+        msb = (data >>  8) & 0xff
+        perc = msb + (1.0 * lsb / 256.0)
+        return f"battery_perc: {perc:.2f}%% ({'charging' if charging else 'discharging'})"
+
     def get_adc_raw(self):
-        return self.get_cmd(0xd5, msb_len=2, label="GET_ADC_RAW")
+        return self.get_cmd(0xd5, length=2, label="GET_ADC_RAW")
 
     def set_image_sensor_state_transition_timeout(self, ms):
         self.send_cmd(0xff, 0x71, ms, "SET_IMG_SNSR_STATE_TRANS_TIMEOUT")
@@ -149,7 +186,9 @@ class Fixture:
     def get_spectrum(self):
         timeout_ms = TIMEOUT_MS + 2 * (self.args.start_integ_time + self.args.stop_integ_time)
 
+        self.LOCK("sending ACQUIRE")
         self.send_cmd(0xad, 0) # SW trigger
+        self.UNLOCK()
 
         bytes_to_read = self.args.pixels * 2
         data = self.dev.read(0x82, bytes_to_read, timeout=timeout_ms)
