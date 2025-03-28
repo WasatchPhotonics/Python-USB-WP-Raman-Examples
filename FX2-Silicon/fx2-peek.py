@@ -16,7 +16,7 @@ class Fixture():
 
         progname = sys.argv.pop(0)
         self.address = int(sys.argv.pop(0), 16)
-        self.length = int(sys.argv.pop(0))
+        self.length = 1 # int(sys.argv.pop(0))
 
         # find the FIRST connected spectrometer of the given PID
         self.pid = 0x1000
@@ -26,7 +26,7 @@ class Fixture():
             sys.exit(1)
 
     def run(self):
-        data = self.get_cmd(0x91, value = self.address, index = self.length, length = self.length)
+        data = self.get_cmd(0xe9, value = self.address, index = self.length, length = self.length)
         if self.address == 0x12:
            ctrl_reg_val = data[1]
            ctrl_reg_val <<= 8
