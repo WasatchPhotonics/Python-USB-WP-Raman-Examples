@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import traceback
+import platform
 import argparse
 import random
 import struct
@@ -13,6 +14,11 @@ from time import sleep
 import usb.core
 
 import EEPROMFields
+
+if platform.system() == "Darwin":
+    import usb.backend.libusb1 as backend
+else:
+    import usb.backend.libusb0 as backend
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -52,7 +58,7 @@ class Fixture(object):
             self.args.dump = True
 
         for pid in [0x1000, 0x2000, 0x4000]:
-            self.dev = usb.core.find(idVendor=0x24aa, idProduct=pid)
+            self.dev = usb.core.find(idVendor=0x24aa, idProduct=pid, backend=backend.get_backend())
             if self.dev:
                 self.pid = pid
                 break
@@ -257,7 +263,9 @@ class Fixture(object):
         print("%s EEPROM:" % state)
         for page in range(len(self.eeprom_pages)):
             print(f"  Page {page}: ", end='')
-            print(" ".join([f"{i:02x}" for i in self.eeprom_pages[page]]))
+            print(" ".join([f"{i:02x}" for i in self.eeprom_pages[page][:32]]))
+            print(f"          ", end='')
+            print(" ".join([f"{i:02x}" for i in self.eeprom_pages[page][32:]]))
 
     def write_eeprom(self):
         print("Writing EEPROM")
@@ -285,8 +293,6 @@ class Fixture(object):
                 continue
 
             name, value = tok
-            name = name.lower()
-
             if name in self.eeprom_fields:
                 field = self.eeprom_fields[name]
                 self.pack(field.pos, field.data_type, value)
@@ -458,6 +464,8 @@ class Fixture(object):
             value = int(value)
         elif data_type.lower() in ["f", "d"]:
             value = float(value)
+        elif data_type.lower() in ["?"]:
+            value = 1 if value.lower() == "true" else 0
 
         # don't try to write negatives to unsigned types
         if data_type in ["H", "I"] and value < 0:
