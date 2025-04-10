@@ -26,11 +26,6 @@ MARKER = 0xffff
 CLAMP  = 0xfffe
 
 class Fixture:
-    """
-    0xeb = AREA_SCAN_ENABLE
-    0xa6 = LINE_COUNT
-    0xa8 = LINE_INTERVAL
-    """
 
     def __init__(self):
         self.extra = []
@@ -47,6 +42,8 @@ class Fixture:
         parser.add_argument("--debug",               action="store_true", help="debug output")
         parser.add_argument("--integration-time-ms", type=int,            help="set integration time", default=100)
         parser.add_argument("--frames",              type=int,            help="how many frames to collect (0=infinite)", default=5)
+        parser.add_argument("--line-count",          type=int,            help="set line count")
+        parser.add_argument("--line-interval",       type=int,            help="set line interval")
         parser.add_argument("--plot",                action="store_true", help="graph frames")
         parser.add_argument("--save",                action="store_true", help="save frames as PNG")
         return parser.parse_args()
@@ -97,6 +94,14 @@ class Fixture:
         self.debug(f"area scan enable = {flag}")
         self.dev.ctrl_transfer(H2D, 0xeb, 1 if flag else 0, 0, Z, TIMEOUT) 
 
+    def set_area_scan_line_count(self, n):
+        self.debug(f"setting line count to {n}")
+        self.dev.ctrl_transfer(H2D, 0xa6, n, 0, Z, TIMEOUT) 
+
+    def set_area_scan_line_interval(self, n):
+        self.debug(f"setting line interval to {n}")
+        self.dev.ctrl_transfer(H2D, 0xa8, n, 0, Z, TIMEOUT) 
+
     def eat_throwaways(self):
         count = 0
         try:
@@ -136,6 +141,12 @@ class Fixture:
     def run(self):
         self.set_integration_time_ms(self.args.integration_time_ms)
 
+        if self.args.line_count is not None:
+            self.set_area_scan_line_count(self.args.line_count)
+
+        if self.args.line_interval is not None:
+            self.set_area_scan_line_interval(self.args.line_interval)
+
         self.debug("eating initial throwawys (no ACQUIRE)")
         self.eat_throwaways()
 
@@ -143,49 +154,52 @@ class Fixture:
         self.send_trigger()
         self.eat_throwaways()
 
-        self.debug("enabling area scan, then eating throwaways")
-        self.set_area_scan_enable(True)
-        self.eat_throwaways()
+        try:
+            self.debug("enabling area scan, then eating throwaways")
+            self.set_area_scan_enable(True)
+            self.eat_throwaways()
 
-        while self.frame_count < self.args.frames or 0 == self.args.frames:
-            # request a frame
-            self.send_trigger()
+            while self.frame_count < self.args.frames or 0 == self.args.frames:
+                # request a frame
+                self.send_trigger()
 
-            for line in range(LINES):
-                prefix = f"line {self.line_count}, frame {self.frame_count}, total {self.total_line_count}"
-                spectrum = self.get_spectrum()
+                for line in range(LINES):
+                    prefix = f"line {self.line_count}, frame {self.frame_count}, total {self.total_line_count}"
+                    spectrum = self.get_spectrum()
 
-                # first pixel is start-of-line marker
-                if spectrum[0] != MARKER:
-                    print(f"{prefix}: WARNING: first pixel expected 0x{MARKER:04x}, found 0x{spectrum[0]:04x}")
-                spectrum[0] = spectrum[2] # stomp
+                    # first pixel is start-of-line marker
+                    if spectrum[0] != MARKER:
+                        print(f"{prefix}: WARNING: first pixel expected 0x{MARKER:04x}, found 0x{spectrum[0]:04x}")
+                    spectrum[0] = spectrum[2] # stomp
 
-                # verify rest of line is clamped to 0xfffe
-                for i, intensity in enumerate(spectrum):
-                    if i > 1 and spectrum[i] > CLAMP:
-                        print(f"{prefix}: WARNING: pixel {i:4d} value 0x{spectrum[i]:04x} exceeds clamp 0x{CLAMP:04x}")
+                    # verify rest of line is clamped to 0xfffe
+                    for i, intensity in enumerate(spectrum):
+                        if i > 1 and spectrum[i] > CLAMP:
+                            print(f"{prefix}: WARNING: pixel {i:4d} value 0x{spectrum[i]:04x} exceeds clamp 0x{CLAMP:04x}")
 
-                # second pixel is line index
-                line_index = spectrum[1]
-                if line_index >= LINES:
-                    print(f"{prefix}: WARNING: line_index {line_index} exceeds frame limit")
-                spectrum[1] = spectrum[2] # stomp
+                    # second pixel is line index
+                    line_index = spectrum[1]
+                    if line_index >= LINES:
+                        print(f"{prefix}: WARNING: line_index {line_index} exceeds frame limit")
+                    spectrum[1] = spectrum[2] # stomp
 
-                # store line in image
-                self.frame[line_index] = spectrum
-                self.debug(f"{prefix}: stored line {line_index}: {spectrum[:5]}")
-                
-                # process completed frame
-                self.line_count += 1
-                if line_index + 1 == LINES:
-                    self.debug(f"{prefix}: displaying frame {self.frame_count}")
-                    self.process_frame()
+                    # store line in image
+                    self.frame[line_index] = spectrum
+                    self.debug(f"{prefix}: stored line {line_index}: {spectrum[:5]}")
+                    
+                    # process completed frame
+                    self.line_count += 1
+                    if line_index + 1 == LINES:
+                        self.debug(f"{prefix}: displaying frame {self.frame_count}")
+                        self.process_frame()
 
-                    # initialize for next frame
-                    self.line_count = 0
-                    self.frame_count += 1
-                    self.debug(f"\nreading frame {self.frame_count}")
-
+                        # initialize for next frame
+                        self.line_count = 0
+                        self.frame_count += 1
+                        self.debug(f"\nreading frame {self.frame_count}")
+        except:
+            self.set_area_scan_enable(False)
+            
 if __name__ == "__main__":
     fixture = Fixture()
     if not fixture.connect():
