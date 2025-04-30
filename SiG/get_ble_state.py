@@ -55,43 +55,20 @@ def get_firmware_version():
     return ".".join([str(d) for d in reversed(data)])
 
 def get_fpga_version():
-    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xb4, 0, 0, 7, TIMEOUT_MS)
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xb4, 0, 0, 1, TIMEOUT_MS)
+    print(data)
+    #data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xea, 0, 0, 7, TIMEOUT_MS)
+    #data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xe9, 0, 0, 7, TIMEOUT_MS)
     return "".join([chr(c) for c in data])
 
-report = { "Timestamp"                                 : datetime.now(),
-           "Battery State"                             : get_battery(),
-           "Microcontroller FW Version"                : get_firmware_version(),
-           "FPGA FW Version"                           : get_fpga_version(),
-           "BLE FW Version"                            : get_string(0xff, 0x2d),
-           "BLE IC Partnumber"                         : get_string(0xff, 0x2e),
-           "BLE Radio State"                           : get_uint(0xff, 0x2f, lsb_len=1),
-           "GET_BLE_INTF_MSG_RX_CNT"                   : get_uint(0xff, 0x38),
-           "GET_BLE_INTF_MSG_TX_CNT"                   : get_uint(0xff, 0x39),
-           "GET_BLE_INTF_KA_REQ_TX_CNT"                : get_uint(0xff, 0x40),
-           "GET_BLE_INTF_KA_RESP_RX_CNT"               : get_uint(0xff, 0x41),
-           "GET_BLE_INTF_BATT_INFO_REQ_RX_CNT"         : get_uint(0xff, 0x42),
-           "GET_BLE_INTF_BATT_INFO_TX_CNT"             : get_uint(0xff, 0x43),
-           "GET_BLE_INTF_UART_RESET_CNT"               : get_uint(0xff, 0x44),
-           "GET_BLE_INTF_TOTAL_KEEP_ALIVE_TMO_CNT"     : get_uint(0xff, 0x45),
-           "GET_BLE_INTF_B2B_KEEP_ALIVE_TMO_CNT"       : get_uint(0xff, 0x46),
-           "GET_BLE_INTF_FPGA_REG_RD_REQ_RX_CNT"       : get_uint(0xff, 0x47),
-           "GET_BLE_INTF_FPGA_REG_WR_REQ_RX_CNT"       : get_uint(0xff, 0x48),
-           "GET_BLE_INTF_FPGA_REG_DATA_TX_CNT"         : get_uint(0xff, 0x49),
-           "GET_BLE_INTF_EEPROM_PAGE_RD_REQ_RX_CNT"    : get_uint(0xff, 0x4a),
-           "GET_BLE_INTF_EEPROM_PAGE_DATA_TX_CNT"      : get_uint(0xff, 0x4b),
-           "GET_BLE_INTF_BLE_FW_INFO_RX_CNT"           : get_uint(0xff, 0x4c),
-           "GET_BLE_INTF_BLE_PART_NR_INFO_RX_CNT"      : get_uint(0xff, 0x4d),
-           "GET_BLE_INTF_RADIO_STATE_UPD_RX_CNT"       : get_uint(0xff, 0x4e),
-           "GET_BLE_INTF_ENTER_DFU_MODE_REQ_TX_CNT"    : get_uint(0xff, 0x4f),
-           "GET_TEC_MODE"                              : get_uint(0xff, 0x61, lsb_len=1),
-           "GET_FPGA_I2C_ACCESS_ERR_CNT"               : get_uint(0xff, 0x65),
-           "GET_SYSTEM_CORE_CLOCK_RATE"                : get_uint(0xff, 0x70),
-           "GET_IMG_SNSR_STATE_TRANS_TIMEOUT"          : get_uint(0xff, 0x72, lsb_len=2),
-         }
-           
-print(get_firmware_version())
+#data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xf8, 0, 0, 1, TIMEOUT_MS)
+#print("FX2 EEPROM I2C Addr:", data)
 
-# for label, value in report.items():
-#    print("%-40s: %s" % (label, value))
+#data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xf9, 0, 0, 1, TIMEOUT_MS)
+#print("FX2 EEPROM Dual Byte Addr Support:", data)
+
+print(get_fpga_version())
+
+
 
 quit()

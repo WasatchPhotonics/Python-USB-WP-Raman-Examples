@@ -98,9 +98,11 @@ def send_acq_auto_raman_req(maxMS,
     buff.append(byte)
     
     # dropFactor (Encoded) [2]
-    byte = dropFactor & 0xff
+    # Byte 0: Integer part
+    # Byte 1: Decimal part (/256)
+    byte = 0
     buff.append(byte)
-    byte = ((dropFactor >> 8) & 0xff)
+    byte = 128
     buff.append(byte)
     
     # saturation [2]
@@ -143,16 +145,16 @@ def send_acq_auto_raman_req(maxMS,
 
 send_acq_auto_raman_req(
     maxMS        = 12345,       
-    startIntegMS = 321,         
-    startGainDB  = 2,           
-    maxIntegMS   = 567,         
-    minIntegMS   = 14,          
+    startIntegMS = 10,         
+    startGainDB  = 1,           
+    maxIntegMS   = 1000,         
+    minIntegMS   = 10,          
     maxGainDB    = 22,          
     minGainDB    = 1,           
-    tgtCounts    = 47890,       
-    maxCounts    = 51234,       
-    minCounts    = 42876,       
-    maxFactor    = 6,           
-    dropFactor   = 400,         
+    tgtCounts    = 55000,       
+    maxCounts    = 56000,       
+    minCounts    = 50000,       
+    maxFactor    = 2,           
+    dropFactor   = 4,         
     saturation   = 61234,       
     maxAvg       = 34)

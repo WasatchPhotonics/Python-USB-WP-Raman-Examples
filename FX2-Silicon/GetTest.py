@@ -58,7 +58,30 @@ def Get_Val_u16_1(opCode, str):
   val <<= 8
   val |= data[0]
   print(str, "Val:", val)
+
+
+data = Get_Raw_2(0xff, 0x38)
+pixelCnt = data[1]
+pixelCnt <<= 8
+pixelCnt |= data[0]
+print("Pixels Per Line Cnt :", pixelCnt)
+
+
+lineCnt, dump = Get_Value_2(0xff, 0x39, 1)
+print("Line Cnt :", lineCnt)
   
+data = Get_Raw_2(0xff, 0x3a)
+areaScanEP2TotIntExpCnt = data[1]
+areaScanEP2TotIntExpCnt <<= 8
+areaScanEP2TotIntExpCnt |= data[0]
+print("Area Scan EP2 Tot Exp Int Cnt :", areaScanEP2TotIntExpCnt)
+
+data = Get_Raw_2(0xff, 0x3b)
+areaScanEP6TotIntExpCnt = data[1]
+areaScanEP6TotIntExpCnt <<= 8
+areaScanEP6TotIntExpCnt |= data[0]
+print("Area Scan EP6 Tot Exp Int Cnt :", areaScanEP6TotIntExpCnt)
+
 
 data = Get_Raw_2(0xff, 0x30)
 ep2IntCnt = data[1]

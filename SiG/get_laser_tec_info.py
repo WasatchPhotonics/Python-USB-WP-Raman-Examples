@@ -79,7 +79,7 @@ def get_tec_wd_tmo():
 
 get_laser_activation_state()
 get_laser_firing_state()
-get_tec_mode()
+#get_tec_mode()
 get_tec_state()
 get_tec_wd_tmo()
 #get_tec_dac_state()
