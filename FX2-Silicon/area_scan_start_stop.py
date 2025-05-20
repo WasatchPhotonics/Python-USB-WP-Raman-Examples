@@ -18,4 +18,6 @@ def Test_Set(SetCommand, value, RetLen):
 
 	dev.ctrl_transfer(HOST_TO_DEVICE, SetCommand, lsw, msw, ZZ, TIMEOUT_MS)
 			
+#print("Area Scan Dis, Test_Set(0xeb, 0, 1)) 
+
 print("Area Scan Ena", Test_Set(0xeb, 1, 1)) 

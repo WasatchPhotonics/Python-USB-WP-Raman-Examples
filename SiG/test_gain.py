@@ -124,4 +124,7 @@ class TestFixture:
 ################################################################################
 
 fixture = TestFixture()
-fixture.run()
+fixture.get_detector_gain()
+fixture.set_detector_gain(10.0)
+fixture.get_detector_gain()
+#fixture.run()

@@ -28,7 +28,7 @@ class Fixture(object):
             print("No spectrometers found with PID 0x%04x" % self.pid)
 
     def send_cmd(self, cmd, value, index=0, buf=None):
-        #print("send_cmd: request %02x, cmd %02x, value %04x, index %04x, buf %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
+        print("send_cmd: request %02x, cmd %02x, value %04x, index %04x, buf %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_buf(self, cmd, value=0, index=0, length=64):
@@ -39,10 +39,16 @@ class Fixture(object):
     def read_eeprom(self):
         print("\nReading EEPROM:")
         self.eeprom_pages = []
-        for page in range(MAX_PAGES):
-            buf = self.get_buf(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
-            self.eeprom_pages.append(buf)
-            print("  Page %d: %s" % (page, buf))
+        len = 39
+        buf = self.get_buf(cmd=0xa2, value=0x3c00, index=len, length=len)
+        data_hex = " ".join( [ f"{v:02x}" for v in buf] )
+        print(data_hex)
+
+        # print(buf)
+        # for page in range(MAX_PAGES):
+        #     buf = self.get_buf(cmd=0xa2, value=0x01, index=page, length=PAGE_SIZE)
+        #     self.eeprom_pages.append(buf)
+        #     print("  Page %d: %s" % (page, buf))
 
     def parse_string(self, page, start, length):
         buf = self.eeprom_pages[page]
@@ -91,7 +97,7 @@ class Fixture(object):
             try:
                 self.read_eeprom()
                 self.dump_eeprom()
-
+                return
                 new_user_text = input("\nEnter replacement user_text (Ctrl-C to exit): ")
                 new_product_config = input("\nEnter product configuration (Ctrl-C to exit): ")
                 self.update_buffers(user_text=new_user_text, product_config=new_product_config)

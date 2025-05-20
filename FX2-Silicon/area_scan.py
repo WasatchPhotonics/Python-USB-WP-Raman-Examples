@@ -22,7 +22,7 @@ MAX_SEC = 1000
 INTEG_MS = 100
 # select pixel count
 PixelCount=1024
-LineCount=2
+LineCount=70
 
 print("setting integration time to %d ms" % INTEG_MS)
 dev.ctrl_transfer(H2D, 0xb2, INTEG_MS, 0, Z, TIMEOUT) 
@@ -43,9 +43,9 @@ while (1):
     while bytesReadTot < total_bytes_needed:
         bytes_remaining = total_bytes_needed - bytesReadTot
         print("rem", bytes_remaining)
-        #print(f"requesting {bytes_remaining} bytes with timeout {TIMEOUT}ms")
+        print(f"requesting {bytes_remaining} bytes with timeout {TIMEOUT}ms")
         latest_data = dev.read(0x82, bytes_remaining, timeout=TIMEOUT)
-        #print("read %d bytes (%d requested)" % (len(latest_data), bytes_remaining))
+        print("read %d bytes (%d requested)" % (len(latest_data), bytes_remaining))
         
         cumulative_data.extend(latest_data) 
         # bytesReadTot = len(cumulative_data)
@@ -54,26 +54,7 @@ while (1):
 
         print("tot read", bytesReadTot)
 
-        #lineCnt = int(bytesReadTot/2048)
-        #if lineCnt > prevLineCnt:
-        #   offset = prevLineCnt*2048
-        #   print("Disp line info", bytesReadTot, offset, prevLineCnt, lineCnt)
-        #   for i in range(lineCnt - prevLineCnt):
-        #     lsb0 = cumulative_data[offset]
-        #     msb0 = cumulative_data[offset + 1]
-        #     intensity0 = lsb0 | (msb0 << 8)
-        #
-        #             lsb1 = cumulative_data[offset + 2]
-        #     msb1 = cumulative_data[offset + 3]
-        #     intensity1 = lsb1 | (msb1 << 8)
-        # 
-        #     print(offset, ":", intensity0, "/", intensity1)
-        #     offset += 2048
-        #   prevLineCnt = lineCnt
-           
-
     print("read cumulative %d bytes" % len(cumulative_data))
-    #print("%d" % len(cumulative_data))
 
     # marshall bytes back into uint16 pixels
     spectrum = []
@@ -89,17 +70,7 @@ while (1):
         
         print(offset, ":", intensity0, "/", intensity1)
 
-        offset += 2048
+        offset += (PixelCount * 2)
 
-
-    #x_axis = []
-    #for i in range(1024):
-    #  x_axis.append(i)
-    # print("%4d %s: read spectrum of %d pixels: %s .. %s" % (count, datetime.datetime.now(), len(spectrum), spectrum[0:5], spectrum[-6:-1]))
-
-    # if count == LineCount:
-    # plt.plot(x_axis, spectrum)
-    # plt.show()
-    
     break
 
