@@ -44,7 +44,8 @@ Troubleshooting
     - You may need to plug the FT232H USB cable in before connecting 12V to the 
       spectrometer.
     - If the script seems to "freeze" at startup, make sure you're setting your 
-      READY/TRIGGER pins correctly, both on the FT232H and cmd-line args
+      READY/TRIGGER pins correctly, both on the FT232H and cmd-line args. I.e.,
+      CC's adapter seemed built for:  --trigger-pin c0 --ready-pin c1 
 
 Deprecated Features
     Area Scan, Horizontal ROI, Multiple ROI, Desmile, Black Level, Pixel Mode and
@@ -116,7 +117,7 @@ except FtdiError as ex:
 #                                                                              #
 ################################################################################
 
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 READ_RESPONSE_OVERHEAD  = 5 # <, LEN_MSB, LEN_LSB, CRC, >  # does NOT include ADDR
 WRITE_RESPONSE_OVERHEAD = 2 # <, >
 READY_POLL_LEN = 2          # 1 seems to work
@@ -162,8 +163,8 @@ def parseArgs(argv):
         epilog=globals()['__doc__'],
         formatter_class=CustomFormatter)
 
-    parser.add_argument("--ready-pin",           type=str,   default="D5",         help="FT232H pin for DATA_READY")
-    parser.add_argument("--trigger-pin",         type=str,   default="D6",         help="FT232H pin for TRIGGER")
+    parser.add_argument("--ready-pin",           type=str,   default="C1",         help="FT232H pin for DATA_READY")
+    parser.add_argument("--trigger-pin",         type=str,   default="C0",         help="FT232H pin for TRIGGER")
     parser.add_argument("--baud-mhz",            type=int,   default=10,           help="baud rate in MHz")
     parser.add_argument("--integration-time-ms", type=int,   default=3,            help="startup integration time in ms")
     parser.add_argument("--gain-db",             type=int,   default=24,           help="startup gain in INTEGRAL dB (24 sent as FunkyFloat 0x1800)")
@@ -200,9 +201,14 @@ def parseArgs(argv):
 
     return args
 
-def debug(msg):
+def debug(msg, lf=True, ts=True):
     if args.debug:
-        print(f"{timestamp()} DEBUG: {msg}")
+        if ts:
+            msg = f"{timestamp()} DEBUG: {msg}"
+        if lf:
+            print(msg)
+        else:
+            print(msg, end='')
 
 ## format a list or bytearray as "[ 0x00, 0x0a, 0xff ]"
 def toHex(values):
@@ -377,12 +383,12 @@ def fIntValidate(input):
 def flushInputBuffer(ready, spi):
     count = 0
     junk = bytearray(READY_POLL_LEN)
-    # debug("flushing input buffer...")
+    debug("flushing input buffer...", lf=False)
     while ready.value:
         spi.readinto(junk)
         count += 1
-    if count > 0:
-        debug(f"flushed {count} bytes from input buffer")
+        debug(".", lf=False, ts=False)
+    debug(f"flushed {count} bytes from input buffer")
 
 def waitForDataReady(ready):
     # debug("waiting for data ready...")
@@ -801,12 +807,14 @@ class cWinMain(tk.Tk):
             self.savedSpectra[basename] = spectrum
 
             if to_disk:
-                x = self.getXAxis()
                 self.makeDataDir()
                 pathname = os.path.join(DATA_DIR, f"{basename}.csv")
                 with open(pathname, "w") as outfile:
-                    for i in range(len(spectrum)):
-                        outfile.write(f"{x[i]:0.2f}, {spectrum[i]}\n")
+                    outfile.write("pixel, wavelength, wavenumber, intensity\n")
+                    for px in range(len(spectrum)):
+                        nm = 0 if self.wavelengths is None else self.wavelengths[px]
+                        cm = 0 if self.wavenumbers is None else self.wavenumbers[px]
+                        outfile.write(f"{px}, {nm:0.2f}, {cm:0.2f}, {spectrum[px]}\n")
                 print(f"saved {pathname}")
 
     def take_dark(self):
@@ -894,7 +902,7 @@ class cWinMain(tk.Tk):
     ## @todo probably faster if we used set_ydata()
     def graphSpectrum(self, y, label="live"):
         x = self.getXAxis()
-        self.graph.plot(x, y, linewidth=0.5, label=label, marker='.')
+        self.graph.plot(x, y, linewidth=0.5, label=label)
         self.update_axes()
         self.graph.legend()
 
