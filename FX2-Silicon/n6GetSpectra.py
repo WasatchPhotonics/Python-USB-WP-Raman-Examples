@@ -61,15 +61,15 @@ while (1):  # datetime.datetime.now() - start_time).total_seconds() < MAX_SEC:
     print("reading data from EP 0x82 .....\n")
 
     ts0 = time.time()
-    print("TS0:", ts0)
+    print("TS0: {:0.3f}".format(ts0))
     cumulative_data = []
     total_bytes_needed = PixelCount*2 
     tot_read = 0
     while len(cumulative_data) < total_bytes_needed:
         bytes_remaining = total_bytes_needed - len(cumulative_data)
         read_cnt = bytes_remaining
-        if bytes_remaining > 512:
-           read_cnt = 512
+        if bytes_remaining > 1024:
+           read_cnt = 1024
 
         # print(f"requesting {read_cnt} bytes with timeout {TIMEOUT}ms")
         latest_data = []
@@ -77,7 +77,7 @@ while (1):  # datetime.datetime.now() - start_time).total_seconds() < MAX_SEC:
         if firstSegRcvd == 0:
             print("first seg sz rcvd", len(latest_data))
             ts1 = time.time()
-            print("TS1:", ts1)
+            print("TS1: {:0.3f}".format(ts1))
             firstSegRcvd = 1
         # print("read %d bytes (%d requested)" % (len(latest_data), bytes_remaining))
         tot_read += len(latest_data)
@@ -89,11 +89,15 @@ while (1):  # datetime.datetime.now() - start_time).total_seconds() < MAX_SEC:
     ts2 = time.time()
     #print("TS0:", ts0)
     #print("TS1:", ts1)
-    print("TS2:", ts2)
-    print("TS1-TS0 =", ts1 - ts0)
-    print("TS2-TS1 =", ts2 - ts1)
-    print("TS2-TS0 =", ts2 - ts0)
-    
+    # print("TS2:", ts2)
+    # print("TS1-TS0 =", ts1 - ts0)
+    # print("TS2-TS1 =", ts2 - ts1)
+    print("TS2-TS0 = {:.3f} secs ".format(ts2 - ts0))
+    data_rate = len(cumulative_data) * 8
+    data_rate /= (ts2 - ts0)
+    data_rate /= 1000000
+    print("Throughput {:.3f} mbps".format(data_rate))
+
     # print("read cumulative %d bytes" % len(cumulative_data))
 
     # marshall bytes back into uint16 pixels
