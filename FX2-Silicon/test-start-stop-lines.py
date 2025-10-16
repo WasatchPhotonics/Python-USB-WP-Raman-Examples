@@ -62,10 +62,10 @@ class Fixture:
     def get_spectrum(self):
         self.dev.ctrl_transfer(H2D, 0xad, 0, 0, Z, TIMEOUT)
         if self.args.pixels == 1024:
-            data = self.dev.read(0x82, self.args.pixels * 2)
+            data = self.dev.read(0x82, self.args.pixels * 2, TIMEOUT)
         elif self.args.pixels == 2048:
-            data = self.dev.read(0x82, self.args.pixels )
-            data.extend(self.dev.read(0x86, self.args.pixels))
+            data = self.dev.read(0x82, self.args.pixels, TIMEOUT)
+            data.extend(self.dev.read(0x86, self.args.pixels, TIMEOUT))
         else:
             raise Exception("invalid pixels {self.args.pixels}")
 
