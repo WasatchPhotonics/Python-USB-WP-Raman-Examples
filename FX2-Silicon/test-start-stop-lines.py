@@ -25,6 +25,8 @@ class Fixture:
         parser.add_argument("--stop-line", type=int)
         self.args = parser.parse_args()
 
+        print(f"connected to VID 0x{self.dev.idVendor:04x}, PID 0x{self.dev.idProduct:04x} with firmware {self.get_firmware_rev()} and FPGA {self.get_fpga_rev()}")
+
         if self.args.start_line is not None:
             self.set_start_line(self.args.start_line)
         if self.args.stop_line is not None:
@@ -44,6 +46,14 @@ class Fixture:
     def set_stop_line(self, stop):
         print(f"setting stop line to {stop}")
         self.i2c_write(0x2A, [stop])
+
+    def get_firmware_rev(self):
+        data = self.dev.ctrl_transfer(D2H, 0xc0, 0, 0, 4, None)
+        return ".".join(reversed([str(int(x)) for x in data]))
+
+    def get_fpga_rev(self):
+        data = self.dev.ctrl_transfer(D2H, 0xb4, 0, 0, 7, None)
+        return "".join(chr(x) for x in data)
 
     def set_integration_time_ms(self, ms):
         print(f"setting integration time to {ms}")
