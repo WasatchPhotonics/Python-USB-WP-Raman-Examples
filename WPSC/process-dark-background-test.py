@@ -20,29 +20,59 @@ $ python process-dark-background-test.py file.csv
 
 """
 
-import re, os, sys, logging
+import re, os, sys, logging, argparse
 import numpy as np
+import matplotlib.pyplot as plt
+
 from enlighten.parser.ExportFileParser import ExportFileParser
 from wasatch import applog
 
-def process_fft(a, n=5):
+args = None
+
+def process_fft(a, n=5, label="UNKNOWN"):
     """ Return a dict of {freq -> mag} for top n magnitudes (positive frequencies only) """
+    len_ = len(a)
     data = np.fft.fft(a)
     mags = np.abs(data)
-    freqs = np.fft.fftfreq(len(a))
+    freqs = np.fft.fftfreq(len_)
 
     # print(f"mags:  " + ", ".join([f"{x:.2f}" for x in mags]))
     # print(f"freqs: " + ", ".join([f"{x:.2f}" for x in freqs]))
-    thresh = list(reversed(sorted(mags)))[n-1]
 
-    result = {}
-    for i in range(len(mags)):
-        if freqs[i] > 0:
-            if mags[i] > (0.99 * thresh):
-                result[freqs[i]] = mags[i]
+    # only consider positive frequencies (they are emitted from +max..zero..-max)
+
+    pos_freq_idx = np.where(freqs > 0)
+    pos_freqs = freqs[pos_freq_idx]
+    pos_mags = mags[pos_freq_idx]
+
+    if args.plot and "laser" in label.lower():
+        plt.clf()
+        fig, (ax2, ax3) = plt.subplots(1, 2, figsize=(15, 5))
+        fig.suptitle(label)
+        # ax1.plot(freqs, mags)
+        ax2.plot(pos_freqs, pos_mags)
+        ax3.plot(a)
+        plt.draw()
+        plt.pause(1)
+        plt.close(fig)
+
+    # we only want the top "n" magnitudes, so sort in reverse numeric order by magnitude 
+    top_mag_idx = np.argsort(pos_mags)
+    top_mags = np.array(pos_mags)[top_mag_idx]
+    top_freq = np.array(pos_freqs)[top_mag_idx]
+
+    # return the top 'n' key-value pairs
+    result = dict(zip(top_freq[:n], top_mags[:n]))
     return result
 
-filename = sys.argv[1]
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("--plot", action="store_true", help="graph FFT")
+(args, filenames) = parser.parse_known_args(sys.argv[1:])
+
+if args.plot:
+    plt.ion()
+
+filename = filenames[0]
 basename = re.sub(r'\.csv', '', filename)
 efp = ExportFileParser(ctl=None, pathname=filename)
 measurements = efp.parse()
@@ -52,8 +82,8 @@ key_freqs = set()
 for m in measurements:
     pr = m.processed_reading
     proc = np.array(pr.processed)
-    freq_mags = process_fft(proc)
-    for freq in freq_mags:
+    m.freq_mags = process_fft(proc, label=m.label)
+    for freq in m.freq_mags:
         key_freqs.add(round(freq, 2))
 key_freqs = list(key_freqs)
 key_freqs.sort()
@@ -84,7 +114,7 @@ with open(f"table-{basename}.csv", "w") as outfile:
             group_freqs[group] = {}
 
         mags = ''
-        freq_mags = process_fft(proc)
+        freq_mags = m.freq_mags
         for key_freq in key_freqs:
             mag = None
             for freq in freq_mags:
