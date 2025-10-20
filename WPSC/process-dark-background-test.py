@@ -5,9 +5,9 @@ WPSC. Those files typically provide 100ea dark spectra at multiple integration
 times, such as 10, 100 and 1000ms. It also may include dark spectra collected 
 while the laser is OFF vs when the laser is ON.
 
-This script applies an FFT to each dark spectrum to look for frequencies with 
-unusually high magnitudes, indicating pattern noise (for instance, being leaked
-into the dark from the laser electronics).
+This script applies an FFT to each dark spectrum to look for sinusoidal pattern 
+noise (for instance, being leaked into the detector readout from the laser 
+electronics).
 
 This script is not considered production-ready for any particular purpose, and is
 only recommended for quick-and-dirty R&D analysis or as an example of how Python
@@ -29,41 +29,28 @@ from wasatch import applog
 
 args = None
 
-def process_fft(a, n=5, label="UNKNOWN"):
+def process_fft(a):
     """ Return a dict of {freq -> mag} for top n magnitudes (positive frequencies only) """
     len_ = len(a)
     data = np.fft.fft(a)
     mags = np.abs(data)
     freqs = np.fft.fftfreq(len_)
 
-    # print(f"mags:  " + ", ".join([f"{x:.2f}" for x in mags]))
-    # print(f"freqs: " + ", ".join([f"{x:.2f}" for x in freqs]))
-
     # only consider positive frequencies (they are emitted from +max..zero..-max)
-
     pos_freq_idx = np.where(freqs > 0)
     pos_freqs = freqs[pos_freq_idx]
     pos_mags = mags[pos_freq_idx]
+    return pos_freqs, pos_mags
 
-    if args.plot and "laser" in label.lower():
-        plt.clf()
-        fig, (ax2, ax3) = plt.subplots(1, 2, figsize=(15, 5))
-        fig.suptitle(label)
-        # ax1.plot(freqs, mags)
-        ax2.plot(pos_freqs, pos_mags)
-        ax3.plot(a)
-        plt.draw()
-        plt.pause(1)
-        plt.close(fig)
-
-    # we only want the top "n" magnitudes, so sort in reverse numeric order by magnitude 
-    top_mag_idx = np.argsort(pos_mags)
-    top_mags = np.array(pos_mags)[top_mag_idx]
-    top_freq = np.array(pos_freqs)[top_mag_idx]
-
-    # return the top 'n' key-value pairs
-    result = dict(zip(top_freq[:n], top_mags[:n]))
-    return result
+    # graphing code for debugging 
+    # plt.clf()
+    # fig, (ax2, ax3) = plt.subplots(1, 2, figsize=(15, 5))
+    # fig.suptitle(label)
+    # ax2.plot(pos_freqs, pos_mags)
+    # ax3.plot(a)
+    # plt.draw()
+    # plt.pause(1)
+    # plt.close(fig)
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--plot", action="store_true", help="graph FFT")
@@ -77,23 +64,11 @@ basename = re.sub(r'\.csv', '', filename)
 efp = ExportFileParser(ctl=None, pathname=filename)
 measurements = efp.parse()
 
-# determine the top FFT frequencies across all measurements
-key_freqs = set()
-for m in measurements:
-    pr = m.processed_reading
-    proc = np.array(pr.processed)
-    m.freq_mags = process_fft(proc, label=m.label)
-    for freq in m.freq_mags:
-        key_freqs.add(round(freq, 2))
-key_freqs = list(key_freqs)
-key_freqs.sort()
-
-group_freqs = {}
+groups = {}
 with open(f"table-{basename}.csv", "w") as outfile:
     # header row
     outfile.write("measurement, len, sum, avg, stdev, rms, model, label, ")
-    outfile.write(", ".join([f"freq {x:.2f}" for x in key_freqs]))
-    outfile.write("\n")
+    finished_header = False
 
     # now output all measurements, including key freqs
     for i, m in enumerate(measurements):
@@ -108,43 +83,32 @@ with open(f"table-{basename}.csv", "w") as outfile:
         stdev = np.std(proc)
         rms   = np.sqrt(np.mean(proc**2))
 
-        # stringify magnitudes of key frequenceis
+        pos_freqs, pos_mags = process_fft(proc)
+
+        if not finished_header:
+            outfile.write(", ".join([f"freq {x:.3f}" for x in pos_freqs]))
+            outfile.write("\n")
+            finished_header = True
+
+        outfile.write(f"{i}, {len_}, {sum_:.2f}, {avg:.2f}, {stdev:.2f}, {rms:.2f}, {model}, {label}, " + ", ".join([f"{x:0.2f}" for x in pos_mags]) + "\n")
+
         group = re.sub(r' -.*', '', label)
-        if group not in group_freqs:
-            group_freqs[group] = {}
-
-        mags = ''
-        freq_mags = m.freq_mags
-        for key_freq in key_freqs:
-            mag = None
-            for freq in freq_mags:
-                if round(freq, 2) == key_freq:
-                    # if multiple FFT frequencies round to the same 0.01, take the highest magnitude
-                    mag = freq_mags[freq] if mag is None else max(mag, freq_mags[freq])
-            if mag is None:
-                mags += ', '
-            else:
-                mags += f', {mag:.2f}' 
-                if key_freq not in group_freqs[group]:
-                    group_freqs[group][key_freq] = []
-                group_freqs[group][key_freq].append(mag)
-
-        outfile.write(f"{i}, {len_}, {sum_:.2f}, {avg:.2f}, {stdev:.2f}, {rms:.2f}, {model}, {label}, {mags}\n")
+        if group not in groups:
+            groups[group] = []
+        groups[group].append(pos_mags)
 
 with open(f"fft-summary-{basename}.csv", "w") as outfile:
     # header row
-    outfile.write("file, freq, " + ", ".join([group for group in group_freqs]) + "\n")
+    outfile.write("group, " + ", ".join([f"{x:0.3f}" for x in pos_freqs]) + "\n")
 
-    # iterate over a fixed range of frequencies (simplifies comparative data)
-    freq = 0.10
-    while freq <= 0.35: 
-        outfile.write(f"{basename}, {freq:.2f}")
-        for group in group_freqs:
-            if freq in group_freqs[group]:
-                mags = group_freqs[group][freq]
-                outfile.write(f", {np.median(mags):.2f}")
-            else:
-                outfile.write(", ")
-        outfile.write("\n")
+    # median magnitudes
+    for group in groups:
+        mags = np.array(groups[group])
+        medians = np.median(mags, axis=0)
+        outfile.write(f"{group}-med, " + ", ".join([f"{x:0.2f}" for x in medians]) + "\n")
 
-        freq = round(freq + 0.01, 2)
+    # max magnitudes
+    for group in groups:
+        mags = np.array(groups[group])
+        maxes = np.max(mags, axis=0)
+        outfile.write(f"{group}-max, " + ", ".join([f"{x:0.2f}" for x in maxes]) + "\n")
