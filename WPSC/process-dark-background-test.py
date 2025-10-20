@@ -30,23 +30,29 @@ from wasatch import applog
 args = None
 
 def process_fft(a, label):
-    """ Return a dict of {freq -> mag} for top n magnitudes (positive frequencies only) """
-    data = np.fft.fft(a)
-
+    """ 
+    Return numerically sorted list of non-zero FFT frequencies, and a matching 
+    list of evaluated magnitudes corresponding to those frequencies.
+    """
+    # generate the list of frequencies
     len_ = len(a)
     freqs = np.fft.fftfreq(len_)
+
+    # generate and evaluate the per-frequency magnitudes
+    data = np.fft.fft(a)
     mags = np.array( [ math.sqrt( v.real * v.real + v.imag * v.imag ) for v in data ] )
 
-    # pop the zero'th element -- this simply contains the sum of all pixels
+    # pop the zero'th element -- this simply contains the sum of all pixels and 
+    # provides no useful frequency data
     freqs = freqs[1:]
     mags = mags[1:]
 
-    # sort both by freq in ascending order
+    # sort both lists by freq in ascending order
     indices = np.argsort(freqs)
     freqs = freqs[indices]
     mags = mags[indices]
 
-    # graphing code for debugging 
+    # graphing
     if args.plot:
         plt.clf()
         fig, (spectrum, analysis) = plt.subplots(1, 2, figsize=(15, 5))
@@ -59,6 +65,7 @@ def process_fft(a, label):
 
     return freqs, mags
 
+# parse command-line arguments
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("--plot", action="store_true", help="graph FFT")
 (args, filenames) = parser.parse_known_args(sys.argv[1:])
@@ -68,9 +75,12 @@ if args.plot:
 
 filename = filenames[0]
 basename = re.sub(r'\.csv', '', filename)
+
+# use ENLIGHTEN to parse WPSC report
 efp = ExportFileParser(ctl=None, pathname=filename)
 measurements = efp.parse()
 
+# generate report of FFTs for each spectrum
 groups = {}
 with open(f"table-{basename}.csv", "w") as outfile:
     # header row
@@ -82,15 +92,17 @@ with open(f"table-{basename}.csv", "w") as outfile:
         label = m.label.replace(',', '_')
         model = m.settings.eeprom.model
         pr    = m.processed_reading
-        proc  = np.array(pr.raw)
+        raw   = np.array(pr.raw)
 
-        len_  = len(proc)
-        sum_  = sum(proc)
-        avg   = np.mean(proc)
-        stdev = np.std(proc)
-        rms   = np.sqrt(np.mean(proc**2))
+        # basic stats on the raw spectrum
+        len_  = len(raw)
+        sum_  = sum(raw)
+        avg   = np.mean(raw)
+        stdev = np.std(raw)
+        rms   = np.sqrt(np.mean(raw**2))
 
-        freqs, mags = process_fft(proc, label)
+        # generate FFT
+        freqs, mags = process_fft(raw, label)
 
         if not finished_header:
             outfile.write(", ".join([f"freq {x:.3f}" for x in freqs]))
@@ -99,11 +111,13 @@ with open(f"table-{basename}.csv", "w") as outfile:
 
         outfile.write(f"{i}, {len_}, {sum_:.2f}, {avg:.2f}, {stdev:.2f}, {rms:.2f}, {model}, {label}, " + ", ".join([f"{x:0.2f}" for x in mags]) + "\n")
 
+        # collect all FFT magnitudes for later aggregate reporting
         group = re.sub(r' -.*', '', label)
         if group not in groups:
             groups[group] = []
         groups[group].append(mags)
 
+# produce aggregate summary
 with open(f"fft-summary-{basename}.csv", "w") as outfile:
     # header row
     outfile.write("group, " + ", ".join([f"{x:0.3f}" for x in freqs]) + "\n")
