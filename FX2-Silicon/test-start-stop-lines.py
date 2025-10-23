@@ -33,26 +33,10 @@ class Fixture:
 
         print(f"connected to VID 0x{self.dev.idVendor:04x}, PID 0x{self.dev.idProduct:04x} with firmware {fw_rev} and FPGA {fpga_rev}")
 
-        self.configure()
-
-    def configure(self):
-        # self.send_cmd(0xd8, 0x0a1f, label="SET_DETECTOR_TEC_SETPOINT -> 10C")
-        # self.send_cmd(0xd6, 0x0001, label="SET_DETECTOR_TEC_ENABLE -> on")
-        # self.send_cmd(0xb7, 0x01e6, label="SET_DETECTOR_GAIN -> 1.9")
-        # self.send_cmd(0xb6, 0x0000, label="SET_DETECTOR_OFFSET")
-        # self.send_cmd(0xd2, 0x0000, data_of_wLength=Z, label="SET_TRIGGER_SOURCE -> SW")
-        # self.send_cmd(0xb2, 0x0003, label="SET_INTEGRATION_TIME_MS -> 3")
-        
+    def run(self):
         self.set_start_line(self.args.start_line)
         self.set_stop_line(self.args.stop_line)
 
-        # self.send_cmd(0xd6, 0x0001, label="SET_DETECTOR_TEC_ENABLE -> on (again)")
-        # self.send_cmd(0xd8, 0x0a1f, label="SET_DETECTOR_TEC_SETPOINT -> 10C (again)")
-        # self.set_start_line(self.args.start_line) # (again)
-        # self.set_stop_line (self.args.stop_line)  # (again)
-        # self.send_cmd(0xb2, 0x01f4, label="SET_INTEGRATION_TIME_MS -> 500")
-
-    def run(self):
         for j in range(self.args.loop):
             for ms in [10, 100, 1000]:
                 self.set_integration_time_ms(ms)
@@ -92,11 +76,19 @@ class Fixture:
 
         return [i + (j << 8) for i, j in zip(data[::2], data[1::2])]
 
-    def i2c_write(self, addr, buf):
-        self.send_cmd(0x90, addr, len(buf), data_or_wLength=buf, label="I2C_POKE")
+    # def i2c_write(self, addr, buf):
+        #self.send_cmd(0x90, addr, len(buf), data_or_wLength=buf, label="I2C_POKE")
+        # self.send_cmd(0x90, addr, len(buf), data_or_wLength=buf, label="I2C_POKE", timeout=None)
 
-    def send_cmd(self, bRequest, wValue=0, wIndex=0, data_or_wLength=0, label=None):
-        result = self.dev.ctrl_transfer(H2D, bRequest, wValue, wIndex, data_or_wLength, TIMEOUT) 
+    def i2c_write(self, address, buf):
+        bRequest = 0x90
+        wValue = address
+        wIndex = len(buf)
+        print(f"i2c_write: sending bRequest 0x{bRequest:02x}, wValue 0x{wValue:02x}, wIndex 0x{wIndex:02x}, buf {buf}")
+        self.dev.ctrl_transfer(H2D, bRequest, address, len(buf), buf)
+
+    def send_cmd(self, bRequest, wValue=0, wIndex=0, data_or_wLength=0, timeout=TIMEOUT, label=None):
+        result = self.dev.ctrl_transfer(H2D, bRequest, wValue, wIndex, data_or_wLength, timeout) 
         if self.args.debug:
             print(f"{datetime.now()}: sending bRequest 0x{bRequest:02x}, wValue 0x{wValue:04x}, wIndex 0x{wIndex:04x}, data_or_wLength {data_or_wLength} returned {result} ({label})")
 
