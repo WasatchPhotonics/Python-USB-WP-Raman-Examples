@@ -874,10 +874,10 @@ class Fixture:
             # note, this needs updated for 633XS
             self.debug("applying 2x2 binning")
             binned = []
-            for i in range(len(spectrum)-1):
-                binned.append((spectrum[i] + spectrum[i+1]) / 2.0)
-            binned.append(spectrum[-1])
-            spectrum = binned
+            for i in range(len(self.spectrum)-1):
+                binned.append((self.spectrum[i] + self.spectrum[i+1]) / 2.0)
+            binned.append(self.spectrum[-1])
+            self.spectrum = binned
             
         return self.spectrum
 
