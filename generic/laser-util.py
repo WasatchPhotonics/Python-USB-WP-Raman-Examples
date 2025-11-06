@@ -39,11 +39,23 @@ class Fixture(object):
         parser.add_argument("--mod-width-us",           type=int,            help="laser modulation pulse width (us) (default 100)", default=100)
         parser.add_argument("--monitor-laser-state",    action="store_true", help="monitor LASER_CAN_FIRE and LASER_IS_FIRING")
         parser.add_argument("--ramp",                   action="store_true", help="ramp PWM up and down")
+        parser.add_argument("--pixels",                 type=int)
+        parser.add_argument("--gain",                   type=float, default=8.0)
+        parser.add_argument("--integration-time-ms",    type=int, default=100)
 
         self.args = parser.parse_args()
 
         # convert PID from hex string
         self.pid = int(self.args.pid, 16)
+
+        # infer pixels
+        if self.args.ramp and self.args.pixels is None:
+            if self.pid == 0x4000:
+                self.args.pixels = 1952
+            elif self.pid == 0x2000:
+                self.args.pixels = 512
+            else:
+                raise Exception("--ramp requires --pixels for FX2 silicon")
 
         # find the FIRST connected spectrometer of the given PID
         self.dev = usb.core.find(idVendor=0x24aa, idProduct=self.pid)
@@ -74,12 +86,21 @@ class Fixture(object):
         if self.args.laser_warning_sec is not None:
             self.set_laser_warning_delay_sec(self.args.laser_warning_sec)
 
+        if self.args.ramp:
+            print("Taking dark...")
+            self.set_integration_time_ms(self.args.integration_time_ms)
+            if self.pid == 0x4000:
+                self.set_gain(self.args.gain)
+            for i in range(2): # one throwaway
+                self.dark = self.get_spectrum()
+
         self.set_enable(True)
+        if self.pid != 0x4000:
+            input("Press return when laser is visibly firing...")
 
         if self.args.ramp:
             self.do_ramp()
-
-        if self.args.max_ms > 0:
+        elif self.args.max_ms > 0:
             self.sleep_ms(self.args.max_ms)
         elif self.args.max_ms == 0:
             cont = input("\nPress <enter> to disable laser...")
@@ -89,7 +110,7 @@ class Fixture(object):
 
         self.set_enable(False)
 
-    def sleep_ms(self, ms):
+    def sleep_ms(self, ms, monitor=True):
         print(f"sleeping {ms} ms...")
         if ms > 1000 and self.pid == 0x4000:
             # monitor battery while sleeping
@@ -99,22 +120,56 @@ class Fixture(object):
                 if self.args.monitor_laser_state:
                     data.append(f"Laser Can Fire: {self.get_laser_can_fire()}")
                     data.append(f"Laser Is Firing: {self.get_laser_is_firing()}")
-                print(" ".join(data))
+                if monitor:
+                    print(" ".join(data))
                 sleep(1)
         else:
             sleep(ms/1000.0)
 
     def do_ramp(self):
         for width_us in [ 900, 500, 200, 500, 900 ]:
+            print(f"\nRamping PWM: setting width {width_us}µs (period 1000µs)")
             self.set_modulation_params(period_us=1000, width_us=width_us)
             if self.args.max_ms > 0:
-                self.sleep_ms(self.args.max_ms)
+                self.sleep_ms(self.args.max_ms, monitor=False)
             else:
                 input("Press return to advance ramp")
+            spectrum = self.get_spectrum()
+
+            # dark-correct
+            for i in range(len(spectrum)):
+                spectrum[i] -= self.dark[i]
+
+            hi = max(spectrum)
+            tot = sum(spectrum)
+            avg = tot / len(spectrum)
+            print(f"  spectrum with PWM width {width_us}µs: max {hi:.2f}, sum {tot:.3e}, avg {avg:.2f}: {spectrum[:5]}")
 
     ############################################################################
     # opcodes
     ############################################################################
+
+    def get_spectrum(self):
+        self.send_cmd(0xad)
+        if self.is_arm():
+            data = self.dev.read(0x82, 1952 * 2, TIMEOUT_MS)
+        else:
+            if self.args.pixels == 1024:
+                data = self.dev.read(0x82, self.args.pixels * 2, TIMEOUT_MS)
+            elif self.args.pixels == 2048:
+                data = self.dev.read(0x82, self.args.pixels )
+                data.extend(self.dev.read(0x86, self.args.pixels, TIMEOUT_MS))
+            else:
+                raise Exception("invalid pixels {self.args.pixels}")
+
+        return [i + (j << 8) for i, j in zip(data[::2], data[1::2])]
+
+    def set_integration_time_ms(self, ms):
+        self.send_cmd(0xb2, ms)
+
+    def set_gain(self, dB):
+        raw = int(dB) << 8
+        self.send_cmd(0xb7, raw)
 
     def get_laser_can_fire(self):
         return 0 != self.get_cmd(0xef, 0, 1)[0]
@@ -189,7 +244,7 @@ class Fixture(object):
         if self.args.debug:
             print("DEBUG: %s" % msg)
 
-    def send_cmd(self, cmd, value, index=0, buf=None, label=None):
+    def send_cmd(self, cmd, value=0, index=0, buf=None, label=None):
         if buf is None:
             if self.is_arm():
                 buf = [0] * 8
