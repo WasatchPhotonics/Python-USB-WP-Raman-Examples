@@ -5,10 +5,22 @@ import struct
 import usb.core
 import argparse
 from datetime import datetime
+from dataclasses import dataclass
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS     = 1000 
+
+@dataclass
+class Result:
+    integration_time_ms: int
+    max_elapsed_ms: int
+    elapsed_sec: float
+    scan_rate: float            # spectra/sec
+    measurement_rate: float     # ms/spectrum
+    integration_total_sec: float
+    comms_total_sec: float
+    comms_average_ms: float
 
 class Fixture(object):
 
@@ -19,10 +31,12 @@ class Fixture(object):
     def __init__(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
+        parser.add_argument("--keep-trying",         action="store_true", help="ignore timeouts")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--count",               type=int,            help="read the given number of spectra", default=10)
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
-        parser.add_argument("--table",               action="store_true", help="output in CSV")
+        parser.add_argument("--outfile",             type=str,            help="CSV filename")
+        parser.add_argument("--profile-ms",          type=str,            help="list of of integration times (e.g. 2000,1000,500,250,100,50,10,5,1)")
         self.args = parser.parse_args()
 
         self.device = None
@@ -50,6 +64,8 @@ class Fixture(object):
         self.read_eeprom()
         self.fw_version = self.get_firmware_version()
         self.fpga_version = self.get_fpga_version()
+        self.results = []
+        self.last_integ = None
 
         print("connected to %s %s (%d-pixel %s) (%.2f, %.2fnm) (FW %s, FPGA %s)" % (
             self.model, self.serial_number, 
@@ -62,46 +78,81 @@ class Fixture(object):
     ############################################################################
 
     def run(self):
-        # set integration time
-        self.send_cmd(0xb2, self.args.integration_time_ms)
+        if self.args.profile_ms is not None:
+            int_times = [ int(x) for x in self.args.profile_ms.split(",") ]
+            print(f"Profiling scan rate for the following integration times: {int_times}")
+            for ms in int_times:
+                print("-"*50)
+                self.profile_integration_time(ms)
+        else:
+            self.profile_integration_time(self.args.integration_time_ms)
+
+        if self.args.outfile:
+            self.save_csv()
+
+    def profile_integration_time(self, ms):
+        print(f"Reading {self.args.count} spectra at {ms}ms")
+
+        # apply integration time, then take two throwaways to be sure
+        self.send_cmd(0xb2, ms)
+        for i in range(2):
+            self.get_spectrum(ms)
 
         last_total = 0
         start = datetime.now()
+        max_elapsed_ms = -1
         for i in range(self.args.count):
-            spectrum = self.get_spectrum()
+            
+            this_start = datetime.now()
+            spectrum = self.get_spectrum(ms)
+            this_elapsed_ms = (datetime.now() - this_start).total_seconds() * 1000.0
+            max_elapsed_ms = max(max_elapsed_ms, this_elapsed_ms)
 
             # make sure we're really reading distinct spectra
             total = sum(spectrum)
+            print(f"{datetime.now()}: spectrum {i+1} (sum {total})")
+
             if total == last_total:
                 print("Warning: consecutive spectra summed to %d" % total)
             last_total = total
 
-            # if i != 0 and (i % 100 == 0 or i + 1 == self.args.count):
-            #     print("%s read %d spectra" % (datetime.now(), i + 1))
-
         end = datetime.now()
+        max_elapsed_ms = int(round(max_elapsed_ms, 0))
 
-        # measure observed time
+        # record observed time
         elapsed_sec = (end - start).total_seconds()
         scan_rate = float(self.args.count) / elapsed_sec
+        measurement_rate = 1000.0 / scan_rate
 
         # compare vs theoretical time
-        integration_total_sec = self.args.count * self.args.integration_time_ms * 0.001
+        integration_total_sec = self.args.count * ms * 0.001
         comms_total_sec = elapsed_sec - integration_total_sec
         comms_average_ms = (comms_total_sec / self.args.count) * 1000.0
 
-        if self.args.table:
-            print(f"Spectra,Integration Time (ms),Elapsed Sec,Effective Measurement Rate ms/spectrum,Effective Scan Rate spectra/sec,Cumulative Integration Sec,Cumulative Overhead Sec,Effective Comms Latency ms/spectrum")
-            print(f"{self.args.count},{self.args.integration_time_ms},{elapsed_sec},{1000.0/scan_rate},{scan_rate},{integration_total_sec},{comms_total_sec},{comms_average_ms}")
-        else:
-            print("")
-            print("read %d spectra at %d ms in %.2f sec\n" % (self.args.count, self.args.integration_time_ms, elapsed_sec))
-            print("effective measurement rate = %6.2f ms/spectrum at %dms integration time" % (1000.0 / scan_rate, self.args.integration_time_ms))
-            print("effective scan rate        = %6.2f spectra/sec at %dms integration time" % (scan_rate, self.args.integration_time_ms))
-            print("")
-            print("cumulative integration     = %6.2f sec over %d measurements" % (integration_total_sec, self.args.count))
-            print("cumulative overhead        = %6.2f sec over %d measurements" % (comms_total_sec, self.args.count))
-            print("effective comms latency    = %6.2f ms/spectrum" % comms_average_ms)
+        print("")
+        print(f"read {self.args.count} spectra at {ms} ms in {elapsed_sec:.2f} sec\n")
+        print(f"max elapsed             = {max_elapsed_ms} ms")
+        print(f"measurement rate        = {measurement_rate:6.2f} ms/spectrum")
+        print(f"scan rate               = {scan_rate:6.2f} spectra/sec")
+        print(f"cumulative integration  = {integration_total_sec:6.2f} sec")
+        print(f"cumulative latency      = {comms_total_sec:6.2f} sec")
+        print(f"average latency         = {comms_average_ms:6.2f} ms/spectrum")
+
+        r = Result(integration_time_ms  = ms,
+                   elapsed_sec          = elapsed_sec,
+                   max_elapsed_ms       = max_elapsed_ms,
+                   scan_rate            = scan_rate,
+                   measurement_rate     = measurement_rate,
+                   integration_total_sec= integration_total_sec,
+                   comms_total_sec      = comms_total_sec,
+                   comms_average_ms     = comms_average_ms)
+        self.results.append(r)
+
+    def save_csv(self):
+        with open(self.args.outfile, "w") as outfile:
+            outfile.write(f"Spectra, Integration Time (ms), Elapsed Sec, Max Elapsed (ms), Measurement Rate (ms/spectrum), Scan Rate (spectra/sec), Cumulative Integration Sec, Cumulative Latency Sec, Average Latency (ms/spectrum)\n")
+            for r in self.results:
+                outfile.write(f"{self.args.count}, {r.integration_time_ms}, {r.elapsed_sec}, {r.max_elapsed_ms}, {r.measurement_rate}, {r.scan_rate}, {r.integration_total_sec}, {r.comms_total_sec}, {r.comms_average_ms}\n")
 
     def read_eeprom(self):
         self.buffers = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
@@ -148,10 +199,28 @@ class Fixture(object):
             return
         self.send_cmd(0xb2, n)
 
-    def get_spectrum(self):
-        timeout_ms = TIMEOUT_MS + self.args.integration_time_ms * 2
+    def get_spectrum(self, ms):
+        timeout_ms = TIMEOUT_MS + ms * 10
+        if self.last_integ is not None:
+            timeout_ms += self.last_integ * 10
+
+        # send trigger
         self.send_cmd(0xad)
-        data = self.device.read(0x82, self.pixels * 2, timeout=timeout_ms)
+
+        bytes_to_read = self.pixels * 2
+        data = []
+        while True:
+            try:
+                this_data = self.device.read(0x82, bytes_to_read, timeout=timeout_ms)
+                data.extend(this_data)
+                if len(data) >= bytes_to_read:
+                    break
+            except usb.core.USBTimeoutError as ex:
+                if not self.args.keep_trying:
+                    raise 
+
+        self.last_integ = ms
+
         spectrum = []
         for i in range(0, len(data), 2):
             spectrum.append(data[i] | (data[i+1] << 8))
