@@ -592,6 +592,7 @@ class Fixture(object):
             plt.ion()
 
         spectra = []
+        start_time = datetime.now()
         for i in range(self.args.spectra):
 
             if self.args.laser_trigger_sn:
@@ -632,6 +633,7 @@ class Fixture(object):
             sleep(self.args.delay_ms / 1000.0 )
 
         if len(spectra):
+            elapsed_sec = (datetime.now() - start_time).total_seconds() 
             stdevs = []
             for px in range(len(spectra[0])):
                 values = []
@@ -640,6 +642,7 @@ class Fixture(object):
                 stdevs.append(np.std(values))
             avg_std = sum(stdevs) / len(stdevs)
             print(f"Mean pixel stdev over {len(spectra)} spectra: {avg_std:.2f}")
+            print(f"Elapsed time: {elapsed_sec:.3f} sec")
 
         if outfile is not None:
             outfile.close()
