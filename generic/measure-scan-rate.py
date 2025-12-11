@@ -4,6 +4,7 @@ import sys
 import struct
 import usb.core
 import argparse
+from time import sleep
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -37,6 +38,7 @@ class Fixture(object):
         parser.add_argument("--pid",                 type=str,            help="desired PID (e.g. 4000)")
         parser.add_argument("--outfile",             type=str,            help="CSV filename")
         parser.add_argument("--profile-ms",          type=str,            help="list of of integration times (e.g. 2000,1000,500,250,100,50,10,5,1)")
+        parser.add_argument("--delay-step-ms",       type=int,            help="if provided, insert pre-trigger delay ranging from 0ms to integration time in 'step' ms increments", default=0)
         self.args = parser.parse_args()
 
         self.device = None
@@ -98,55 +100,66 @@ class Fixture(object):
         for i in range(2):
             self.get_spectrum(ms)
 
-        last_total = 0
-        start = datetime.now()
-        max_elapsed_ms = -1
-        for i in range(self.args.count):
+        if self.args.delay_step_ms:
+            step = self.args.delay_step_ms
+            delay_values = list(range(ms-step, -step, -step))
+            print(f"Iterating over delay values {delay_values}")
+        else:
+            delay_values = [ 0 ]
+
+        for delay_ms in delay_values:
             
-            this_start = datetime.now()
-            spectrum = self.get_spectrum(ms)
-            this_elapsed_ms = (datetime.now() - this_start).total_seconds() * 1000.0
-            max_elapsed_ms = max(max_elapsed_ms, this_elapsed_ms)
+            last_total = 0
+            start = datetime.now()
+            max_elapsed_ms = -1
+            for i in range(self.args.count):
 
-            # make sure we're really reading distinct spectra
-            total = sum(spectrum)
-            print(f"{datetime.now()}: spectrum {i+1} (sum {total})")
+                this_start = datetime.now()
+                if delay_ms > 0:
+                    sleep(delay_ms / 1000.0)
+                spectrum = self.get_spectrum(ms)
+                this_elapsed_ms = (datetime.now() - this_start).total_seconds() * 1000.0
+                max_elapsed_ms = max(max_elapsed_ms, this_elapsed_ms)
 
-            if total == last_total:
-                print("Warning: consecutive spectra summed to %d" % total)
-            last_total = total
+                # make sure we're really reading distinct spectra
+                total = sum(spectrum)
+                print(f"{datetime.now()}: spectrum {i+1} (delay {delay_ms}ms, sum {total})")
 
-        end = datetime.now()
-        max_elapsed_ms = int(round(max_elapsed_ms, 0))
+                if total == last_total:
+                    print("Warning: consecutive spectra summed to %d" % total)
+                last_total = total
 
-        # record observed time
-        elapsed_sec = (end - start).total_seconds()
-        scan_rate = float(self.args.count) / elapsed_sec
-        measurement_rate = 1000.0 / scan_rate
+            end = datetime.now()
+            max_elapsed_ms = int(round(max_elapsed_ms, 0))
 
-        # compare vs theoretical time
-        integration_total_sec = self.args.count * ms * 0.001
-        comms_total_sec = elapsed_sec - integration_total_sec
-        comms_average_ms = (comms_total_sec / self.args.count) * 1000.0
+            # record observed time
+            elapsed_sec = (end - start).total_seconds()
+            scan_rate = float(self.args.count) / elapsed_sec
+            measurement_rate = 1000.0 / scan_rate
 
-        print("")
-        print(f"read {self.args.count} spectra at {ms} ms in {elapsed_sec:.2f} sec\n")
-        print(f"max elapsed             = {max_elapsed_ms} ms")
-        print(f"measurement rate        = {measurement_rate:6.2f} ms/spectrum")
-        print(f"scan rate               = {scan_rate:6.2f} spectra/sec")
-        print(f"cumulative integration  = {integration_total_sec:6.2f} sec")
-        print(f"cumulative latency      = {comms_total_sec:6.2f} sec")
-        print(f"average latency         = {comms_average_ms:6.2f} ms/spectrum")
+            # compare vs theoretical time
+            integration_total_sec = self.args.count * ms * 0.001
+            comms_total_sec = elapsed_sec - integration_total_sec
+            comms_average_ms = (comms_total_sec / self.args.count) * 1000.0
 
-        r = Result(integration_time_ms  = ms,
-                   elapsed_sec          = elapsed_sec,
-                   max_elapsed_ms       = max_elapsed_ms,
-                   scan_rate            = scan_rate,
-                   measurement_rate     = measurement_rate,
-                   integration_total_sec= integration_total_sec,
-                   comms_total_sec      = comms_total_sec,
-                   comms_average_ms     = comms_average_ms)
-        self.results.append(r)
+            print("")
+            print(f"read {self.args.count} spectra at {ms} ms in {elapsed_sec:.2f} sec\n")
+            print(f"max elapsed             = {max_elapsed_ms} ms")
+            print(f"measurement rate        = {measurement_rate:6.2f} ms/spectrum")
+            print(f"scan rate               = {scan_rate:6.2f} spectra/sec")
+            print(f"cumulative integration  = {integration_total_sec:6.2f} sec")
+            print(f"cumulative latency      = {comms_total_sec:6.2f} sec")
+            print(f"average latency         = {comms_average_ms:6.2f} ms/spectrum")
+
+            r = Result(integration_time_ms  = ms,
+                       elapsed_sec          = elapsed_sec,
+                       max_elapsed_ms       = max_elapsed_ms,
+                       scan_rate            = scan_rate,
+                       measurement_rate     = measurement_rate,
+                       integration_total_sec= integration_total_sec,
+                       comms_total_sec      = comms_total_sec,
+                       comms_average_ms     = comms_average_ms)
+            self.results.append(r)
 
     def save_csv(self):
         with open(self.args.outfile, "w") as outfile:
