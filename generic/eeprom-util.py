@@ -409,7 +409,7 @@ class Fixture(object):
         length     = address[2]
         end_byte   = start_byte + length
 
-        if page > len(self.eeprom_pages):
+        if page + 1 > len(self.eeprom_pages):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
                 page, start_byte, length, data_type, field))
             return
