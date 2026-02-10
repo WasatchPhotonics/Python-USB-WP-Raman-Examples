@@ -107,7 +107,7 @@ def unpack(address, data_type, field, pages):
     length     = address[2]
     end_byte   = start_byte + length
 
-    if page > len(pages):
+    if page + 1 > len(pages):
         print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
             page, start_byte, length, data_type, field))
         return
