@@ -410,14 +410,12 @@ class Fixture(object):
         end_byte   = start_byte + length
 
         if page + 1 > len(self.eeprom_pages):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
-                page, start_byte, length, data_type, field))
+            # print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: invalid page (field {field})")
             return
 
         buf = self.eeprom_pages[page]
         if buf is None or end_byte > len(buf):
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
-                page, start_byte, length, data_type, buf, field))
+            print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: buf is {buf} (field {field})")
             return
 
         if data_type == "s":
@@ -433,7 +431,7 @@ class Fixture(object):
             try:
                 unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
             except:
-                print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+                print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}")
                 return
 
         extra = "" if field is None else f"({field})"

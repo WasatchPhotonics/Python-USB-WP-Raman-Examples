@@ -29,7 +29,6 @@ HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 1000
 
-MAX_PAGES = 8
 PAGE_SIZE = 64
 
 # An extensible, stateful "Test Fixture" 
@@ -141,7 +140,7 @@ class Fixture(object):
         group.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
         group.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
         group.add_argument("--dump",                action="store_true", help="dump basic getters")
-        group.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
+        group.add_argument("--max-pages",           type=int,            help="number of EEPROM pages", default=8)
         group.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
         group.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
         group.add_argument("--shutdown",            action="store_true", help="turn off spectrometer")
@@ -176,7 +175,7 @@ class Fixture(object):
             self.debug("claimed device")
 
     def read_eeprom(self, dev):
-        dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
+        dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
         dev.eeprom = parse_eeprom_pages(dev.buffers)
 
         # save each page as hex string
@@ -690,7 +689,7 @@ class Fixture(object):
         block_size = bytes_to_read # testing multi-channel
         data = []
 
-        print(f"{datetime.now()} trying to read {dev.pixels} ({bytes_to_read} bytes) in chunks of {block_size} bytes with timeout {timeout_ms}ms from {sn}")
+        print(f"{datetime.now()} trying to read {dev.pixels} pixels ({bytes_to_read} bytes) in chunks of {block_size} bytes with timeout {timeout_ms}ms from {sn}")
         while True:
             try:
                 self.debug(f"{datetime.now()} have {len(data)}/{bytes_to_read} bytes, reading next {block_size}")

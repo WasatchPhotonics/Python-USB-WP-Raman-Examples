@@ -79,7 +79,7 @@ EEPROM_FIELDS = [
     ((3, 57,  2), "H", "detector_timeout_sec"),
     ((3, 59,  1), "B", "horizontal_binning_mode"),
     ((3, 60,  1), "B", "startup_scans_to_average"),
-    ((3, 61,  1), "B", "xs_sml_attenuator"),
+    ((3, 61,  1), "B", "laser_attenuator"),
     ((4,  0, 64), "s", "user_data"),
     ((5, 30, 16), "s", "product_configuration"),
     ((5, 63,  1), "B", "subformat"),
@@ -108,14 +108,12 @@ def unpack(address, data_type, field, pages):
     end_byte   = start_byte + length
 
     if page + 1 > len(pages):
-        print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
-            page, start_byte, length, data_type, field))
+        # print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: invalid page (field {field})")
         return
 
     buf = pages[page]
     if buf is None or end_byte > len(buf):
-        print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
-            page, start_byte, length, data_type, buf, field))
+        print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: buf is {buf} (field {field})")
         return
 
     if data_type == "s":
@@ -131,7 +129,7 @@ def unpack(address, data_type, field, pages):
         try:
             unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
         except:
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+            print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}")
             return
 
     return unpack_result
