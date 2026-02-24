@@ -64,7 +64,9 @@ class Fixture:
             elif tag == 'field':
                 self.parse_field(reg, node)
 
-        if 'bytes' not in reg:
+        if 'bytes' in reg:
+            reg['bytes'] = int(reg['bytes'])
+        else:
             if reg['_max_bit'] > -1:
                 reg['bytes'] = int(math.ceil(reg['_max_bit'] + 1) / 8)
             else:
@@ -133,15 +135,19 @@ class Fixture:
     def peek_all(self):
         for addr_hex, reg in self.registers.items():
             if 'read' in reg['mode'].lower():
-                self.debug(f"\nwill peek register {reg['name']} at address 0x{addr_hex} with len {reg['bytes']} bytes")
+                addr_dec = int(addr_hex, 16)
+                length = int(reg['bytes'])
+
+                self.debug(f"\nwill peek register {reg['name']} at address 0x{addr_hex} with len {length} bytes")
                 if 'fields' in reg:
                     self.debug(f"    and parse the results per {self.pretty_dict(reg['fields'])}")
 
-                addr_dec = int(addr_hex, 16)
-                self.peek(addr=addr_dec, length=reg['bytes'], name=reg['name'])
+                try:
+                    self.peek(addr=addr_dec, length=length, name=reg['name'])
+                except:
+                    print(f"ERROR: unable to peek {length} bytes from address 0x{addr_hex}")
         
     def peek(self, addr, length, name=None):
-        length = int(length)
         data = self.get_cmd(0x91, value=addr, index=length, length=length)
         # if addr == 0x12:
         #    ctrl_reg_val = data[1]
