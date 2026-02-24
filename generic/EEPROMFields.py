@@ -77,9 +77,13 @@ EEPROM_FIELDS = [
     ((3, 52,  2), "H", "laser_watchdog_sec"),
     ((3, 55,  2), "H", "power_watchdog_sec"),
     ((3, 57,  2), "H", "detector_timeout_sec"),
+    ((3, 59,  1), "B", "horizontal_binning_mode"),
+    ((3, 60,  1), "B", "startup_scans_to_average"),
+    ((3, 61,  1), "B", "xs_sml_attenuator"),
     ((4,  0, 64), "s", "user_data"),
     ((5, 30, 16), "s", "product_configuration"),
-    ((5, 63,  1), "B", "subformat")
+    ((5, 63,  1), "B", "subformat"),
+    ((8,  0, 16), "s", "laser_password")
 ]
 
 def get_eeprom_fields():
@@ -103,7 +107,7 @@ def unpack(address, data_type, field, pages):
     length     = address[2]
     end_byte   = start_byte + length
 
-    if page > len(pages):
+    if page + 1 > len(pages):
         print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
             page, start_byte, length, data_type, field))
         return
