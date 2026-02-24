@@ -73,7 +73,10 @@ class Fixture:
                 raise Exception(f"could not compute bytes for reg {self.pretty_dict(reg)}")
 
         if 'addr_hex' in reg:
+            print(f"storing register {reg['addr_hex']}")
             self.registers[reg['addr_hex']] = reg
+        else:
+            print(f"skipping register {reg}")
 
     def parse_field(self, reg, field_node):
         field = {}
@@ -134,11 +137,11 @@ class Fixture:
 
     def peek_all(self):
         for addr_hex, reg in self.registers.items():
-            if 'read' in reg['mode'].lower():
+            if any(mode in reg['mode'].lower() for mode in ['read', 'custom']):
                 addr_dec = int(addr_hex, 16)
                 length = int(reg['bytes'])
 
-                self.debug(f"\nwill peek register {reg['name']} at address 0x{addr_hex} with len {length} bytes")
+                self.debug(f"\nwill peek {reg['mode']} register {reg['name']} at address 0x{addr_hex} with len {length} bytes")
                 if 'fields' in reg:
                     self.debug(f"    and parse the results per {self.pretty_dict(reg['fields'])}")
 

@@ -100,6 +100,8 @@ class Fixture(object):
         group.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
         group.add_argument("--integration-times",   type=str,            help="list of integration times (ms)")
         group.add_argument("--scans-to-average",    type=int,            help="set scan averaging (XS-only)")
+        group.add_argument("--detector-gain",       type=float,          help="detector gain")
+        group.add_argument("--detector-offset",     type=int,            help="detector offset")
         group.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         group.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
         group.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
@@ -239,6 +241,14 @@ class Fixture(object):
                 check = self.get_scans_to_average(dev)
                 if check != n:
                     print(f"WARNING: failed to set {n} scan averaging (read {check})")
+
+        if self.args.detector_gain is not None:
+            for dev in self.devices:
+                self.set_detector_gain(dev, self.args.detector_gain)
+
+        if self.args.detector_offset is not None:
+            for dev in self.devices:
+                self.set_detector_offset(dev, self.args.detector_offset)
 
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 1) for dev in self.devices]
@@ -418,6 +428,24 @@ class Fixture(object):
         sn = dev.eeprom["serial_number"]
         print(f"{datetime.now()} setting integrationTimeMS to {n} on {sn}")
         self.send_cmd(dev, 0xb2, n)
+
+    def set_detector_gain(self, dev, gain):
+        raw = self.float_to_uint16(gain)
+        sn = dev.eeprom["serial_number"]
+        print(f"{datetime.now()} setting detector gain to {gain:0.2f} (raw 0x{raw}) on {sn}")
+        self.send_cmd(dev, 0xb7, raw)
+        # self.send_cmd(dev, 0x9d, raw)
+
+    def set_detector_offset(self, dev, offset):
+        sn = dev.eeprom["serial_number"]
+        print(f"{datetime.now()} setting detector offset to {offset} on {sn}")
+        self.send_cmd(dev, 0xb6, offset)
+
+    def float_to_uint16(self, gain):
+        msb = int(round(gain, 5)) & 0xff
+        lsb = int((gain - msb) * 256) & 0xff
+        raw = (msb << 8) | lsb
+        return raw
 
     def get_integration_time_ms(self, dev):
         return self.get_cmd(dev, 0xbf, lsb_len=3)
