@@ -121,9 +121,10 @@ class Fixture(object):
         print(f"integration_time_ms -> {self.args.integration_time_ms}")
         self.set_integration_time_ms(self.args.integration_time_ms)
 
-        self.set_laser_mod_linked_to_integration_time(False) # Step 8
-        self.set_laser_mod_enable(False) # Step 9
-        self.set_laser_enable(False) # Step 10
+        if self.eeprom["has_laser"]:
+            self.set_laser_mod_linked_to_integration_time(False) # Step 8
+            self.set_laser_mod_enable(False) # Step 9
+            self.set_laser_enable(False) # Step 10
 
         # step 11-14 (EN 8-11) send gain/offset even/odd 
         self.set_detector_gain(self.eeprom["gain"])
@@ -140,23 +141,24 @@ class Fixture(object):
         print(f"trigger_source -> 0")
         self.set_trigger_source(0)
 
-        # step 17-18: get and set laser modulation period
-        period_us = self.get_laser_mod_period()
-        print(f"laser modulation period {period_us}us")
-        period_us = 1000
-        self.set_laser_mod_period(period_us)
-        print(f"laser modulation period -> {period_us}")
+        if self.eeprom["has_laser"]:
+            # step 17-18: get and set laser modulation period
+            period_us = self.get_laser_mod_period()
+            print(f"laser modulation period {period_us}us")
+            period_us = 1000
+            self.set_laser_mod_period(period_us)
+            print(f"laser modulation period -> {period_us}")
 
-        # step 19-20: get and set laser modulation pulse width
-        width_us = self.get_laser_mod_pulse_width()
-        print(f"laser modulation width {width_us}us")
-        width_us = 99
-        self.set_laser_mod_pulse_width(width_us)
-        print(f"laser modulation period -> {width_us}")
+            # step 19-20: get and set laser modulation pulse width
+            width_us = self.get_laser_mod_pulse_width()
+            print(f"laser modulation width {width_us}us")
+            width_us = 99
+            self.set_laser_mod_pulse_width(width_us)
+            print(f"laser modulation period -> {width_us}")
 
-        # step 21: enable laser modulation
-        print("laser mod enable -> True")
-        self.set_laser_mod_enable(True)
+            # step 21: enable laser modulation
+            print("laser mod enable -> True")
+            self.set_laser_mod_enable(True)
 
         print("finished Wasatch.NET connection sequence")
 
