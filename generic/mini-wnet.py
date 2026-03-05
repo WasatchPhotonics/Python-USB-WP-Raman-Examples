@@ -46,6 +46,7 @@ class Fixture(object):
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
+        parser.add_argument("--profile",             action="store_true", help="profile exchanges")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--pixels",              type=int,            help="pixels")
@@ -66,6 +67,8 @@ class Fixture(object):
             usb.util.claim_interface(self.device, 0)
         else:
             self.debug("not on POSIX, so NOT claiming interface")
+
+        self.start_time = datetime.now()
 
     def connect(self):
         print("starting Wasatch.NET connection sequence")
@@ -367,19 +370,34 @@ class Fixture(object):
         if self.args.debug:
             print("DEBUG: %s" % msg)
 
+    def profile(self, msg):
+        if self.args.profile:
+            elapsed_ms = int((datetime.now() - self.start_time).total_seconds() * 1000)
+            print("PROFILE: " + msg)
+            print(f"ELAPSED: {elapsed_ms} ms")
+
+    def to_hex(self, a):
+        if a is None or len(a) == 0:
+            return
+        return "[ 0x" + " ".join(f"{c:02x}" for c in a) + " ]"
+
     def send_cmd(self, cmd, value=0, index=0, buf=None, label=None):
         if buf is None:
             if self.pid == 0x4000:
                 buf = [0] * 8
             else:
                 buf = ""
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
+        msg = f">> 0x{HOST_TO_DEVICE:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}, buf {self.to_hex(buf)}"
+        self.debug(msg)
+        self.profile(msg)
         self.device.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d)" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
+        msg = f">> 0x{DEVICE_TO_HOST:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}, len {length}, timeout {TIMEOUT_MS}"
+        self.debug(msg)
+        self.profile(msg)
         result = self.device.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, result))
+        self.profile(f"<< {self.to_hex(result)}")
 
         value = 0
         if msb_len is not None:
