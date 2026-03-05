@@ -14,6 +14,8 @@ import os
 from time import sleep
 from datetime import datetime
 
+import EEPROMFields
+
 if platform.system() == "Darwin":
     from ctypes import *
     from CoreFoundation import *
@@ -70,53 +72,85 @@ class Fixture(object):
 
         if self.args.pixels is not None:
             self.pixels = self.args.pixels
+        elif self.pid == 0x4000:
+            self.pixels = 1952
+        elif self.pid == 0x2000:
+            self.pixels = 512
         else:
-            self.pixels = 1952 if self.pid == 0x4000 else 2048
+            self.pixels = 2048
         self.debug(f"connect: using pixels {self.pixels}")
 
-        if False:
-            # 1. read EEPROM
-            eeprom = self.read_eeprom()
-            print(f"eeprom <- {eeprom}")
-
-            self.pixels = eeprom["pixels"]
-            print(f"pixels <- {self.pixels}")
-
-            # 2. read FPGA compilation options
-            fpga_options = self.read_fpga_compilation_options()
-            print(f"fpga_compilation_options <- {fpga_options}")
-
-            # 3. CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
-
-            # 4. set trigger source
-            print(f"trigger_source -> 0")
-            self.set_trigger_source(0)
-
-        # 5. set integration time
-        print(f"integration_time_ms -> {self.args.integration_time_ms}")
-        self.set_integration_time_ms(self.args.integration_time_ms)
-
-        return
-
-        # 6. get FW revision
+        # step 1: get FW revision
         fw_rev = self.get_firmware_version()
         print(f"FW Revision <- {fw_rev}")
 
-        # 7. get FPGA revision
+        # step 2: get FPGA revision
         fpga_rev = self.get_fpga_version()
         print(f"FPGA Revision <- {fpga_rev}")
 
-        # 8. get integration time (verify it was set correctly)
+        # step 3: set high gain mode
+        if self.is_ingaas():
+            self.set_high_gain_mode_enable(True)
+
+        # step 4: read EEPROM
+        self.read_eeprom()
+        print(f"eeprom <- {self.eeprom}")
+
+        self.pixels = self.eeprom["active_pixels_horizontal"]
+        print(f"pixels <- {self.pixels}")
+
+        # step 5: set detector TEC setpoint
+        if self.eeprom["has_cooling"]:
+            degC = None
+            if self.eeprom["min_temp"] <= self.eeprom["startup_temp_degC"] <= self.eeprom["max_temp"]:
+                degC = self.eeprom["startup_temp_degC"]
+            elif re.match(r"7031|10141|9214", self.eeprom["detector"]) or self.is_ingaas():
+                degC = -15
+            elif re.match(r"16011|11511|11850|13971", self.eeprom["detector"]):
+                degC = 10
+
+            if degC is not None:
+                self.set_detector_tec_setpoint_degC(degC)
+
+                # step 6:
+                self.set_detector_tec_enable(True)
+
+        # step 7: read FPGA compilation options
+        fpga_options = self.read_fpga_compilation_options()
+        print(f"fpga_compilation_options <- {fpga_options}")
+
+        # step 8, 9, 10, 11: CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
+        self.set_detector_gain(self.eeprom["gain"])
+        self.set_detector_offset(self.eeprom["offset"])
+        if self.is_ingaas():
+            self.set_detector_gain_odd(self.eeprom["gain_odd"])
+            self.set_detector_offset_odd(self.eeprom["offset_odd"])
+
+        # step 12: set trigger source
+        print(f"trigger_source -> 0")
+        self.set_trigger_source(0)
+
+        # step 13: set integration time
+        print(f"integration_time_ms -> {self.args.integration_time_ms}")
+        self.set_integration_time_ms(self.args.integration_time_ms)
+
+        # step 14: get integration time (verify it was set correctly)
         ms = self.get_integration_time_ms()
         print(f"integration_time_ms <- {ms}")
         if ms != self.args.integration_time_ms:
             print(f"integration time didn't match expectation ({ms} != {self.args.integration_time_ms})")
 
-        # 9. get detector gain
+        # step 15: get detector gain
         gain = self.get_detector_gain()
         print(f"detector gain <- {gain:0.3f}")
 
         print("finished ENLIGHTEN connection sequence")
+
+    def is_ingaas(self):
+        if self.pid == 0x2000:
+            return True
+        if self.eeprom["detector"].lower().startswith("g"):
+            return True
 
     def run(self):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
@@ -126,8 +160,14 @@ class Fixture(object):
             if outfile is not None:
                 outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
 
-            # raw_temp = self.get_detector_temperature_raw()
-            # print("Raw temperature %04x" % raw_temp)
+            if self.eeprom["has_laser"]:
+                laser_enabled = self.get_laser_enabled()
+                print(f"Laser enabled {laser_enabled}")
+
+            if self.eeprom["has_cooling"]:
+                raw_temp = self.get_detector_temperature_raw()
+                print(f"Raw detector temperature 0x{raw_temp:04x}")
+
         if outfile is not None:
             outfile.close()
 
@@ -138,11 +178,12 @@ class Fixture(object):
     def read_eeprom(self):
         self.buffers = [self.get_cmd(0xff, 0x01, page) for page in range(8)]
 
-        self.eeprom = {}
-        self.eeprom["format"]        = self.unpack((0, 63,  1), "B")
-        self.eeprom["model"]         = self.unpack((0,  0, 16), "s")
-        self.eeprom["serial_number"] = self.unpack((0, 16, 16), "s")
-        self.eeprom["pixels"]        = self.unpack((2, 16,  2), "H")
+        self.eeprom = EEPROMFields.parse_eeprom_pages(self.buffers)
+        # self.eeprom["format"]        = self.unpack((0, 63,  1), "B")
+        # self.eeprom["model"]         = self.unpack((0,  0, 16), "s")
+        # self.eeprom["serial_number"] = self.unpack((0, 16, 16), "s")
+        # self.eeprom["detector"]      = self.unpack((0,  0, 16), "s")
+        # self.eeprom["pixels"]        = self.unpack((2, 16,  2), "H")
         return self.eeprom
 
     def read_fpga_compilation_options(self):
@@ -161,8 +202,15 @@ class Fixture(object):
 
     def set_trigger_source(self, value):
         if self.pid == 0x4000:
-            return False
-        return self.send_cmd(0xd2, value, buf=[0] * 8) # MZ: this is weird...we're sending the buffer on an FX2-only command
+            return
+        buf = [0] * 8
+        return self.send_cmd(0xd2, value, buf=buf)
+
+    def set_high_gain_mode_enable(self, flag):
+        if self.pid != 0x2000:
+            return
+        buf = [0] * 8
+        return self.send_cmd(0xeb, value=1 if flag else 0, index=0, buf=buf)
 
     def get_firmware_version(self):
         result = self.get_cmd(0xc0)
@@ -185,8 +233,29 @@ class Fixture(object):
             return
         self.send_cmd(0xb2, n)
 
+    def get_laser_enabled(self):
+        return 0 != self.get_cmd(0xe2, lsb_len=1)
+
     def get_integration_time_ms(self):
         return self.get_cmd(0xbf, lsb_len=3)
+
+    def set_detector_offset(self, n):
+        self.send_cmd(0xb6, n)
+
+    def set_detector_offset_odd(self, n):
+        self.send_cmd(0x9c, n)
+
+    def set_detector_gain(self, n):
+        msb = int(n)
+        lsb = int((n - msb) * 256)
+        raw = (msb << 8) | lsb
+        self.send_cmd(0xb7, raw)
+
+    def set_detector_gain_odd(self, n):
+        msb = int(n)
+        lsb = int((n - msb) * 256)
+        raw = (msb << 8) | lsb
+        self.send_cmd(0x9d, raw)
 
     def get_detector_gain(self):
         result = self.get_cmd(0xc5, label="GET_DETECTOR_GAIN")
@@ -198,8 +267,12 @@ class Fixture(object):
     def get_detector_temperature_raw(self):
         return self.get_cmd(0xd7, label="GET_CCD_TEMP", msb_len=2)
 
-    def set_detector_tec_setpoint(self, raw):
-        self.set_cmd(0xd8, wValue=0xa46, label="SET_DETECTOR_TEC_SETPOINT")
+    def set_detector_tec_setpoint_degC(self, raw):
+        self.send_cmd(0xd8, raw, label="SET_DETECTOR_TEC_SETPOINT")
+
+    def set_detector_tec_enable(self, flag):
+        value = 1 if flag else 0
+        self.send_cmd(0xd6, value, label="SET_DETECTOR_TEC_ENABLE")
 
     ## @see wasatch.FeatureIdentificationDevice.get_line
     def get_spectrum(self):
@@ -261,7 +334,7 @@ class Fixture(object):
         if self.args.debug:
             print("DEBUG: %s" % msg)
 
-    def send_cmd(self, cmd, value=0, index=0, buf=None):
+    def send_cmd(self, cmd, value=0, index=0, buf=None, label=None):
         if buf is None:
             if self.pid == 0x4000:
                 buf = [0] * 8
