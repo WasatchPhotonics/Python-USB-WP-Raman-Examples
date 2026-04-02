@@ -265,6 +265,13 @@ class Fixture(object):
         if self.args.eeprom_load_test:
             self.do_eeprom_load_test()
 
+        if self.args.monitor_battery:
+            while True:
+                for dev in self.devices:
+                    (raw, percentage, charging) = self.get_battery_level(dev)
+                    print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
+                sleep(1)
+
         # disable laser on shutdown
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 0) for dev in self.devices]
@@ -272,13 +279,6 @@ class Fixture(object):
         # reset trigger source on shutdown
         if self.args.hardware_trigger:
             [self.set_trigger_source(dev, 0) for dev in self.devices]
-
-        if self.args.monitor_battery:
-            while True:
-                for dev in self.devices:
-                    (raw, percentage, charging) = self.get_battery_level(dev)
-                    print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
-                sleep(1)
 
         if self.args.plot and self.args.spectra:
             print("Press return to exit...", end='')

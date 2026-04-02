@@ -10,6 +10,22 @@ class EEPROMField:
         self.offset     = pos[1]
         self.length     = pos[2]
 
+FEATURE_MASK_FLAGS = [ 
+    (0x0001, "invert_x_axis"),
+    (0x0002, "horiz_binning_enabled"),
+    (0x0004, "gen15"),
+    (0x0008, "cutoff_filter_installed"),
+    (0x0010, "hardware_even_odd"),
+    (0x0020, "sig_laser_tec"),
+    (0x0040, "has_interlock_feedback"),
+    (0x0080, "has_shutter"),
+    (0x0100, "disable_ble_power"),
+    (0x0200, "disable_laser_armed_indicator"),
+    (0x0400, "laser_interlock_excluded"),
+    (0x0800, "laser_timeout_after_count"),
+    (0x1000, "is_oem") 
+]
+
 EEPROM_FIELDS = [
     ((0,  0, 16), "s", "model"),
     ((0, 16, 16), "s", "serial_number"),
@@ -100,6 +116,12 @@ def parse_eeprom_pages(pages):
     for name, field in fields.items():
         eeprom[name] = unpack(field.pos, field.data_type, name, pages)
     return eeprom
+
+def dump_feature_mask(value):
+    print(f"FeatureMask 0x{value:04x}:")
+    for bit, label in FEATURE_MASK_FLAGS:
+        hi = "ON " if value & bit else "OFF"
+        print(f"  0x{bit:04x}: {hi} {label}")
 
 def unpack(address, data_type, field, pages):
     page       = address[0]

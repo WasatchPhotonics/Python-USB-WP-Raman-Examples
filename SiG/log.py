@@ -42,9 +42,9 @@ def get_next_log():
        logStr=""
        for i in raw[1:]:
            # print(i, chr(i))
-           logStr += chr(i)
            if i == 0:
               break
+           logStr += chr(i)
        
        disp = True
 
