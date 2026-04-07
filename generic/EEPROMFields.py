@@ -42,6 +42,7 @@ EEPROM_FIELDS = [
     ((0, 52,  2), "h", "offset"), 
     ((0, 54,  4), "f", "gain_odd"), 
     ((0, 58,  2), "h", "offset_odd"), 
+    ((0, 60,  2), "h", "startup_laser_tec_setpoint"), # uint12, XS-only
     ((0, 63,  1), "B", "format"), 
     ((1,  0,  4), "f", "wavecal_c0"),
     ((1,  4,  4), "f", "wavecal_c1"),
