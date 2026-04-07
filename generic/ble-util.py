@@ -1344,3 +1344,40 @@ if __name__ == "__main__":
 #    asyncio.ensure_future(fixture.run())
 #    loop.run_forever()
 #    loop.close()
+
+"""
+Note that Bleak is unable to enable notifications/indications on Windows under 
+Parallels from a Mac.
+
+`pip list` from a Dell laptop on which this script worked:
+
+Package            Version
+------------------ ------------
+bleak              0.22.3
+bleak-winrt        1.2.0
+contourpy          1.3.1
+cycler             0.12.1
+docutils           0.21.2
+fonttools          4.55.3
+importlib_metadata 8.5.0
+kiwisolver         1.4.7
+libusb             1.0.27.post3
+matplotlib         3.10.0
+numpy              2.2.0
+packaging          24.2
+pillow             11.0.0
+pip                24.3.1
+pkg_about          1.2.6
+pyparsing          3.2.0
+PySide6            6.8.1
+PySide6_Addons     6.8.1
+PySide6_Essentials 6.8.1
+python-dateutil    2.9.0.post0
+pyusb              1.2.1
+setuptools         75.6.0
+shiboken6          6.8.1
+six                1.17.0
+typing_extensions  4.12.2
+usb                0.0.83.dev0
+zipp               3.21.0
+"""
