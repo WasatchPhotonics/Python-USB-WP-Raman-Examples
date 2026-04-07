@@ -31,7 +31,7 @@ class Fixture:
 
     @todo It appears notifications don't work on Windows?!?
     """
-    VERSION = "1.0.5"
+    VERSION = "1.1.0"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -95,7 +95,7 @@ class Fixture:
                               "ACQUIRE":                 0xff04,
                               "BATTERY_STATE":           0xff09,
                               "GENERIC":                 0xff0a,
-                              "SPECTRA":                 0xff0b } # MZ: added
+                              "SPECTRA":                 0xff0b } 
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
 
         #                  Name                        Lvl  Set   Get Size
@@ -266,6 +266,11 @@ class Fixture:
         # grab device information
         await self.load_device_information()
 
+        # warn on old firmware
+        if self.vercmp(self.device_info["Software Revision String"], "4.10.7") < 0:
+            print("\nWARNING: this script is intended for use with BLE FW 4.10.7 or higher, " +
+                  "supporting the 0xff0b SPECTRA Characteristic.\n")
+
         # get Characteristic information
         await self.load_characteristics()
 
@@ -319,10 +324,15 @@ class Fixture:
         print("\ndisconnected")
 
     async def load_device_information(self):
+        """
+        This will load Hardware Revision String, Firmware Revision String and 
+        Software Revision String, corresponding to the FPGA, STM32 and BL652 
+        firmware versions respectively.
+        """
         self.debug(f"address {self.client.address}")
         self.debug(f"mtu_size {self.client.mtu_size} bytes")
 
-        self.device_info = {}
+        self.device_info = {} # will include "Hardware", "Firmware" and "Software Revision String"s
         for service in self.client.services:
             if "Device Information" in str(service):
                 for char in service.characteristics:
@@ -382,7 +392,7 @@ class Fixture:
                     self.notifications.add(char.uuid)
                 elif name == "SPECTRA":
                     self.debug(f"starting {name} notifications")
-                    await self.client.start_notify(char.uuid, self.spectra_notification) # MZ: added
+                    await self.client.start_notify(char.uuid, self.spectra_notification)
                     self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
@@ -538,7 +548,7 @@ class Fixture:
             await self.set_integration_time_ms(self.eeprom["startup_integration_time_ms"])
         if self.args.gain_db is None:
             await self.set_gain_db(self.eeprom["gain"])
-        # don't worry about startup_temp_degC (should be set by FW)
+        # don't worry about startup_laser_tec_setpoint (should be set by FW)
 
     async def set_integration_time_ms(self, ms):
         name = "INTEGRATION_TIME_MS"
@@ -836,7 +846,7 @@ class Fixture:
         msg = self.parse_acquire_status(status, payload)
         self.debug(f"acquire_notification: {msg}")
         
-    def spectra_notification(self, sender, data): # MZ: added
+    def spectra_notification(self, sender, data):
         ok = True
         if (len(data) < 3):
             raise RuntimeError(f"received invalid SPECTRA notification of {len(data)} bytes: {data}")
@@ -934,7 +944,7 @@ class Fixture:
         msg  = f"Connected to {self.eeprom['model']} {self.eeprom['serial_number']} with {self.pixels} pixels "
         msg += f"from ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)"
         if self.wavenumbers:
-            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f} 1/cm)"
+            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
         try:
             print(msg)
         except:
@@ -1126,6 +1136,35 @@ class Fixture:
         except:
             pass
         return data
+
+    def vercmp(self, a, b, delim=None):
+        """ 
+        @returns vercmp("1.2.3.4", "1.2.4.3") -> -1 
+        @note Python probably already something like this...?
+        """
+        if a is None or b is None:
+            return None
+
+        if delim is None:
+            for c in [".", "_", "-", " "]:
+                if c in a and c in b:
+                    delim = c
+                    break
+        if delim is None:
+            delim = "." # maybe there is no delimiter
+
+        tok_a = str(a).split(delim)
+        tok_b = str(b).split(delim)
+
+        int_a = int(tok_a[0])
+        int_b = int(tok_b[0])
+
+        if   int_a > int_b: return +1
+        elif int_a < int_b: return -1
+        elif len(tok_a) == 1 and len(tok_b) == 1: return 0
+        elif len(tok_a)  > 1 and len(tok_b)  > 1: return self.vercmp(delim.join(tok_a[1:]), delim.join(tok_b[1:]), delim=delim)
+        elif len(tok_b)  > 1: return -1
+        else: return +1
 
 class Generic:
     """ encapsulates paired setter and getter accessors for a single attribute """
