@@ -13,6 +13,8 @@ from functools import partial
 
 import EEPROMFields
 
+MAX_EEPROM_PAGES = 8 # separate from EEPROMFields, as XS BLE FW may not be in sync
+
 debugging = False
 def debug(msg):
     if debugging:
@@ -45,11 +47,22 @@ class Fixture:
          5: ("ERR_IMG_SNSR_IN_BAD_STATE",   "The sensor is not able to take spectra"),
          6: ("ERR_IMG_SNSR_STATE_TRANS_FLR","The sensor failed to apply acquisition parameters"),
          7: ("ERR_SPEC_ACQ_SIG_WAIT_TMO",   "The sensor failed to take a spectrum (timeout exceeded)"),
-        32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"),
-        33: ("TAKING_DARK",                 "taking spectra (no laser)"),
-        34: ("LASER_WARNING_DELAY",         "paused during laser warning delay period"),
-        35: ("LASER_WARMUP",                "paused during laser warmup period"),
-        36: ("TAKING_RAMAN",                "taking spectra (laser enabled)"),
+
+         # added from EnlightenMAUI.BluetoothSpectrometer.COLLECTION_FAILURE_CODDES
+         # and ENG-0120 ACQUIRE Status Notifications
+         8: ("ERR_INTERLOCK_OPEN",          "Can't perform Raman measurement because interlock open"),
+         9: ("ERR_RESERVED",                "Reserved acquisition error"),
+        10: ("ERR_BAD_MSG_FROM_STM32",      "Internal error (bad message from STM32)"),
+        11: ("ERR_AUTO_RAMAN_IN_PROG",      "Auto-Raman already in progress"),
+        12: ("ERR_SEG_TX_FLR",              "Error transmitting image segment over BLE"),
+        13: ("ERR_FPGA_READ_FLR",           "Error reading from FPGA"),
+        14: ("ERR_FPGA_UPDATE_FLR",         "Error writing to FPGA"),
+
+        32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"), # incl targetRatio
+        33: ("TAKING_DARK",                 "Auto-Dark/Raman taking spectra (no laser)"),                         # incl current/total steps
+        34: ("LASER_WARNING_DELAY",         "Auto-Dark/Raman paused during laser warning delay period"),          # ditto
+        35: ("LASER_WARMUP",                "Auto-Dark/Raman paused during laser warmup period"),                 # ditto
+        36: ("TAKING_RAMAN",                "Auto-Dark/Raman taking spectra (laser enabled)")                     # ditto
     }
 
     ############################################################################
@@ -81,7 +94,8 @@ class Fixture:
         self.code_by_name = { "LASER_STATE":             0xff03,
                               "ACQUIRE":                 0xff04,
                               "BATTERY_STATE":           0xff09,
-                              "GENERIC":                 0xff0a }
+                              "GENERIC":                 0xff0a,
+                              "SPECTRA":                 0xff0b } # MZ: added
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
 
         #                  Name                        Lvl  Set   Get Size
@@ -122,6 +136,7 @@ class Fixture:
         group.add_argument("--plot",                    action="store_true", help="graph spectra")
         group.add_argument("--overlay",                 action="store_true", help="overlay spectra on graph")
         group.add_argument("--delay-ms",                type=int,            help="intra-spectra delay", default=0)
+        group.add_argument("--timeout-ms",              type=int,            help="override timeout (ms)")
         group.add_argument("--keep-waiting",            action="store_true", help="don't timeout")
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
@@ -338,7 +353,7 @@ class Fixture:
 
         sys = platform.system()
         self.debug("Characteristics:")
-        for name in ['GENERIC', 'LASER_STATE', 'ACQUIRE', 'BATTERY_STATE']:
+        for name in ['GENERIC', 'LASER_STATE', 'ACQUIRE', 'BATTERY_STATE', 'SPECTRA']:
             char = self.char_by_name[name]
             extra = ""
 
@@ -356,7 +371,6 @@ class Fixture:
                 elif name == "LASER_STATE":
                     self.debug(f"starting {name} notifications")
                     await self.client.start_notify(char.uuid, self.laser_state_notification)
-                    self.debug(f"back from start_notify")
                     self.notifications.add(char.uuid)
                 elif name == "GENERIC":
                     self.debug(f"starting {name} notifications")
@@ -365,6 +379,10 @@ class Fixture:
                 elif name == "ACQUIRE":
                     self.debug(f"starting {name} notifications")
                     await self.client.start_notify(char.uuid, self.acquire_notification)
+                    self.notifications.add(char.uuid)
+                elif name == "SPECTRA":
+                    self.debug(f"starting {name} notifications")
+                    await self.client.start_notify(char.uuid, self.spectra_notification) # MZ: added
                     self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
@@ -795,9 +813,10 @@ class Fixture:
         elif status in [33, 34, 35, 36]:
             currentStep = int(payload[0] << 8 | payload[1])
             totalSteps  = int(payload[2] << 8 | payload[3])
-            if totalSteps > 1:
-                msg += f" (step {currentStep+1}/{totalSteps})" 
+            # if totalSteps > 1:
+            msg += f" (step {currentStep+1}/{totalSteps})" 
 
+        self.debug(f"parse_qcquire_status: converted status {status}, payload {payload} -> {msg}")
         return msg
     
     def acquire_notification(self, sender, data):
@@ -805,15 +824,29 @@ class Fixture:
         if (len(data) < 3):
             raise RuntimeError(f"received invalid ACQUIRE notification of {len(data)} bytes: {data}")
 
-        # first two bytes declare whether it's a status message or spectral data
+        # first two bytes declare whether it's a status message (all we should be 
+        # getting now under API9) or spectral data (deprecated after API6)
+        first_pixel = int((data[0] << 8) | data[1]) # big-endian int16
+
+        if first_pixel != 0xffff:
+            raise RuntimeError(f"received invalid SPECTRA data (API6) on API9 ACQUIRE characteristic!")
+            
+        status = data[2]
+        payload = data[3:]
+        msg = self.parse_acquire_status(status, payload)
+        self.debug(f"acquire_notification: {msg}")
+        
+    def spectra_notification(self, sender, data): # MZ: added
+        ok = True
+        if (len(data) < 3):
+            raise RuntimeError(f"received invalid SPECTRA notification of {len(data)} bytes: {data}")
+
+        # first two bytes declare whether it's spectral data (all we should be 
+        # getting now under API9) or a status message (deprecated after API6)
         first_pixel = int((data[0] << 8) | data[1]) # big-endian int16
 
         if first_pixel == 0xffff:
-            status = data[2]
-            payload = data[3:]
-            msg = self.parse_acquire_status(status, payload)
-            self.debug(f"acquire_notification: {msg}")
-            return
+            raise RuntimeError("received invalid API6 ACQUIRE status notification on API9 SPECTRA characteristic!")
 
         ########################################################################
         # apparently it's spectral data
@@ -824,6 +857,7 @@ class Fixture:
             raise RuntimeError(f"received first_pixel {first_pixel} when pixels_read {self.pixels_read}")
 
         spectral_data = data[2:]
+        
         pixels_in_packet = int(len(spectral_data) / 2)
 
         for i in range(pixels_in_packet):
@@ -855,7 +889,11 @@ class Fixture:
         await self.write_char("ACQUIRE", [arg]) # , quiet=True)
 
         # compute timeout
-        timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
+        if self.args.timeout_ms:
+            timeout_ms = self.args.timeout_ms
+        else:
+            timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
+        self.debug(f"waiting for {self.pixels} pixels over {timeout_ms} ms")
 
         # wait for spectral data to arrive
         start_time = datetime.now()
@@ -934,14 +972,15 @@ class Fixture:
         self.pages = []
 
         name = "EEPROM_DATA"
-        for page in range(8):
+        for page in range(MAX_EEPROM_PAGES):
             buf = bytearray()
-            for subpage in range(4):
+            while len(buf) < 64:
                 
+                offset = len(buf)
                 request = self.generics.generate_read_request(name)
                 request.append(0) # page is big-endian uint16
                 request.append(page)
-                request.append(subpage)
+                request.append(offset)
 
                 self.debug(f"read_eeprom_pages: querying {name} ({to_hex(request)})")
                 await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
@@ -950,7 +989,7 @@ class Fixture:
                 await self.generics.wait(name)
 
                 data = self.generics.get_value(name)
-                self.debug(f"read_eeprom_pages: received page {page}, subpage {subpage}: {data}")
+                self.debug(f"read_eeprom_pages: received {len(data)} bytes from page {page} at offset {offset}: {data}")
 
                 for byte in data:
                     buf.append(byte)
@@ -969,7 +1008,7 @@ class Fixture:
         length     = address[2]
         end_byte   = start_byte + length
 
-        if page > len(self.pages):
+        if page >= len(self.pages):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
                 page, start_byte, length, data_type, field))
             return
@@ -1078,7 +1117,7 @@ class Fixture:
         elif advertisement_data is not None:
             return self.WASATCH_SERVICE.lower() in advertisement_data.service_uuids
         else:
-            return "wp-" in device.name.lower()
+            return any([device.name.upper().startswith(prefix) for prefix in ["WP-", "V2.EVT"]])
 
     def decode(self, data):
         try:
@@ -1145,7 +1184,7 @@ class Generic:
 class Generics:
     """ Facade to access all Generic attributes in the BLE interface """
 
-    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
+    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_PARAMETER', 'UNSUPPORTED_COMMAND' ]
 
     def __init__(self):
         self.seq = 0
