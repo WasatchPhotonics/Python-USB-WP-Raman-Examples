@@ -99,7 +99,8 @@ EEPROM_FIELDS = [
     ((4,  0, 64), "s", "user_data"),
     ((5, 30, 16), "s", "product_configuration"),
     ((5, 63,  1), "B", "subformat"),
-    ((8,  0, 16), "s", "laser_password")
+    ((8,  0, 16), "s", "laser_password"),
+    ((8, 16,  4), "I", "feature_mask_xs")
 ]
 
 def get_eeprom_fields():
