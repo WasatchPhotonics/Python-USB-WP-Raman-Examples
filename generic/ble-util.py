@@ -263,6 +263,10 @@ class Fixture:
         # connect 
         await self.client.connect()
 
+        while not self.client.is_connected:
+            self.debug("waiting on connection...")
+            sleep(0.1)
+
         # grab device information
         await self.load_device_information()
 
@@ -373,17 +377,18 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
+            # MZ: This is where Bleak 2.x and 3.x crash on Windows. Affects both INDICATE and NOTIFY.
             if "notify" in char.properties or "indicate" in char.properties:
                 if name == "BATTERY_STATE":
                     self.debug(f"starting {name} notifications")
                     await self.client.start_notify(char.uuid, self.battery_notification)
                     self.notifications.add(char.uuid)
                 elif name == "LASER_STATE":
-                    self.debug(f"starting {name} notifications")
+                    self.debug(f"starting {name} indications")
                     await self.client.start_notify(char.uuid, self.laser_state_notification)
                     self.notifications.add(char.uuid)
                 elif name == "GENERIC":
-                    self.debug(f"starting {name} notifications")
+                    self.debug(f"starting {name} indications")
                     await self.client.start_notify(char.uuid, self.generics.notification_callback)
                     self.notifications.add(char.uuid)
                 elif name == "ACQUIRE":
@@ -391,7 +396,7 @@ class Fixture:
                     await self.client.start_notify(char.uuid, self.acquire_notification)
                     self.notifications.add(char.uuid)
                 elif name == "SPECTRA":
-                    self.debug(f"starting {name} notifications")
+                    self.debug(f"starting {name} indications")
                     await self.client.start_notify(char.uuid, self.spectra_notification)
                     self.notifications.add(char.uuid)
 
