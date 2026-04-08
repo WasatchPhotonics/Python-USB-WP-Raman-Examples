@@ -22,6 +22,7 @@ def process_cmd_args():
     parser.add_argument("--pixels",              type=int,            help="expected pixels", default=1952)
     parser.add_argument("--lines",               type=int,            help="max lines", default=1080)
     parser.add_argument("--step",                type=int,            help="line step")
+    parser.add_argument("--gap",                 type=int,            help="line gap")
     parser.add_argument("--start-line",          type=int,            help="vertical binning start line", default=0)
     parser.add_argument("--stop-line",           type=int,            help="vertical binning stop line", default=1079)
     parser.add_argument("--csvfile",             type=str,            help="optional file to save row-ordered CSV")
@@ -68,6 +69,13 @@ if args.step is not None:
     msb = (args.step >> 8) & 0xff
     buf = [ lsb, msb ]
     send_code(cmd=0x90, value=0x17, index=len(buf), buf=buf)
+
+if args.gap is not None:
+    print("setting line gap %d" % args.gap)
+    lsb = args.gap & 0xff
+    msb = (args.gap >> 8) & 0xff
+    buf = [ lsb, msb ]
+    send_code(cmd=0x90, value=0x18, index=len(buf), buf=buf)
 
 print("Enabling area scan")
 send_code(0xeb, 1)
