@@ -5,6 +5,7 @@ import sys
 import png
 import usb.core
 import argparse
+import datetime
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -20,6 +21,7 @@ def process_cmd_args():
     parser.add_argument("--pid",                 type=str,            help="USB PID in hex", default="4000", choices=["1000", "2000", "4000"])
     parser.add_argument("--pixels",              type=int,            help="expected pixels", default=1952)
     parser.add_argument("--lines",               type=int,            help="max lines", default=1080)
+    parser.add_argument("--step",                type=int,            help="line step")
     parser.add_argument("--start-line",          type=int,            help="vertical binning start line", default=0)
     parser.add_argument("--stop-line",           type=int,            help="vertical binning stop line", default=1079)
     parser.add_argument("--csvfile",             type=str,            help="optional file to save row-ordered CSV")
@@ -60,6 +62,13 @@ if args.stop_line is not None:
     print("setting stop_line %d" % args.stop_line)
     send_code(0xff, 0xf5, args.stop_line)
 
+if args.step is not None:
+    print("setting line step %d" % args.step)
+    lsb = args.step & 0xff
+    msb = (args.step >> 8) & 0xff
+    buf = [ lsb, msb ]
+    send_code(cmd=0x90, value=0x17, index=len(buf), buf=buf)
+
 print("Enabling area scan")
 send_code(0xeb, 1)
 
@@ -75,27 +84,34 @@ image = [[0 for _ in range(args.pixels)] for _ in range(args.lines)]
 print("Looping over %d spectra (lines)" % args.count)
 for linenum in range(args.count):
 
-    # read spectrum
+    # send ACQUIRE
+    send_code(0xad)
+
+    # read one line
     data = dev.read(0x82, args.pixels*2)
 
+    # deserialize to pixels
     spectrum = []
     for i in range(0, len(data), 2):
         spectrum.append(data[i] | (data[i+1] << 8))
 
-    print("Spectrum %3d/%3d: %s ..." % (linenum + 1, args.count, spectrum[:10]))
+    print("%s spectrum %3d/%3d: %s ..." % (datetime.datetime.now(), linenum + 1, args.count, spectrum[:10]))
 
     if args.csvfile:
         with open(args.csvfile, "a") as csvfile:
             csvfile.write(", ".join([f"{pixel}" for pixel in spectrum]) + "\n")
 
     # stomp endpoints so they don't skew image intensity range
-    line_num = spectrum[0] # capture this before stomping
+    line_num = spectrum[1] # capture this before stomping
     for i in range(3):
-        spectrum[i] = spectrum[3]
+        spectrum[i] = spectrum[4]
     spectrum[-1] = spectrum[-2]
 
     if args.pngfile:
-        image[line_num] = spectrum
+        if line_num < len(image):
+            image[line_num] = spectrum
+        else:
+            print(f"    ditching overflow line {line_num}")
 
 print("Exiting area scan")
 send_code(0xeb, 0)
