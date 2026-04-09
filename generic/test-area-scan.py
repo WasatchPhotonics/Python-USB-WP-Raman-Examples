@@ -16,6 +16,7 @@ TIMEOUT_MS = 1000
 def process_cmd_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--debug",               action="store_true", help="verbose output")
+    parser.add_argument("--perpetual",           action="store_true", help="run until stopped")
     parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read", default=20)
     parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=10)
     parser.add_argument("--pid",                 type=str,            help="USB PID in hex", default="4000", choices=["1000", "2000", "4000"])
@@ -81,9 +82,14 @@ if args.csvfile:
 # initialize PNG
 image = [[0 for _ in range(args.pixels)] for _ in range(args.lines)]
 
-print("Looping over %d spectra (lines)" % args.count)
-for linenum in range(args.count):
+if not args.perpetual:
+    print("Looping over %d spectra (lines)" % args.count)
 
+lines_read = 0
+while True:
+    if not args.perpetual and lines_read > args.count:
+        break
+        
     # send ACQUIRE
     send_code(0xad)
 
@@ -95,23 +101,25 @@ for linenum in range(args.count):
     for i in range(0, len(data), 2):
         spectrum.append(data[i] | (data[i+1] << 8))
 
-    print("%s spectrum %3d/%3d: %s ..." % (datetime.datetime.now(), linenum + 1, args.count, spectrum[:10]))
+    print("%s spectrum %3d/%3d: %s ..." % (datetime.datetime.now(), lines_read + 1, args.count, spectrum[:10]))
 
     if args.csvfile:
         with open(args.csvfile, "a") as csvfile:
             csvfile.write(", ".join([f"{pixel}" for pixel in spectrum]) + "\n")
 
     # stomp endpoints so they don't skew image intensity range
-    line_num = spectrum[1] # capture this before stomping
+    index = spectrum[1] # capture this before stomping
     for i in range(3):
         spectrum[i] = spectrum[4]
     spectrum[-1] = spectrum[-2]
 
     if args.pngfile:
-        if line_num < len(image):
-            image[line_num] = spectrum
+        if index < len(image):
+            image[index] = spectrum
         else:
-            print(f"    ditching overflow line {line_num}")
+            print(f"    ditching overflow line {index}")
+
+    lines_read += 1
 
 print("Exiting area scan")
 send_code(0xeb, 0)
