@@ -600,8 +600,14 @@ class Fixture:
         """
         buf = await self.read_char("BATTERY_STATE", 2)
         self.debug(f"battery response: {buf}")
+
+        perc = buf[1] + buf[2] / 256.0
+        batt_temp = buf[3]
+        chg_temp = buf[4]
         return { 'charging': buf[0] != 0,
-                 'perc': int(buf[1]) }
+                 'perc': buf[1] + buf[2] / 256.0,
+                 'batt_temp': buf[3],
+                 'chg_temp': buf[4] }
 
     async def get_laser_state(self):
         retval = {}
@@ -609,33 +615,40 @@ class Fixture:
             retval[k] = 'UNKNOWN'
             
         buf = await self.read_char("LASER_STATE", 7)
+        # print(f"parsing LASER_STATE buf {buf}")
         if len(buf) >= 4:
             retval.update({
                 'mode':            buf[0],
                 'type':            buf[1],
                 'enable':          buf[2],
-                'watchdog_sec':    buf[3] })
+                'watchdog_sec':    (buf[3] << 8) | buf[4] }) # MSB uint16?
+
+        # skip bytes 5 and 6 reserved (used to be laser_warning_delay_ms)
 
         if len(buf) >= 7: 
             retval.update({
-                'mask':            buf[6],
-                'interlock_closed':buf[6] & 0x01,
-                'laser_firing':    buf[6] & 0x02 })
+                'mask':            buf[7],          # the whole mask
+                'interlock_closed':buf[7] & 0x01,
+                'laser_firing':    buf[7] & 0x02 })
 
+        # byte 8 will be laser PWM
+
+        # print(f"returning LASER_STATE {retval}")
         return retval
 
     async def get_status(self):
         battery_state = await self.get_battery_state()
-        battery_perc = f"{battery_state['perc']:3d}%"
+        battery_perc = f"{battery_state['perc']:6.2f}%"
         battery_charging = 'charging' if battery_state['charging'] else 'discharging'
 
         laser_state = await self.get_laser_state()
-        laser_firing = laser_state['laser_firing']
         interlock_closed = 'closed (armed)' if laser_state['interlock_closed'] else 'open (safe)'
 
         amb_temp = await self.get_generic_value("AMBIENT_TEMPERATURE_DEG_C")
 
-        return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
+        return (f"Battery <Perc {battery_perc}, {battery_charging}, temp {battery_state['batt_temp']}°C, IC {battery_state['chg_temp']}°C>, " +
+                f"Laser <Enabled {laser_state['enable']}, Interlock {interlock_closed}, Watchdog {laser_state['watchdog_sec']}sec>, " +
+                f"Amb {amb_temp}°C")
 
     async def monitor(self):
         try:
