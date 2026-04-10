@@ -67,11 +67,11 @@ send_code(0xb2, args.integration_time_ms & 0xffff)
 
 if args.start_line is not None:
     print("setting start_line %d" % args.start_line)
-    send_code(0xff, 0xf4, args.start_line)
+    send_code(0xff, 0x21, args.start_line)
 
 if args.stop_line is not None:
     print("setting stop_line %d" % args.stop_line)
-    send_code(0xff, 0xf5, args.stop_line)
+    send_code(0xff, 0x23, args.stop_line)
 
 if args.line_step is not None:
     set_line_step(args.line_step)
@@ -91,6 +91,9 @@ image = [[0 for _ in range(args.pixels)] for _ in range(args.lines)]
 if not args.perpetual:
     print("Looping over %d spectra (lines)" % args.count)
 
+print("Sending single ACQUIRE")
+send_code(0xad)
+
 lines_read = 0
 last_index = -1
 while True:
@@ -100,22 +103,21 @@ while True:
     delay_ms = random.randint(1, 100) if args.randomize else 0
     time.sleep(delay_ms / 1000.0)
         
-    # send ACQUIRE
-    send_code(0xad)
-
-    # read one line
-    data = dev.read(0x82, args.pixels*2)
+    # read next line
+    try:
+        data = dev.read(0x82, args.pixels*2)
+    except usb.core.USBError as usb_err:
+        print("\nERROR: ignoring dropped line\n")
+        time.sleep(1)
+        continue
 
     # deserialize to pixels
     spectrum = []
     for i in range(0, len(data), 2):
         spectrum.append(data[i] | (data[i+1] << 8))
 
-    # stomp endpoints so they don't skew image intensity range
-    index = spectrum[0] # capture this before stomping
-    # for i in range(3):
-    #     spectrum[i] = spectrum[4]
-    # spectrum[-1] = spectrum[-2]
+    # extract line index
+    index = spectrum[0] 
 
     dup = "DUP" if index == last_index else ""
     last_index = index
