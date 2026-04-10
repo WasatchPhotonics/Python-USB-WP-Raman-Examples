@@ -76,7 +76,11 @@ if args.stop_line is not None:
 if args.line_step is not None:
     set_line_step(args.line_step)
 
-print("Enabling area scan")
+if dev.idProduct == 0x4000:
+    print("disabling detector timeout")
+    send_code(0x8e, 0)
+
+print("enabling area scan")
 send_code(0xeb, 1)
 
 # initialize CSV
@@ -96,18 +100,20 @@ send_code(0xad)
 
 lines_read = 0
 last_index = -1
+start_time = datetime.datetime.now()
 while True:
     if not args.perpetual and lines_read > args.count:
         break
 
     delay_ms = random.randint(1, 100) if args.randomize else 0
     time.sleep(delay_ms / 1000.0)
+    elapsed_ms = int((datetime.datetime.now() - start_time).total_seconds() * 1000)
         
     # read next line
     try:
         data = dev.read(0x82, args.pixels*2)
     except usb.core.USBError as usb_err:
-        print("\nERROR: dropped line, sending another ACQUIRE\n")
+        print(f"\nERROR: dropped line, sending another ACQUIRE (elapsed {elapsed_ms}ms)\n")
         send_code(0xad)
         continue
 
