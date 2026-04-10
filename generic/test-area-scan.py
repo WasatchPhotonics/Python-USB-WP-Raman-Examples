@@ -107,8 +107,8 @@ while True:
     try:
         data = dev.read(0x82, args.pixels*2)
     except usb.core.USBError as usb_err:
-        print("\nERROR: ignoring dropped line\n")
-        time.sleep(1)
+        print("\nERROR: dropped line, sending another ACQUIRE\n")
+        send_code(0xad)
         continue
 
     # deserialize to pixels
