@@ -29,7 +29,6 @@ HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
 TIMEOUT_MS = 1000
 
-MAX_PAGES = 8
 PAGE_SIZE = 64
 
 # An extensible, stateful "Test Fixture" 
@@ -101,6 +100,8 @@ class Fixture(object):
         group.add_argument("--integration-time-ms", type=int,            help="integration time (ms)")
         group.add_argument("--integration-times",   type=str,            help="list of integration times (ms)")
         group.add_argument("--scans-to-average",    type=int,            help="set scan averaging (XS-only)")
+        group.add_argument("--detector-gain",       type=float,          help="detector gain")
+        group.add_argument("--detector-offset",     type=int,            help="detector offset")
         group.add_argument("--spectra",             type=int,            help="read the given number of spectra", default=0)
         group.add_argument("--delay-ms",            type=int,            help="delay n ms between spectra", default=0)
         group.add_argument("--continuous-count",    type=int,            help="how many spectra to read from a single ACQUIRE", default=1)
@@ -141,7 +142,7 @@ class Fixture(object):
         group.add_argument("--fpga-options",        action="store_true", help="dump FPGA compilation options")
         group.add_argument("--eeprom-load-test",    action="store_true", help="load-test multiple EEPROMs")
         group.add_argument("--dump",                action="store_true", help="dump basic getters")
-        group.add_argument("--max-pages",           type=int,            help="number of EEPROM pages for load-test", default=8)
+        group.add_argument("--max-pages",           type=int,            help="number of EEPROM pages", default=8)
         group.add_argument("--monitor-battery",     action="store_true", help="monitor XS battery")
         group.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
         group.add_argument("--shutdown",            action="store_true", help="turn off spectrometer")
@@ -176,7 +177,7 @@ class Fixture(object):
             self.debug("claimed device")
 
     def read_eeprom(self, dev):
-        dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(8)]
+        dev.buffers = [self.get_cmd(dev, 0xff, 0x01, page) for page in range(self.args.max_pages)]
         dev.eeprom = parse_eeprom_pages(dev.buffers)
 
         # save each page as hex string
@@ -241,6 +242,14 @@ class Fixture(object):
                 if check != n:
                     print(f"WARNING: failed to set {n} scan averaging (read {check})")
 
+        if self.args.detector_gain is not None:
+            for dev in self.devices:
+                self.set_detector_gain(dev, self.args.detector_gain)
+
+        if self.args.detector_offset is not None:
+            for dev in self.devices:
+                self.set_detector_offset(dev, self.args.detector_offset)
+
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 1) for dev in self.devices]
 
@@ -256,6 +265,13 @@ class Fixture(object):
         if self.args.eeprom_load_test:
             self.do_eeprom_load_test()
 
+        if self.args.monitor_battery:
+            while True:
+                for dev in self.devices:
+                    (raw, percentage, charging) = self.get_battery_level(dev)
+                    print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
+                sleep(1)
+
         # disable laser on shutdown
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 0) for dev in self.devices]
@@ -263,13 +279,6 @@ class Fixture(object):
         # reset trigger source on shutdown
         if self.args.hardware_trigger:
             [self.set_trigger_source(dev, 0) for dev in self.devices]
-
-        if self.args.monitor_battery:
-            while True:
-                for dev in self.devices:
-                    (raw, percentage, charging) = self.get_battery_level(dev)
-                    print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
-                sleep(1)
 
         if self.args.plot and self.args.spectra:
             print("Press return to exit...", end='')
@@ -419,6 +428,24 @@ class Fixture(object):
         sn = dev.eeprom["serial_number"]
         print(f"{datetime.now()} setting integrationTimeMS to {n} on {sn}")
         self.send_cmd(dev, 0xb2, n)
+
+    def set_detector_gain(self, dev, gain):
+        raw = self.float_to_uint16(gain)
+        sn = dev.eeprom["serial_number"]
+        print(f"{datetime.now()} setting detector gain to {gain:0.2f} (raw 0x{raw}) on {sn}")
+        self.send_cmd(dev, 0xb7, raw)
+        # self.send_cmd(dev, 0x9d, raw)
+
+    def set_detector_offset(self, dev, offset):
+        sn = dev.eeprom["serial_number"]
+        print(f"{datetime.now()} setting detector offset to {offset} on {sn}")
+        self.send_cmd(dev, 0xb6, offset)
+
+    def float_to_uint16(self, gain):
+        msb = int(round(gain, 5)) & 0xff
+        lsb = int((gain - msb) * 256) & 0xff
+        raw = (msb << 8) | lsb
+        return raw
 
     def get_integration_time_ms(self, dev):
         return self.get_cmd(dev, 0xbf, lsb_len=3)
@@ -690,7 +717,7 @@ class Fixture(object):
         block_size = bytes_to_read # testing multi-channel
         data = []
 
-        print(f"{datetime.now()} trying to read {dev.pixels} ({bytes_to_read} bytes) in chunks of {block_size} bytes with timeout {timeout_ms}ms from {sn}")
+        print(f"{datetime.now()} trying to read {dev.pixels} pixels ({bytes_to_read} bytes) in chunks of {block_size} bytes with timeout {timeout_ms}ms from {sn}")
         while True:
             try:
                 self.debug(f"{datetime.now()} have {len(data)}/{bytes_to_read} bytes, reading next {block_size}")

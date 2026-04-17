@@ -13,6 +13,8 @@ from functools import partial
 
 import EEPROMFields
 
+MAX_EEPROM_PAGES = 8 # separate from EEPROMFields, as XS BLE FW may not be in sync
+
 debugging = False
 def debug(msg):
     if debugging:
@@ -29,7 +31,7 @@ class Fixture:
 
     @todo It appears notifications don't work on Windows?!?
     """
-    VERSION = "1.0.5"
+    VERSION = "1.1.0"
 
     WASATCH_SERVICE   = "D1A7FF00-AF78-4449-A34F-4DA1AFAF51BC"
     DISCOVERY_SERVICE = "0000ff00-0000-1000-8000-00805f9b34fb"
@@ -45,11 +47,22 @@ class Fixture:
          5: ("ERR_IMG_SNSR_IN_BAD_STATE",   "The sensor is not able to take spectra"),
          6: ("ERR_IMG_SNSR_STATE_TRANS_FLR","The sensor failed to apply acquisition parameters"),
          7: ("ERR_SPEC_ACQ_SIG_WAIT_TMO",   "The sensor failed to take a spectrum (timeout exceeded)"),
-        32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"),
-        33: ("TAKING_DARK",                 "taking spectra (no laser)"),
-        34: ("LASER_WARNING_DELAY",         "paused during laser warning delay period"),
-        35: ("LASER_WARMUP",                "paused during laser warmup period"),
-        36: ("TAKING_RAMAN",                "taking spectra (laser enabled)"),
+
+         # added from EnlightenMAUI.BluetoothSpectrometer.COLLECTION_FAILURE_CODDES
+         # and ENG-0120 ACQUIRE Status Notifications
+         8: ("ERR_INTERLOCK_OPEN",          "Can't perform Raman measurement because interlock open"),
+         9: ("ERR_RESERVED",                "Reserved acquisition error"),
+        10: ("ERR_BAD_MSG_FROM_STM32",      "Internal error (bad message from STM32)"),
+        11: ("ERR_AUTO_RAMAN_IN_PROG",      "Auto-Raman already in progress"),
+        12: ("ERR_SEG_TX_FLR",              "Error transmitting image segment over BLE"),
+        13: ("ERR_FPGA_READ_FLR",           "Error reading from FPGA"),
+        14: ("ERR_FPGA_UPDATE_FLR",         "Error writing to FPGA"),
+
+        32: ("AUTO_OPT_TARGET_RATIO",       "Auto-Raman is in the process of optimizing acquisition parameters"), # incl targetRatio
+        33: ("TAKING_DARK",                 "Auto-Dark/Raman taking spectra (no laser)"),                         # incl current/total steps
+        34: ("LASER_WARNING_DELAY",         "Auto-Dark/Raman paused during laser warning delay period"),          # ditto
+        35: ("LASER_WARMUP",                "Auto-Dark/Raman paused during laser warmup period"),                 # ditto
+        36: ("TAKING_RAMAN",                "Auto-Dark/Raman taking spectra (laser enabled)")                     # ditto
     }
 
     ############################################################################
@@ -81,7 +94,8 @@ class Fixture:
         self.code_by_name = { "LASER_STATE":             0xff03,
                               "ACQUIRE":                 0xff04,
                               "BATTERY_STATE":           0xff09,
-                              "GENERIC":                 0xff0a }
+                              "GENERIC":                 0xff0a,
+                              "SPECTRA":                 0xff0b } 
         self.name_by_uuid = { self.wrap_uuid(code): name for name, code in self.code_by_name.items() }
 
         #                  Name                        Lvl  Set   Get Size
@@ -122,6 +136,7 @@ class Fixture:
         group.add_argument("--plot",                    action="store_true", help="graph spectra")
         group.add_argument("--overlay",                 action="store_true", help="overlay spectra on graph")
         group.add_argument("--delay-ms",                type=int,            help="intra-spectra delay", default=0)
+        group.add_argument("--timeout-ms",              type=int,            help="override timeout (ms)")
         group.add_argument("--keep-waiting",            action="store_true", help="don't timeout")
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
@@ -248,8 +263,17 @@ class Fixture:
         # connect 
         await self.client.connect()
 
+        while not self.client.is_connected:
+            self.debug("waiting on connection...")
+            sleep(0.1)
+
         # grab device information
         await self.load_device_information()
+
+        # warn on old firmware
+        if self.vercmp(self.device_info["Software Revision String"], "4.10.7") < 0:
+            print("\nWARNING: this script is intended for use with BLE FW 4.10.7 or higher, " +
+                  "supporting the 0xff0b SPECTRA Characteristic.\n")
 
         # get Characteristic information
         await self.load_characteristics()
@@ -304,10 +328,15 @@ class Fixture:
         print("\ndisconnected")
 
     async def load_device_information(self):
+        """
+        This will load Hardware Revision String, Firmware Revision String and 
+        Software Revision String, corresponding to the FPGA, STM32 and BL652 
+        firmware versions respectively.
+        """
         self.debug(f"address {self.client.address}")
         self.debug(f"mtu_size {self.client.mtu_size} bytes")
 
-        self.device_info = {}
+        self.device_info = {} # will include "Hardware", "Firmware" and "Software Revision String"s
         for service in self.client.services:
             if "Device Information" in str(service):
                 for char in service.characteristics:
@@ -338,7 +367,7 @@ class Fixture:
 
         sys = platform.system()
         self.debug("Characteristics:")
-        for name in ['GENERIC', 'LASER_STATE', 'ACQUIRE', 'BATTERY_STATE']:
+        for name in ['GENERIC', 'LASER_STATE', 'ACQUIRE', 'BATTERY_STATE', 'SPECTRA']:
             char = self.char_by_name[name]
             extra = ""
 
@@ -348,23 +377,27 @@ class Fixture:
             props = ",".join(char.properties)
             self.debug(f"  {name:30s} {char.uuid} ({props}){extra}")
     
+            # MZ: This is where Bleak 2.x and 3.x crash on Windows. Affects both INDICATE and NOTIFY.
             if "notify" in char.properties or "indicate" in char.properties:
                 if name == "BATTERY_STATE":
                     self.debug(f"starting {name} notifications")
                     await self.client.start_notify(char.uuid, self.battery_notification)
                     self.notifications.add(char.uuid)
                 elif name == "LASER_STATE":
-                    self.debug(f"starting {name} notifications")
+                    self.debug(f"starting {name} indications")
                     await self.client.start_notify(char.uuid, self.laser_state_notification)
-                    self.debug(f"back from start_notify")
                     self.notifications.add(char.uuid)
                 elif name == "GENERIC":
-                    self.debug(f"starting {name} notifications")
+                    self.debug(f"starting {name} indications")
                     await self.client.start_notify(char.uuid, self.generics.notification_callback)
                     self.notifications.add(char.uuid)
                 elif name == "ACQUIRE":
                     self.debug(f"starting {name} notifications")
                     await self.client.start_notify(char.uuid, self.acquire_notification)
+                    self.notifications.add(char.uuid)
+                elif name == "SPECTRA":
+                    self.debug(f"starting {name} indications")
+                    await self.client.start_notify(char.uuid, self.spectra_notification)
                     self.notifications.add(char.uuid)
 
     async def stop_notifications(self):
@@ -520,7 +553,7 @@ class Fixture:
             await self.set_integration_time_ms(self.eeprom["startup_integration_time_ms"])
         if self.args.gain_db is None:
             await self.set_gain_db(self.eeprom["gain"])
-        # don't worry about startup_temp_degC (should be set by FW)
+        # don't worry about startup_laser_tec_setpoint (should be set by FW)
 
     async def set_integration_time_ms(self, ms):
         name = "INTEGRATION_TIME_MS"
@@ -567,8 +600,14 @@ class Fixture:
         """
         buf = await self.read_char("BATTERY_STATE", 2)
         self.debug(f"battery response: {buf}")
+
+        perc = buf[1] + buf[2] / 256.0
+        batt_temp = buf[3]
+        chg_temp = buf[4]
         return { 'charging': buf[0] != 0,
-                 'perc': int(buf[1]) }
+                 'perc': buf[1] + buf[2] / 256.0,
+                 'batt_temp': buf[3],
+                 'chg_temp': buf[4] }
 
     async def get_laser_state(self):
         retval = {}
@@ -576,33 +615,40 @@ class Fixture:
             retval[k] = 'UNKNOWN'
             
         buf = await self.read_char("LASER_STATE", 7)
+        # print(f"parsing LASER_STATE buf {buf}")
         if len(buf) >= 4:
             retval.update({
                 'mode':            buf[0],
                 'type':            buf[1],
                 'enable':          buf[2],
-                'watchdog_sec':    buf[3] })
+                'watchdog_sec':    (buf[3] << 8) | buf[4] }) # MSB uint16?
+
+        # skip bytes 5 and 6 reserved (used to be laser_warning_delay_ms)
 
         if len(buf) >= 7: 
             retval.update({
-                'mask':            buf[6],
-                'interlock_closed':buf[6] & 0x01,
-                'laser_firing':    buf[6] & 0x02 })
+                'mask':            buf[7],          # the whole mask
+                'interlock_closed':buf[7] & 0x01,
+                'laser_firing':    buf[7] & 0x02 })
 
+        # byte 8 will be laser PWM
+
+        # print(f"returning LASER_STATE {retval}")
         return retval
 
     async def get_status(self):
         battery_state = await self.get_battery_state()
-        battery_perc = f"{battery_state['perc']:3d}%"
+        battery_perc = f"{battery_state['perc']:6.2f}%"
         battery_charging = 'charging' if battery_state['charging'] else 'discharging'
 
         laser_state = await self.get_laser_state()
-        laser_firing = laser_state['laser_firing']
         interlock_closed = 'closed (armed)' if laser_state['interlock_closed'] else 'open (safe)'
 
         amb_temp = await self.get_generic_value("AMBIENT_TEMPERATURE_DEG_C")
 
-        return f"Battery {battery_perc} ({battery_charging}), Laser {laser_firing}, Interlock {interlock_closed}, Amb {amb_temp}°C"
+        return (f"Battery <Perc {battery_perc}, {battery_charging}, temp {battery_state['batt_temp']}°C, IC {battery_state['chg_temp']}°C>, " +
+                f"Laser <Enabled {laser_state['enable']}, Interlock {interlock_closed}, Watchdog {laser_state['watchdog_sec']}sec>, " +
+                f"Amb {amb_temp}°C")
 
     async def monitor(self):
         try:
@@ -795,9 +841,10 @@ class Fixture:
         elif status in [33, 34, 35, 36]:
             currentStep = int(payload[0] << 8 | payload[1])
             totalSteps  = int(payload[2] << 8 | payload[3])
-            if totalSteps > 1:
-                msg += f" (step {currentStep+1}/{totalSteps})" 
+            # if totalSteps > 1:
+            msg += f" (step {currentStep+1}/{totalSteps})" 
 
+        self.debug(f"parse_qcquire_status: converted status {status}, payload {payload} -> {msg}")
         return msg
     
     def acquire_notification(self, sender, data):
@@ -805,15 +852,29 @@ class Fixture:
         if (len(data) < 3):
             raise RuntimeError(f"received invalid ACQUIRE notification of {len(data)} bytes: {data}")
 
-        # first two bytes declare whether it's a status message or spectral data
+        # first two bytes declare whether it's a status message (all we should be 
+        # getting now under API9) or spectral data (deprecated after API6)
+        first_pixel = int((data[0] << 8) | data[1]) # big-endian int16
+
+        if first_pixel != 0xffff:
+            raise RuntimeError(f"received invalid SPECTRA data (API6) on API9 ACQUIRE characteristic!")
+            
+        status = data[2]
+        payload = data[3:]
+        msg = self.parse_acquire_status(status, payload)
+        self.debug(f"acquire_notification: {msg}")
+        
+    def spectra_notification(self, sender, data):
+        ok = True
+        if (len(data) < 3):
+            raise RuntimeError(f"received invalid SPECTRA notification of {len(data)} bytes: {data}")
+
+        # first two bytes declare whether it's spectral data (all we should be 
+        # getting now under API9) or a status message (deprecated after API6)
         first_pixel = int((data[0] << 8) | data[1]) # big-endian int16
 
         if first_pixel == 0xffff:
-            status = data[2]
-            payload = data[3:]
-            msg = self.parse_acquire_status(status, payload)
-            self.debug(f"acquire_notification: {msg}")
-            return
+            raise RuntimeError("received invalid API6 ACQUIRE status notification on API9 SPECTRA characteristic!")
 
         ########################################################################
         # apparently it's spectral data
@@ -824,6 +885,7 @@ class Fixture:
             raise RuntimeError(f"received first_pixel {first_pixel} when pixels_read {self.pixels_read}")
 
         spectral_data = data[2:]
+        
         pixels_in_packet = int(len(spectral_data) / 2)
 
         for i in range(pixels_in_packet):
@@ -855,7 +917,11 @@ class Fixture:
         await self.write_char("ACQUIRE", [arg]) # , quiet=True)
 
         # compute timeout
-        timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
+        if self.args.timeout_ms:
+            timeout_ms = self.args.timeout_ms
+        else:
+            timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
+        self.debug(f"waiting for {self.pixels} pixels over {timeout_ms} ms")
 
         # wait for spectral data to arrive
         start_time = datetime.now()
@@ -896,7 +962,7 @@ class Fixture:
         msg  = f"Connected to {self.eeprom['model']} {self.eeprom['serial_number']} with {self.pixels} pixels "
         msg += f"from ({self.wavelengths[0]:.2f}, {self.wavelengths[-1]:.2f}nm)"
         if self.wavenumbers:
-            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f} 1/cm)"
+            msg += f" ({self.wavenumbers[0]:.2f}, {self.wavenumbers[-1]:.2f}cm⁻¹)"
         try:
             print(msg)
         except:
@@ -934,14 +1000,15 @@ class Fixture:
         self.pages = []
 
         name = "EEPROM_DATA"
-        for page in range(8):
+        for page in range(MAX_EEPROM_PAGES):
             buf = bytearray()
-            for subpage in range(4):
+            while len(buf) < 64:
                 
+                offset = len(buf)
                 request = self.generics.generate_read_request(name)
                 request.append(0) # page is big-endian uint16
                 request.append(page)
-                request.append(subpage)
+                request.append(offset)
 
                 self.debug(f"read_eeprom_pages: querying {name} ({to_hex(request)})")
                 await self.write_char("GENERIC", request, callback=lambda data: self.generics.process_response(name, data))
@@ -950,7 +1017,7 @@ class Fixture:
                 await self.generics.wait(name)
 
                 data = self.generics.get_value(name)
-                self.debug(f"read_eeprom_pages: received page {page}, subpage {subpage}: {data}")
+                self.debug(f"read_eeprom_pages: received {len(data)} bytes from page {page} at offset {offset}: {data}")
 
                 for byte in data:
                     buf.append(byte)
@@ -969,7 +1036,7 @@ class Fixture:
         length     = address[2]
         end_byte   = start_byte + length
 
-        if page > len(self.pages):
+        if page >= len(self.pages):
             print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
                 page, start_byte, length, data_type, field))
             return
@@ -1078,7 +1145,7 @@ class Fixture:
         elif advertisement_data is not None:
             return self.WASATCH_SERVICE.lower() in advertisement_data.service_uuids
         else:
-            return "wp-" in device.name.lower()
+            return any([device.name.upper().startswith(prefix) for prefix in ["WP-", "V2.EVT"]])
 
     def decode(self, data):
         try:
@@ -1087,6 +1154,35 @@ class Fixture:
         except:
             pass
         return data
+
+    def vercmp(self, a, b, delim=None):
+        """ 
+        @returns vercmp("1.2.3.4", "1.2.4.3") -> -1 
+        @note Python probably already something like this...?
+        """
+        if a is None or b is None:
+            return None
+
+        if delim is None:
+            for c in [".", "_", "-", " "]:
+                if c in a and c in b:
+                    delim = c
+                    break
+        if delim is None:
+            delim = "." # maybe there is no delimiter
+
+        tok_a = str(a).split(delim)
+        tok_b = str(b).split(delim)
+
+        int_a = int(tok_a[0])
+        int_b = int(tok_b[0])
+
+        if   int_a > int_b: return +1
+        elif int_a < int_b: return -1
+        elif len(tok_a) == 1 and len(tok_b) == 1: return 0
+        elif len(tok_a)  > 1 and len(tok_b)  > 1: return self.vercmp(delim.join(tok_a[1:]), delim.join(tok_b[1:]), delim=delim)
+        elif len(tok_b)  > 1: return -1
+        else: return +1
 
 class Generic:
     """ encapsulates paired setter and getter accessors for a single attribute """
@@ -1145,7 +1241,7 @@ class Generic:
 class Generics:
     """ Facade to access all Generic attributes in the BLE interface """
 
-    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_ATTRIBUTE', 'UNSUPPORTED_COMMAND' ]
+    RESPONSE_ERRORS = [ 'OK', 'NO_RESPONSE_FROM_HOST', 'FPGA_READ_FAILURE', 'INVALID_PARAMETER', 'UNSUPPORTED_COMMAND' ]
 
     def __init__(self):
         self.seq = 0
@@ -1261,3 +1357,40 @@ if __name__ == "__main__":
 #    asyncio.ensure_future(fixture.run())
 #    loop.run_forever()
 #    loop.close()
+
+"""
+Note that Bleak is unable to enable notifications/indications on Windows under 
+Parallels from a Mac.
+
+`pip list` from a Dell laptop on which this script worked:
+
+Package            Version
+------------------ ------------
+bleak              0.22.3
+bleak-winrt        1.2.0
+contourpy          1.3.1
+cycler             0.12.1
+docutils           0.21.2
+fonttools          4.55.3
+importlib_metadata 8.5.0
+kiwisolver         1.4.7
+libusb             1.0.27.post3
+matplotlib         3.10.0
+numpy              2.2.0
+packaging          24.2
+pillow             11.0.0
+pip                24.3.1
+pkg_about          1.2.6
+pyparsing          3.2.0
+PySide6            6.8.1
+PySide6_Addons     6.8.1
+PySide6_Essentials 6.8.1
+python-dateutil    2.9.0.post0
+pyusb              1.2.1
+setuptools         75.6.0
+shiboken6          6.8.1
+six                1.17.0
+typing_extensions  4.12.2
+usb                0.0.83.dev0
+zipp               3.21.0
+"""

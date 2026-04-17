@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Reproduce the ENLIGHTEN startup sequence
+# Reproduce the Wasatch.NET startup sequence, but in Python
 
 import traceback
 import usb.core
@@ -46,6 +46,7 @@ class Fixture(object):
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--debug",               action="store_true", help="debug output")
+        parser.add_argument("--profile",             action="store_true", help="profile exchanges")
         parser.add_argument("--list",                action="store_true", help="list all spectrometers")
         parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=100)
         parser.add_argument("--pixels",              type=int,            help="pixels")
@@ -67,8 +68,10 @@ class Fixture(object):
         else:
             self.debug("not on POSIX, so NOT claiming interface")
 
+        self.start_time = datetime.now()
+
     def connect(self):
-        print("starting ENLIGHTEN connection sequence")
+        print("starting Wasatch.NET connection sequence")
 
         if self.args.pixels is not None:
             self.pixels = self.args.pixels
@@ -80,24 +83,26 @@ class Fixture(object):
             self.pixels = 2048
         self.debug(f"connect: using pixels {self.pixels}")
 
-        # step 1: get FW revision
-        fw_rev = self.get_firmware_version()
-        print(f"FW Revision <- {fw_rev}")
-
-        # step 2: get FPGA revision
-        fpga_rev = self.get_fpga_version()
-        print(f"FPGA Revision <- {fpga_rev}")
-
-        # step 3: set high gain mode
-        if self.is_ingaas():
-            self.set_high_gain_mode_enable(True)
-
-        # step 4: read EEPROM
+        # step 1 (EN 4): read EEPROM
         self.read_eeprom()
-        print(f"eeprom <- {self.eeprom}")
-
+        print(f"EEPROM:")
+        for k, v in self.eeprom.items():
+            print(f"  {k:<30s}: {v}")
         self.pixels = self.eeprom["active_pixels_horizontal"]
-        print(f"pixels <- {self.pixels}")
+
+        # step 2 (EN 7): read FPGA compilation options
+        self.read_fpga_compilation_options()
+        print(f"FPGA Compilation Options:")
+        for k, v in self.fpga_compilation_options.items():
+            print(f"  {k:<30s}: {v}")
+
+        # step 3 (EN 1): get FW revision
+        fw_rev = self.get_firmware_version()
+        print(f"FW Revision: {fw_rev}")
+
+        # step 4 (EN 2): get FPGA revision
+        fpga_rev = self.get_fpga_version()
+        print(f"FPGA Revision: {fpga_rev}")
 
         # step 5: set detector TEC setpoint
         if self.eeprom["has_cooling"]:
@@ -115,36 +120,50 @@ class Fixture(object):
                 # step 6:
                 self.set_detector_tec_enable(True)
 
-        # step 7: read FPGA compilation options
-        fpga_options = self.read_fpga_compilation_options()
-        print(f"fpga_compilation_options <- {fpga_options}")
+        # step 7 (EN 13): set integration time
+        print(f"integration_time_ms -> {self.args.integration_time_ms}")
+        self.set_integration_time_ms(self.args.integration_time_ms)
 
-        # step 8, 9, 10, 11: CONFIGURE FPGA (if format >= 4, send gain/offset even/odd downstream)
+        if self.eeprom["has_laser"]:
+            self.set_laser_mod_linked_to_integration_time(False) # Step 8
+            self.set_laser_mod_enable(False) # Step 9
+            self.set_laser_enable(False) # Step 10
+
+        # step 11-14 (EN 8-11) send gain/offset even/odd 
         self.set_detector_gain(self.eeprom["gain"])
         self.set_detector_offset(self.eeprom["offset"])
         if self.is_ingaas():
             self.set_detector_gain_odd(self.eeprom["gain_odd"])
             self.set_detector_offset_odd(self.eeprom["offset_odd"])
 
-        # step 12: set trigger source
+        # step 15 (EN 3): set high gain mode
+        if self.is_ingaas():
+            self.set_high_gain_mode_enable(True)
+
+        # step 16 (EN 12): set trigger source
         print(f"trigger_source -> 0")
         self.set_trigger_source(0)
 
-        # step 13: set integration time
-        print(f"integration_time_ms -> {self.args.integration_time_ms}")
-        self.set_integration_time_ms(self.args.integration_time_ms)
+        if self.eeprom["has_laser"]:
+            # step 17-18: get and set laser modulation period
+            period_us = self.get_laser_mod_period()
+            print(f"laser modulation period {period_us}us")
+            period_us = 1000
+            self.set_laser_mod_period(period_us)
+            print(f"laser modulation period -> {period_us}")
 
-        # step 14: get integration time (verify it was set correctly)
-        ms = self.get_integration_time_ms()
-        print(f"integration_time_ms <- {ms}")
-        if ms != self.args.integration_time_ms:
-            print(f"integration time didn't match expectation ({ms} != {self.args.integration_time_ms})")
+            # step 19-20: get and set laser modulation pulse width
+            width_us = self.get_laser_mod_pulse_width()
+            print(f"laser modulation width {width_us}us")
+            width_us = 99
+            self.set_laser_mod_pulse_width(width_us)
+            print(f"laser modulation period -> {width_us}")
 
-        # step 15: get detector gain
-        gain = self.get_detector_gain()
-        print(f"detector gain <- {gain:0.3f}")
+            # step 21: enable laser modulation
+            print("laser mod enable -> True")
+            self.set_laser_mod_enable(True)
 
-        print("finished ENLIGHTEN connection sequence")
+        print("finished Wasatch.NET connection sequence")
 
     def is_ingaas(self):
         if self.pid == 0x2000:
@@ -155,18 +174,14 @@ class Fixture(object):
     def run(self):
         outfile = open(self.args.outfile, 'w') if self.args.outfile is not None else None
         for i in range(self.args.spectra):
+            if self.eeprom["has_cooling"]:
+                raw_temp = self.get_detector_temperature_raw()
+                print(f"Raw detector temperature 0x{raw_temp:04x}")
+
             spectrum = self.get_spectrum()
             print("Spectrum %3d/%3d %s ..." % (i, self.args.spectra, spectrum[:10]))
             if outfile is not None:
                 outfile.write("%s, %s\n" % (datetime.now(), ", ".join([str(x) for x in spectrum])))
-
-            if self.eeprom["has_laser"]:
-                laser_enabled = self.get_laser_enabled()
-                print(f"Laser enabled {laser_enabled}")
-
-            if self.eeprom["has_cooling"]:
-                raw_temp = self.get_detector_temperature_raw()
-                print(f"Raw detector temperature 0x{raw_temp:04x}")
 
         if outfile is not None:
             outfile.close()
@@ -198,7 +213,28 @@ class Fixture(object):
         opts["has_area_scan"]               = (word & 0x1000) != 0
         opts["has_actual_integ_time"]       = (word & 0x2000) != 0
         opts["has_horiz_binning"]           = (word & 0x4000) != 0
-        return opts
+        self.fpga_compilation_options = opts
+
+    def set_laser_mod_linked_to_integration_time(self, flag):
+        return self.send_cmd(0xdd, 1 if flag else 0)
+
+    def set_laser_mod_enable(self, flag):
+        return self.send_cmd(0xbd, 1 if flag else 0)
+
+    def set_laser_enable(self, flag):
+        return self.send_cmd(0xbe, 1 if flag else 0)
+
+    def set_laser_mod_period(self, n):
+        return self.send_cmd(0xc7, n)
+
+    def get_laser_mod_period(self):
+        return self.get_cmd(0xcb, lsb_len=5)
+
+    def get_laser_mod_pulse_width(self):
+        return self.get_cmd(0xdc, lsb_len=5)
+
+    def set_laser_mod_pulse_width(self, n):
+        return self.send_cmd(0xdb, n)
 
     def set_trigger_source(self, value):
         if self.pid == 0x4000:
@@ -334,19 +370,34 @@ class Fixture(object):
         if self.args.debug:
             print("DEBUG: %s" % msg)
 
+    def profile(self, msg):
+        if self.args.profile:
+            elapsed_ms = int((datetime.now() - self.start_time).total_seconds() * 1000)
+            print("PROFILE: " + msg)
+            print(f"ELAPSED: {elapsed_ms} ms")
+
+    def to_hex(self, a):
+        if a is None or len(a) == 0:
+            return
+        return "[ 0x" + " ".join(f"{c:02x}" for c in a) + " ]"
+
     def send_cmd(self, cmd, value=0, index=0, buf=None, label=None):
         if buf is None:
             if self.pid == 0x4000:
                 buf = [0] * 8
             else:
                 buf = ""
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x) >> %s" % (HOST_TO_DEVICE, cmd, value, index, buf))
+        msg = f">> 0x{HOST_TO_DEVICE:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}, buf {self.to_hex(buf)}"
+        self.debug(msg)
+        self.profile(msg)
         self.device.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, TIMEOUT_MS)
 
     def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d)" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS))
+        msg = f">> 0x{DEVICE_TO_HOST:02x}, bRequest 0x{cmd:02x}, wValue 0x{value:04x}, wIndex 0x{index:04x}, len {length}, timeout {TIMEOUT_MS}"
+        self.debug(msg)
+        self.profile(msg)
         result = self.device.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
-        self.debug("ctrl_transfer(0x%02x, 0x%02x, 0x%04x, 0x%04x, len %d, timeout %d) << %s" % (DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS, result))
+        self.profile(f"<< {self.to_hex(result)}")
 
         value = 0
         if msb_len is not None:

@@ -10,6 +10,22 @@ class EEPROMField:
         self.offset     = pos[1]
         self.length     = pos[2]
 
+FEATURE_MASK_FLAGS = [ 
+    (0x0001, "invert_x_axis"),
+    (0x0002, "horiz_binning_enabled"),
+    (0x0004, "gen15"),
+    (0x0008, "cutoff_filter_installed"),
+    (0x0010, "hardware_even_odd"),
+    (0x0020, "sig_laser_tec"),
+    (0x0040, "has_interlock_feedback"),
+    (0x0080, "has_shutter"),
+    (0x0100, "disable_ble_power"),
+    (0x0200, "disable_laser_armed_indicator"),
+    (0x0400, "laser_interlock_excluded"),
+    (0x0800, "laser_timeout_after_count"),
+    (0x1000, "is_oem") 
+]
+
 EEPROM_FIELDS = [
     ((0,  0, 16), "s", "model"),
     ((0, 16, 16), "s", "serial_number"),
@@ -26,6 +42,7 @@ EEPROM_FIELDS = [
     ((0, 52,  2), "h", "offset"), 
     ((0, 54,  4), "f", "gain_odd"), 
     ((0, 58,  2), "h", "offset_odd"), 
+    ((0, 60,  2), "h", "startup_laser_tec_setpoint"), # uint12, XS-only
     ((0, 63,  1), "B", "format"), 
     ((1,  0,  4), "f", "wavecal_c0"),
     ((1,  4,  4), "f", "wavecal_c1"),
@@ -79,11 +96,12 @@ EEPROM_FIELDS = [
     ((3, 57,  2), "H", "detector_timeout_sec"),
     ((3, 59,  1), "B", "horizontal_binning_mode"),
     ((3, 60,  1), "B", "startup_scans_to_average"),
-    ((3, 61,  1), "B", "xs_sml_attenuator"),
+    ((3, 61,  1), "B", "laser_attenuator"),
     ((4,  0, 64), "s", "user_data"),
     ((5, 30, 16), "s", "product_configuration"),
     ((5, 63,  1), "B", "subformat"),
-    ((8,  0, 16), "s", "laser_password")
+    ((8,  0, 16), "s", "laser_password"),
+    ((8, 16,  4), "I", "feature_mask_xs")
 ]
 
 def get_eeprom_fields():
@@ -101,6 +119,12 @@ def parse_eeprom_pages(pages):
         eeprom[name] = unpack(field.pos, field.data_type, name, pages)
     return eeprom
 
+def dump_feature_mask(value):
+    print(f"FeatureMask 0x{value:04x}:")
+    for bit, label in FEATURE_MASK_FLAGS:
+        hi = "ON " if value & bit else "OFF"
+        print(f"  0x{bit:04x}: {hi} {label}")
+
 def unpack(address, data_type, field, pages):
     page       = address[0]
     start_byte = address[1]
@@ -108,14 +132,12 @@ def unpack(address, data_type, field, pages):
     end_byte   = start_byte + length
 
     if page + 1 > len(pages):
-        print("error unpacking EEPROM page %d, offset %d, len %d as %s: invalid page (field %s)" % ( 
-            page, start_byte, length, data_type, field))
+        # print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: invalid page (field {field})")
         return
 
     buf = pages[page]
     if buf is None or end_byte > len(buf):
-        print("error unpacking EEPROM page %d, offset %d, len %d as %s: buf is %s (field %s)" % ( 
-            page, start_byte, length, data_type, buf, field))
+        print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}: buf is {buf} (field {field})")
         return
 
     if data_type == "s":
@@ -131,7 +153,7 @@ def unpack(address, data_type, field, pages):
         try:
             unpack_result = struct.unpack(data_type, buf[start_byte:end_byte])[0]
         except:
-            print("error unpacking EEPROM page %d, offset %d, len %d as %s" % (page, start_byte, length, data_type))
+            print(f"error unpacking EEPROM page {page}, offset {start_byte}, len {length} as {data_type}")
             return
 
     return unpack_result
