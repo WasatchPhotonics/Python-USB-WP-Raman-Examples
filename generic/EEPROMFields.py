@@ -29,7 +29,6 @@ FEATURE_MASK_FLAGS = [
 EEPROM_FIELDS = [
     ((0,  0, 16), "s", "model"),
     ((0, 16, 16), "s", "serial_number"),
-    ((0, 32,  4), "I", "baud_rate"),
     ((0, 36,  1), "?", "has_cooling"),
     ((0, 37,  1), "?", "has_battery"),
     ((0, 38,  1), "?", "has_laser"),
@@ -76,11 +75,7 @@ EEPROM_FIELDS = [
     ((2, 41,  2), "H", "roi_vertical_region_3_end"),
     ((0, 43,  2), "H", "startup_integration_time_ms"),
     ((0, 45,  2), "h", "startup_temp_degC"),
-    ((2, 43,  4), "f", "linearity_c0"),
-    ((2, 47,  4), "f", "linearity_c1"),
-    ((2, 51,  4), "f", "linearity_c2"),
-    ((2, 55,  4), "f", "linearity_c3"),
-    ((2, 59,  4), "f", "linearity_c4"),
+    ((3, 11,  1), "b", "max_laser_temp_deg_c"),
     ((3, 12,  4), "f", "laser_power_c0"),
     ((3, 16,  4), "f", "laser_power_c1"),
     ((3, 20,  4), "f", "laser_power_c2"),
@@ -99,9 +94,19 @@ EEPROM_FIELDS = [
     ((3, 61,  1), "B", "laser_attenuator"),
     ((4,  0, 64), "s", "user_data"),
     ((5, 30, 16), "s", "product_configuration"),
+    ((5, 45,  6), "*", "assembly_revision_packed"),
     ((5, 63,  1), "B", "subformat"),
     ((8,  0, 16), "s", "laser_password"),
-    ((8, 16,  4), "I", "feature_mask_xs")
+    ((8, 16,  4), "I", "feature_mask_xs"),
+    ((8, 20,  2), "H", "acc_state"),
+    ((8, 22,  1), "B", "acc_state_gpio1"),
+    ((8, 23,  1), "B", "acc_state_gpio2"),
+    ((8, 24,  4), "I", "acc_cont_strobe_period_us"),
+    ((8, 28,  4), "I", "acc_cont_strobe_width_us"),
+    ((8, 32,  4), "I", "acc_cont_strobe_delay_us"),
+    ((8, 36,  2), "H", "acc_cont_strobe_count"),
+    ((8, 38,  1), "b", "max_battery_temp_deg_c"),
+    ((8, 39,  1), "b", "pixel_calibration_type"),
 ]
 
 def get_eeprom_fields():
@@ -148,6 +153,8 @@ def unpack(address, data_type, field, pages):
             if c == 0:
                 break
             unpack_result += chr(c)
+    elif data_type == "*":
+        unpack_result = buf[start_byte:end_byte]
     else:
         unpack_result = 0 
         try:

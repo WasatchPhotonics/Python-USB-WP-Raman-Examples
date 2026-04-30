@@ -46,8 +46,8 @@ class Fixture(object):
         parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with --pattern, then populates minimal defaults")
         parser.add_argument("--verify",         action="store_true",    help="verifies EEPROM contents match the specified pattern and not immutable string")
         parser.add_argument("--pixels",         type=int,               help="active_pixels_horizontal when reprogramming", default=1024)
-        parser.add_argument("--pattern",        type=str,               help="for reprogram or erase, use this base pattern", default="zeros",
-                                                                        choices=["zeros", "ones", "random", "ramp", "ramp-all"])
+        parser.add_argument("--pattern",        type=str,               help="for reprogram or erase, use this base pattern", default="zeros", choices=["zeros", "ones", "random", "ramp", "ramp-all"])
+        parser.add_argument("--pattern-page",   type=int,               help="only erase with pattern on this page")
         parser.add_argument("--save-file",      type=str,               help="save to JSON file")
         self.args = parser.parse_args()
 
@@ -123,7 +123,8 @@ class Fixture(object):
         
     def do_erase(self):
         print("Erasing buffers")
-        for page in range(len(self.eeprom_pages)):
+        pages = [self.args.pattern_page] if self.args.pattern_page is not None else list(range(self.eeprom_pages))
+        for page in pages:
             for i in range(PAGE_SIZE):
                 value = self.pattern_generator()
                 self.pack((page, i, 1), "B", value)
@@ -450,6 +451,8 @@ class Fixture(object):
                 if c == 0:
                     break
                 unpack_result += chr(c)
+        elif data_type == "*":
+            unpack_result = buf[start_byte:end_byte]
         else:
             unpack_result = 0 
             try:
@@ -505,6 +508,23 @@ class Fixture(object):
                     buf[start_byte + i] = ord(value[i])
                 else:
                     buf[start_byte + i] = 0
+        elif data_type == "*":
+            for i in range(start_byte, end_byte):
+                buf[i] = 0
+            if isinstance(value, str):
+                # convert from hex
+                value = value.removeprefix("0x")
+                self.debug(f"value now {value}")
+                new_value = []
+                for i in range(len(value) // 2):
+                    b = value[i*2:i*2+2]
+                    self.debug(f"byte {i} of {value} is '{b}'")
+                    new_value.append(int(b, 16))
+                value = new_value
+                self.debug(f"value now {value}")
+            if isinstance(value, list):
+                for i in range(min(length, len(value))):
+                    buf[start_byte + i] = value[i]
         else:
             struct.pack_into(data_type, buf, start_byte, value)
 
