@@ -27,9 +27,12 @@ def to_hex(a):
 
 class Fixture:
     """
-    Note this script is currently coded to ENG-0120 BLE API rev 7.
+    This script is currently coded to ENG-0120 BLE API rev 10.
 
-    @todo It appears notifications don't work on Windows?!?
+    Note that due to a Bleak issue, notifications (and hence most spectrometer 
+    functionality) do not currently work under Parallels VM with a MacOS host
+    and Windows guest OS. (It DOES work from native MacOS, and on Windows with
+    native Intel hardware.)
     """
     VERSION = "1.1.0"
 
@@ -324,8 +327,8 @@ class Fixture:
         self.keep_scanning = False
         self.stop_scanning_event.set()
 
-    def disconnected_callback(self):
-        print("\ndisconnected")
+    def disconnected_callback(self, arg):
+        print(f"\ndisconnected (arg {arg})")
 
     async def load_device_information(self):
         """
