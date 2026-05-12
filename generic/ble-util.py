@@ -33,6 +33,9 @@ def to_hex(a):
 # Classes
 ################################################################################
 
+class WPTimeout(Exception):
+    pass
+
 class Fixture:
     """
     This script is currently coded to ENG-0120 BLE API rev 10.
@@ -150,6 +153,7 @@ class Fixture:
         group.add_argument("--delay-ms",                type=int,            help="intra-spectra delay", default=0)
         group.add_argument("--timeout-ms",              type=int,            help="override timeout (ms)")
         group.add_argument("--keep-waiting",            action="store_true", help="don't timeout")
+        group.add_argument("--loop-forever",            action="store_true", help="repeat measurement until killed with ctrl-C")
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
         group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
@@ -439,7 +443,7 @@ class Fixture:
 
     def laser_state_notification(self, sender, data):
         status = self.parse_laser_state(data)
-        print(f"{datetime.now()} received LASER_STATE notification: sender {sender}, data {data}: {status}")
+        print(f"{datetime.now()} received LASER_STATE notification: with data {data}: {status}")
 
     async def read_char(self, name, min_len=None, quiet=False):
         uuid = self.get_uuid_by_name(name)
@@ -780,6 +784,25 @@ class Fixture:
         drop_factor_msb = int(self.args.ar_drop_factor)
         drop_factor_lsb = int((self.args.ar_drop_factor - drop_factor_msb) * 256)
 
+        debug("Packing AUTO_RAMAN_PARAMS:")
+    
+        for arg in [ "max_ms",
+                     "start_integ_ms",
+                     "start_gain_db",
+                     "max_integ_ms",
+                     "min_integ_ms",
+                     "max_gain_db",
+                     "min_gain_db",
+                     "target_counts",
+                     "max_counts",
+                     "min_counts",
+                     "max_factor",
+                     "drop_factor",
+                     "saturation",
+                     "max_avg" ]:
+            value = getattr(self.args, f"ar_{arg}")
+            debug(f"  {arg} = {value}")
+
         buf = []
         buf.extend([self.args.ar_max_ms           & 0xff, (self.args.ar_max_ms        >> 8) & 0xff])
         buf.extend([self.args.ar_start_integ_ms   & 0xff, (self.args.ar_start_integ_ms>> 8) & 0xff])
@@ -834,7 +857,14 @@ class Fixture:
                 spectra = []
                 for repeat in range(repeats):
                     start_time = datetime.now()
-                    spectrum = await self.get_spectrum()
+                    try:
+                        spectrum = await self.get_spectrum()
+                    except WPTimeout as wpt:
+                        if self.args.keep_waiting:
+                            print("ignoring timeout, retrying after 5sec...")
+                            sleep(5)
+                        else:
+                            raise(wpt)
 
                     # compute total start-to-start period
                     now = datetime.now()
@@ -902,7 +932,7 @@ class Fixture:
             # if totalSteps > 1:
             msg += f" (step {currentStep+1}/{totalSteps})" 
 
-        self.debug(f"parse_qcquire_status: converted status {status}, payload {payload} -> {msg}")
+        self.debug(f"parse_acquire_status: converted status {status}, payload {payload} -> {msg}")
         return msg
     
     def acquire_notification(self, sender, data):
@@ -975,7 +1005,9 @@ class Fixture:
         await self.write_char("ACQUIRE", [arg]) # , quiet=True)
 
         # compute timeout
-        if self.args.timeout_ms:
+        if self.args.auto_raman:
+            timeout_ms = self.args.ar_max_ms + 5_000
+        elif self.args.timeout_ms:
             timeout_ms = self.args.timeout_ms
         else:
             timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
@@ -985,7 +1017,7 @@ class Fixture:
         start_time = datetime.now()
         while self.pixels_read < self.pixels:
             if not self.args.keep_waiting and (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
-                raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
+                raise WPTimeout(f"failed to read spectrum within timeout {timeout_ms}ms")
 
             # self.debug(f"still waiting for spectra ({self.pixels_read}/{self.pixels} read)")
             await asyncio.sleep(0.2)
@@ -1111,6 +1143,9 @@ class Fixture:
                 if c == 0:
                     break
                 unpack_result += chr(c)
+        elif data_type == "*":
+            # non-standard Wasatch extension
+            unpack_result = buf[start_byte:end_byte]
         else:
             unpack_result = 0 
             try:
@@ -1369,7 +1404,7 @@ class Generics:
     async def notification_callback(self, sender, data):
         # STEP EIGHT: we have received a response notification from the Generic Characteristic
 
-        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
+        debug(f"received GENERIC notification with data {to_hex(data)}")
 
         # STEP NINE: extract the sequence number from the notification response
         result = None
