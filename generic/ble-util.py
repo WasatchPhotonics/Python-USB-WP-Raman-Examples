@@ -13,6 +13,12 @@ from functools import partial
 
 import EEPROMFields
 
+################################################################################
+# Globals
+################################################################################
+
+# global to simplify access from Fixture, Generics and Generic
+
 debugging = False
 def debug(msg):
     if debugging:
@@ -22,6 +28,10 @@ def to_hex(a):
     if a is None:
         return "[ ]"
     return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
+
+################################################################################
+# Classes
+################################################################################
 
 class Fixture:
     """
@@ -102,15 +112,16 @@ class Fixture:
         #                  Name                        Lvl  Set   Get Size
         self.generics = Generics()
         self.generics.add("LASER_TEC_MODE",             0, 0x84, 0x85, 1)
-        self.generics.add("GAIN_DB",                    0, 0xb7, 0xc5, 2, epsilon=0.01)
+        self.generics.add("GAIN_DB",                    0, 0xb7, 0xc5, 2, data_type="funky_float", epsilon=0.01)
         self.generics.add("INTEGRATION_TIME_MS",        0, 0xb2, 0xbf, 3)
         self.generics.add("LASER_WARNING_DELAY_SEC",    0, 0x8a, 0x8b, 1)
-        self.generics.add("EEPROM_DATA",                1, None, 0x01, 1)
+        self.generics.add("EEPROM_DATA",                1, None, 0x01, 1, data_type="raw_data")
         self.generics.add("START_LINE",                 1, 0x21, 0x22, 2)
         self.generics.add("STOP_LINE",                  1, 0x23, 0x24, 2)
         self.generics.add("AMBIENT_TEMPERATURE_DEG_C",  1, None, 0x2a, 1)
         self.generics.add("POWER_WATCHDOG_SEC",         1, 0x30, 0x31, 2)
         self.generics.add("SCANS_TO_AVERAGE",           1, 0x62, 0x63, 2)
+        self.generics.add("AUTO_RAMAN_PARAMS",          0, 0x95, 0x98, 23, data_type="raw_data")
 
         self.parse_args()
 
@@ -146,6 +157,22 @@ class Fixture:
         group.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
         group.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
         group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line")
+
+        group = parser.add_argument_group('Auto-Raman Parameters')
+        group.add_argument("--ar-max-ms",               type=int,            help="maximum measurement time (start to finish)", default=10_000)
+        group.add_argument("--ar-start-integ-ms",       type=int,            help="initial integration time", default=100)
+        group.add_argument("--ar-start-gain-db",        type=int,            help="initial gain", default=0)
+        group.add_argument("--ar-max-integ-ms",         type=int,            help="max integration time", default=2000)
+        group.add_argument("--ar-min-integ-ms",         type=int,            help="min integration time", default=10)
+        group.add_argument("--ar-max-gain-db",          type=int,            help="max gain", default=30)
+        group.add_argument("--ar-min-gain-db",          type=int,            help="min gain", default=0)
+        group.add_argument("--ar-target-counts",        type=int,            help="optimization target intensity", default=45_000)
+        group.add_argument("--ar-max-counts",           type=int,            help="max intensity", default=50_000)
+        group.add_argument("--ar-min-counts",           type=int,            help="min intensity", default=40_000)
+        group.add_argument("--ar-max-factor",           type=int,            help="how quickly to scale up in optimization", default=5)
+        group.add_argument("--ar-drop-factor",          type=float,          help="how quickly to scale down in optimization", default=0.5)
+        group.add_argument("--ar-saturation",           type=int,            help="how high is way too high", default=65_000)
+        group.add_argument("--ar-max-avg",              type=int,            help="how much averaging to allow", default=100)
 
         group = parser.add_argument_group('Laser Control')
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
@@ -749,6 +776,32 @@ class Fixture:
     # Spectra
     ############################################################################
 
+    def serialize_auto_raman_params(self):
+        drop_factor_msb = int(self.args.ar_drop_factor)
+        drop_factor_lsb = int((self.args.ar_drop_factor - drop_factor_msb) * 256)
+
+        buf = []
+        buf.extend([self.args.ar_max_ms           & 0xff, (self.args.ar_max_ms        >> 8) & 0xff])
+        buf.extend([self.args.ar_start_integ_ms   & 0xff, (self.args.ar_start_integ_ms>> 8) & 0xff])
+        buf.extend([self.args.ar_start_gain_db    & 0xff                                          ])
+        buf.extend([self.args.ar_max_integ_ms     & 0xff, (self.args.ar_max_integ_ms  >> 8) & 0xff])
+        buf.extend([self.args.ar_min_integ_ms     & 0xff, (self.args.ar_min_integ_ms  >> 8) & 0xff])
+        buf.extend([self.args.ar_max_gain_db      & 0xff                                          ])
+        buf.extend([self.args.ar_min_gain_db      & 0xff                                          ])
+        buf.extend([self.args.ar_target_counts    & 0xff, (self.args.ar_target_counts >> 8) & 0xff])
+        buf.extend([self.args.ar_max_counts       & 0xff, (self.args.ar_max_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_min_counts       & 0xff, (self.args.ar_min_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_factor       & 0xff                                          ])
+        buf.extend([drop_factor_msb               & 0xff, drop_factor_lsb                   & 0xff])
+        buf.extend([self.args.ar_saturation       & 0xff, (self.args.ar_saturation    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_avg          & 0xff                                          ]) 
+        return buf
+
+    async def set_auto_raman_params(self):
+        data = self.serialize_auto_raman_params()
+        print(f"setting Auto-Raman params {to_hex(data)}")
+        await self.write_char("GENERIC", self.generics.generate_write_request("AUTO_RAMAN_PARAMS", data))
+
     async def perform_collection(self):
         # init outfile
         if self.args.outfile:
@@ -765,6 +818,10 @@ class Fixture:
 
         # init ramps
         self.init_ramps()
+
+        # init auto-raman
+        if self.args.auto_raman:
+            await self.set_auto_raman_params()
 
         try:
             # collect however many spectra were requested
@@ -1187,22 +1244,27 @@ class Fixture:
 
 class Generic:
     """ encapsulates paired setter and getter accessors for a single attribute """
-    def __init__(self, name, tier, setter, getter, size, epsilon):
-        self.name    = name
-        self.tier    = tier # 0, 1 or 2
-        self.setter  = setter
-        self.getter  = getter
-        self.size    = size
-        self.epsilon = epsilon
+    def __init__(self, name, tier, setter, getter, size, epsilon=0, data_type=None):
+        self.name      = name
+        self.tier      = tier # 0, 1 or 2
+        self.setter    = setter
+        self.getter    = getter
+        self.size      = size
+        self.epsilon   = epsilon
+        self.data_type = data_type
 
         self.value = None
         self.event = asyncio.Event()
     
     def serialize(self, value):
         data = []
-        if self.name == "GAIN_DB":
+        if value is None:
+            pass
+        elif self.data_type == "funky_float":
             data.append(int(value) & 0xff)
             data.append(int((value - int(value)) * 256) & 0xff)
+        elif self.data_type == "raw_data":
+            data = value # for writing EEPROM, AUTO_RAMAN_PARAMS etc
         else: 
             # assume big-endian uint[size]            
             for i in range(self.size):
@@ -1210,10 +1272,11 @@ class Generic:
         return data
 
     def deserialize(self, data):
-        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
-        if self.name == "GAIN_DB":
+        # STEP SIXTEEN: deserialize the returned Generic response payload 
+        #               according to the attribute type
+        if self.data_type == "funky_float":
             return data[0] + data[1] / 256.0
-        elif self.name == "EEPROM_DATA":
+        elif self.data_type == "raw_data":
             return data
         else:
             # by default, treat as big-endian uint
@@ -1266,8 +1329,8 @@ class Generics:
         # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
         debug(f"get_callback: seq {seq} not found in callbacks")
 
-    def add(self, name, tier, setter, getter, size, epsilon=0):
-        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
+    def add(self, name, tier, setter, getter, size, epsilon=0, data_type=None):
+        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon=epsilon, data_type=data_type)
 
     def generate_write_request(self, name, value):
         return self.generics[name].generate_write_request(value)
@@ -1349,6 +1412,10 @@ class Generics:
         epsilon = self.generics[name].epsilon
         delta   = abs(actual - expected)
         return delta <= epsilon
+
+################################################################################
+# Main
+################################################################################
 
 if __name__ == "__main__":
     fixture = Fixture()
