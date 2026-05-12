@@ -13,8 +13,6 @@ from functools import partial
 
 import EEPROMFields
 
-MAX_EEPROM_PAGES = 8 # separate from EEPROMFields, as XS BLE FW may not be in sync
-
 debugging = False
 def debug(msg):
     if debugging:
@@ -1003,7 +1001,7 @@ class Fixture:
         self.pages = []
 
         name = "EEPROM_DATA"
-        for page in range(MAX_EEPROM_PAGES):
+        for page in range(9):
             buf = bytearray()
             while len(buf) < 64:
                 
