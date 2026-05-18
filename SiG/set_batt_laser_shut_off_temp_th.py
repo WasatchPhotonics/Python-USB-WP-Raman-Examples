@@ -29,7 +29,7 @@ if args.temp is None:
 
 if args.temp is not None:
    thVal = args.temp
-   print("temp threshold {} deg C ", thVal)
+   print("setting battery temperature threshold to {} deg C ".format(thVal))
    if thVal < -1 or thVal > 127:
       print("temp threshold range is 0 to 127 deg C, -1 to disable")
       quit()
