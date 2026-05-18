@@ -18,9 +18,14 @@ Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
 
 def Get_Raw(Command, ByteCount=64, index=0):
-    return dev.ctrl_transfer(DEVICE_TO_HOST, Command, 0, 0, ByteCount, TIMEOUT_MS)
+    rc = dev.ctrl_transfer(DEVICE_TO_HOST, Command, 0, 0, ByteCount, TIMEOUT_MS)
+    print (rc)
+    return rc
 
 def Get_Raw_2(Command, Command2, ByteCount=64, index=0):
+    #print(Command)
+    #print(Command2)
+    #print(ByteCount)
     return dev.ctrl_transfer(DEVICE_TO_HOST, Command, Command2, 0, ByteCount, TIMEOUT_MS)
 
 def Get_Value(Command, ByteCount, index=0):
@@ -52,6 +57,27 @@ def Get_Val_u16(opCode, str):
   print(str, "Val:", cnt)
 
 
+def Get_Val_u32(opCode, str):
+  # print("opCode is ", opCode)
+  data = Get_Raw_2(0xff, Command2=opCode, ByteCount=4)
+  # print(data)
+  val = data[3]
+  val <<= 8
+  val |= data[2]
+  val <<= 8
+  val |= data[1]
+  val <<= 8
+  val |= data[0]
+  print(str, "Val:", val)
+  return val
+
+
+def Get_Val_u8(opCode, str):
+  data = Get_Raw_2(0xff, Command2=opCode, ByteCount=1)
+  val = data[0]
+  print(str, "Val:", val)
+
+
 def Get_Val_u16_1(opCode, str):
   data = Get_Raw(opCode, ByteCount=2)
   val = data[1]
@@ -59,6 +85,19 @@ def Get_Val_u16_1(opCode, str):
   val |= data[0]
   print(str, "Val:", val)
 
+
+print("Integration Time   %8s %s" % Get_Value(0xbf, 6))
+data = Get_Val_u16(0x98, "Features Mask")
+data = Get_Val_u16(0x17, "LASER watchdog timeout (in integ cnts)")
+print("")
+data = Get_Val_u32(0x90, "LASER watchdog run time (millis)")
+print("")
+data = Get_Val_u32(0x91, "LASER watchdog timeout (in millis)")
+print("")
+data = Get_Val_u32(0x92, "SYS Up Time (millis)")
+data = Get_Val_u8(0x93, "LASER disable on sleep cnt")
+
+# sys.exit()
 
 data = Get_Raw_2(0xff, 0x38)
 pixelCnt = data[1]
@@ -127,3 +166,5 @@ print("CCD Temperature    %8s %s" % Get_Value(0xd7, 2))
 print("Interlock          %8s %s" % Get_Value(0xef, 1))
 print("uC FW Version      %s"     % ".".join(str(x) for x in list(reversed(list(Get_Raw(0xc0))))))
 print("FPGA FW Version    %s"     % "".join(chr(c) for c in Get_Raw(0xb4)))
+print("Model Name         %s"     % "".join(chr(c) for c in Get_Raw_2(0xff, 0x60, 16)))
+print("Serial Number      %s"     % "".join(chr(c) for c in Get_Raw_2(0xff, 0x61, 16)))

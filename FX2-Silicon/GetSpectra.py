@@ -24,27 +24,33 @@ INTEG_MS = 235
 # select pixel count
 PixelCount=2048
 
-print("setting integration time to %d ms" % INTEG_MS)
-dev.ctrl_transfer(H2D, 0xb2, INTEG_MS, 0, Z, TIMEOUT) 
+#print("setting integration time to %d ms" % INTEG_MS)
+#dev.ctrl_transfer(H2D, 0xb2, INTEG_MS, 0, Z, TIMEOUT) 
 
 start_time = datetime.datetime.now()
+    
+dev.ctrl_transfer(H2D, 0xad, 0, 0, Z, TIMEOUT)   # trigger an acquisition
+
+sys.exit()
 
 count = 0
 while (datetime.datetime.now() - start_time).total_seconds() < MAX_SEC:
-    # print("sending acquire")
+    print("sending acquire")
     dev.ctrl_transfer(H2D, 0xad, 0, 0, Z, TIMEOUT)   # trigger an acquisition
 
     print("reading data from EP 0x82 .....\n")
 
     cumulative_data = []
-    total_bytes_needed = (PixelCount*2)/2 
+    total_bytes_needed = (PixelCount*2)
     while len(cumulative_data) < total_bytes_needed:
         bytes_remaining = total_bytes_needed - len(cumulative_data)
         print(f"requesting {bytes_remaining} bytes with timeout {TIMEOUT}ms")
         latest_data = dev.read(0x82, bytes_remaining, timeout=TIMEOUT)
         print("read %d bytes (%d requested)" % (len(latest_data), bytes_remaining))
         cumulative_data.extend(latest_data)
-    
+   
+    continue
+
     print("reading data from EP 0x86 .....\n")
 
     cumulative_data_1 = []
@@ -67,16 +73,16 @@ while (datetime.datetime.now() - start_time).total_seconds() < MAX_SEC:
         intensity = lsb | (msb << 8)
         spectrum.append(intensity)
 
-    x_axis = []
-    for i in range(PixelCount):
-      x_axis.append(i)
+    #x_axis = []
+    #for i in range(PixelCount):
+    #  x_axis.append(i)
 
-    if count == 1:
-       plt.plot(x_axis, spectrum)
-       plt.show()
-       break
+    #if count == 1:
+    #   plt.plot(x_axis, spectrum)
+    #   plt.show()
+    #   break
     print("%4d %s: read spectrum of %d pixels: %s .. %s" % (count, datetime.datetime.now(), len(spectrum), spectrum[0:5], spectrum[-6:-1]))
 
-    count += 1
-    if count >= 2:
-       break
+    #count += 1
+    #if count >= 2:
+    #   break

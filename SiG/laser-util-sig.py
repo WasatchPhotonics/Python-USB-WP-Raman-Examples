@@ -332,6 +332,43 @@ class Fixture(object):
     def get_laser_thermistor_raw(self):
         return self.get_adc(0)
 
+    def get_laser_thermistor_degC_220250_rev_5pt1(self, raw=None):
+        """
+        @see  docs in wasatch.FID.get_laser_thermistor_degC
+        @note we're not actually reading the thermistor here, we're reading the 
+              TEC IC's "buffered copy" of the thermistor value (likely different
+              than the original), and it is likely this calibration is invalid;
+              however it may still be USEFUL, so we're giving it a try
+        """
+        if raw is None:
+            raw = self.get_laser_thermistor_raw()
+        try:
+            print("LASER Temp ADC raw {}".format(raw))
+            degC = 0
+            gain = 2.11 # R17/R18
+            voltage    = 3.3 * raw / 4096
+            vTherm = (1 + gain - voltage) / gain
+            resistance = 10000.0 * vTherm / (1.5 - vTherm) 
+            print("LASER Temp Therm R {} ohms".format(int(resistance)))
+
+            if resistance < 0:
+                print(f"get_laser_temperature_degC: can't compute degC: raw 0x{raw:04x}, voltage = {voltage}, resistance = {resistance}")
+                return -999
+
+            x = math.log2(resistance)
+            A = 344.57183
+            B = -27.96592
+            C = 0.02218
+            degC = A + B*x + C*x*x*x
+
+            #logVal     = math.log(resistance / 10000.0)
+            #insideMain = logVal + 3977.0 / (25 + 273.0)
+            #degC       = 3977.0 / insideMain - 273.0
+        except:
+            degC = -998
+
+        return degC
+
     def get_laser_thermistor_degC(self, raw=None):
         """
         @see  docs in wasatch.FID.get_laser_thermistor_degC
@@ -638,6 +675,7 @@ class Fixture(object):
         self.dev.ctrl_transfer(HOST_TO_DEVICE, cmd, value, index, buf, self.args.timeout_ms)
 
     def get_cmd(self, cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None):
+        #print("timeout is ", self.args.timeout_ms)
         result = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, self.args.timeout_ms)
 
         value = 0
@@ -670,12 +708,137 @@ class Fixture(object):
             sleep(min(1, remaining))
             elapsed_sec = (datetime.now() - start).total_seconds()
 
+    def set_laser_pwr_attn_level(self, setPoint):
+        cmd = 0x82
+        value = setPoint
+        index = 0
+        length = 1
+        resp = self.dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, 10)
+        print("resp is ", resp)
+        if resp[0] == 0:
+           print("laser pwr attn set to {}".format(setPoint))
+        else:
+           print("failed to set laser pwr attn - error code {}".format(resp[0]))
+
+    def Get_Value(self, Command, command2, ByteCount, index=0):
+        return self.dev.ctrl_transfer(DEVICE_TO_HOST, Command, command2, 0, ByteCount, 1000)
+
+    def get_laser_pwr_attn_level(self):
+        data = self.Get_Value(0x83, 0x0, 2)
+        print("data :", data)
+        if data[0] == 0:
+           print("laser pwr attn is {}".format(data[1]))
+        else:
+           print("error code {}".format(data[0]))
+
+
 fixture = Fixture()
 if fixture.dev:
+    fixture.set_integration_time_ms(1000)
+    quit()
+    fixture.get_watchdog_sec()
+    fixture.set_watchdog_sec(13)
+    fixture.get_watchdog_sec()
+    quit()
+    #print("    Start line:          %s" % fixture.get_startline())
+    #print("    Stop line:          %s" % fixture.get_stopline())
+    #degC = fixture.get_laser_thermistor_degC()
+    #degC = fixture.get_laser_thermistor_degC_220250_rev_5pt1()
+    #print("LASER temp ", degC, "degC")
+    #fixture.set_tec_setpoint(800)
+    #fixture.set_enable(False)
+    #fixture.set_enable(True)
+    print("adc temp val", fixture.get_adc())
+    #sleep(.01)
+    print("adc temp val", fixture.get_adc())
+    #sleep(.02)
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    #sleep(.03)
+    fixture.set_laser_pwr_attn_level(111)
+    #sleep(.03)
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    print("adc temp val", fixture.get_adc())
+    #sleep(.03)
+    print("adc temp val", fixture.get_adc())
+    #sleep(.03)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    quit()
+    #sleep(1)
+    fixture.set_laser_pwr_attn_level(111)
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    print("adc temp val", fixture.get_adc())
+    #sleep(1)
+    fixture.get_laser_pwr_attn_level()
+    quit()
     try:
-        temp = fixture.get_laser_thermistor_degC()
-        print("Laser Temp is {} deg C".format(temp))
-        # fixture.run()
+        #temp = fixture.get_laser_thermistor_degC()
+        #print("Laser Temp is {} deg C".format(temp))
+        fixture.run()
     except Exception as ex:
         print(f"caught {ex}")
     # fixture.set_enable(False)

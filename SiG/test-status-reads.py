@@ -66,7 +66,7 @@ class Fixture:
         coeffs = [ 1.5712971947853123e+000, 1.4453391889061071e-002, -1.8534086153440592e-006, 4.2553356470494626e-010 ]
         for i, coeff in enumerate(coeffs):
             degC += coeff * pow(raw, i)
-        return f"{degC:6.2f}°C"
+        return f"{degC:6.2f} deg C"
 
     def set_laser_tec_mode(self, mode):
         print(f"setting laser TEC mode {mode}")
@@ -115,4 +115,6 @@ class Fixture:
 
 fixture = Fixture()
 fixture.get_amb_temp()
+retval = fixture.get_las_temp()
+print(retval)
 #fixture.run()

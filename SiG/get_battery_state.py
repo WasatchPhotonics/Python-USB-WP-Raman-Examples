@@ -28,10 +28,11 @@ def Get_Value(Command, command2, ByteCount, index=0):
 #
 # E.g., [0x20, 0x40, 0x00] = 64 + 32/256 = 64.125% (not charging)
 def get_battery_level():
-    raw = Get_Value(0xff, 0x13, 3)
+    raw = Get_Value(0xff, 0x13, 5)
     percentage = raw[1] + (1.0 * raw[0] / 256.0)
     charging = raw[2] != 0
-    return (raw, percentage, charging)
+    return (raw, percentage, charging, raw[3], raw[4])
     
-(raw, percentage, charging) = get_battery_level()
+(raw, percentage, charging, battTempDegC, chargerTempDegC) = get_battery_level()
 print("Battery Charge Level: %s (%.2f%%) (%s)" % (raw, percentage, "charging" if charging else "not charging"))
+print("Batt Temp: %d deg C, Charger Temp: %d deg C", battTempDegC, chargerTempDegC)

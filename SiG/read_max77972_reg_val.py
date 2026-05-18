@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+
 import sys
 import usb.core
 import argparse
@@ -7,8 +8,8 @@ import argparse
 dev = usb.core.find(idVendor=0x24aa, idProduct=0x4000)
 
 if not dev:
-    print("No spectrometer found")
-    sys.exit()
+   print("No spectrometer found")
+   sys.exit()
 
 HOST_TO_DEVICE = 0x40
 DEVICE_TO_HOST = 0xC0
@@ -34,15 +35,18 @@ def Get_Value(Command, command2, ByteCount, regAddr, index=0):
     return dev.ctrl_transfer(DEVICE_TO_HOST, Command, command2, regAddr, 3, TIMEOUT_MS)
 
 def read_reg(regAddr):
+    #print(regAddr)
     data = Get_Value(0xff, 0x76, 3, regAddr)
     # print(data)
+    val = 0
     if data[0] != 0:
        print("Flr !! rc", data[0])
     else:
        val = data[2]
        val <<= 8
        val |= data[1]
-       print("{}/0x{:2x} : {}/0x{:04x}".format(regAddr, regAddr, val, val))
+       #print("{}/0x{:2x} : {}/0x{:04x}".format(regAddr, regAddr, val, val))
+       print("0x{:04x}".format(val))
     return val      
 
 read_reg(regAddr)
