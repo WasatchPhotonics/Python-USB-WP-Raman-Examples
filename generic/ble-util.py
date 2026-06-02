@@ -302,10 +302,15 @@ class Fixture:
         # grab device information
         await self.load_device_information()
 
-        # warn on old firmware
-        if self.vercmp(self.device_info["Software Revision String"], "4.10.7") < 0:
-            print("\nWARNING: this script is intended for use with BLE FW 4.10.7 or higher, " +
-                  "supporting the 0xff0b SPECTRA Characteristic.\n")
+        # check for old firmware
+        ble_fw = self.device_info["Software Revision String"]
+        if self.vercmp(ble_fw, "4.10.7") < 0:
+            print("\nWARNING: this script is intended for use with BLE FW 4.10.7 or higher, supporting the 0xff0b SPECTRA Characteristic.\n")
+        if self.vercmp(ble_fw, "4.12.9") < 0:
+            self.max_eeprom_pages = 8
+            print("\nWARNING: older FW can only read first 8 EEPROM pages.\n")
+        else:
+            self.max_eeprom_pages = 9
 
         # get Characteristic information
         await self.load_characteristics()
@@ -1090,8 +1095,9 @@ class Fixture:
         self.pages = []
 
         name = "EEPROM_DATA"
-        for page in range(9):
+        for page in range(self.max_eeprom_pages):
             buf = bytearray()
+            self.debug(f"read_eeprom_pages: reading page {page} of {self.max_eeprom_pages}")
             while len(buf) < 64:
                 
                 offset = len(buf)
