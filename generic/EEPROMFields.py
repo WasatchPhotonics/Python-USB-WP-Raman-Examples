@@ -26,6 +26,14 @@ FEATURE_MASK_FLAGS = [
     (0x1000, "is_oem") 
 ]
 
+FEATURE_MASK_XS_FLAGS = [ 
+    (0x0000_0001, "ble_door_sensor"),
+    (0x0000_0002, "ext_laser_control"),
+    (0x0000_0004, "aux_button_laser_enable"),
+    (0x0000_0008, "disable_laser_sub_sys"),
+    (0x0000_0010, "leave_acc_5v_out_powered"),
+]
+
 EEPROM_FIELDS = [
     ((0,  0, 16), "s", "model"),
     ((0, 16, 16), "s", "serial_number"),
@@ -130,10 +138,16 @@ def parse_eeprom_pages(pages):
     return eeprom
 
 def dump_feature_mask(value):
-    print(f"FeatureMask 0x{value:04x}:")
+    print(f"FeatureMask 0x{value:02x}:")
     for bit, label in FEATURE_MASK_FLAGS:
         hi = "ON " if value & bit else "OFF"
         print(f"  0x{bit:04x}: {hi} {label}")
+
+def dump_feature_mask_xs(value):
+    print(f"FeatureMaskXS 0x{value:04x}:")
+    for bit, label in FEATURE_MASK_XS_FLAGS:
+        hi = "ON " if value & bit else "OFF"
+        print(f"  0x{bit:08x}: {hi} {label}")
 
 def unpack(address, data_type, field, pages):
     page       = address[0]

@@ -313,7 +313,7 @@ class Fixture(object):
                     if name == label:
                         field = self.eeprom_fields['feature_mask']
                         old_mask = self.fields['feature_mask']
-                        flag = value.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH']
+                        flag = value.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH', 'YES']
                         if flag:
                             new_mask = old_mask | bit
                         else:
@@ -322,6 +322,23 @@ class Fixture(object):
                         print(f"setting FeatureMask.{label} {flag}: 0x{old_mask:04x} -> 0x{new_mask:04x}")
                         self.pack(field.pos, field.data_type, new_mask)
                         self.eeprom_fields['feature_mask'] = new_mask
+                        set_something = True
+
+            # check for FeatureMaskXS bitfield
+            if not set_something:
+                for bit, label in EEPROMFields.FEATURE_MASK_XS_FLAGS:
+                    if name == label:
+                        field = self.eeprom_fields['feature_mask_xs']
+                        old_mask = self.fields['feature_mask_xs']
+                        flag = value.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH', 'YES']
+                        if flag:
+                            new_mask = old_mask | bit
+                        else:
+                            new_mask = old_mask & (bit ^ 0xffff_ffff)
+
+                        print(f"setting FeatureMaskXS.{label} {flag}: 0x{old_mask:08x} -> 0x{new_mask:08x}")
+                        self.pack(field.pos, field.data_type, new_mask)
+                        self.eeprom_fields['feature_mask_xs'] = new_mask
                         set_something = True
 
             if not set_something:
@@ -400,6 +417,7 @@ class Fixture(object):
             print("%30s %s" % (field, self.fields[field]))
 
         EEPROMFields.dump_feature_mask(self.fields['feature_mask'])
+        EEPROMFields.dump_feature_mask_xs(self.fields['feature_mask_xs'])
 
     ############################################################################
     # Utility Methods
@@ -486,7 +504,11 @@ class Fixture(object):
                 page, start_byte, length, data_type, label))
 
         if data_type.lower() in ["h", "i", "b", "l", "q"]:
-            value = int(value)
+            if isinstance(value, str) and value.startswith("0x"):
+                value.removeprefix("0x")
+                value = int(value, 16)
+            else:
+                value = int(value)
         elif data_type.lower() in ["f", "d"]:
             value = float(value)
         elif data_type.lower() in ["?"]:
