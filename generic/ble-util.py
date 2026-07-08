@@ -13,7 +13,11 @@ from functools import partial
 
 import EEPROMFields
 
-MAX_EEPROM_PAGES = 8 # separate from EEPROMFields, as XS BLE FW may not be in sync
+################################################################################
+# Globals
+################################################################################
+
+# global to simplify access from Fixture, Generics and Generic
 
 debugging = False
 def debug(msg):
@@ -25,11 +29,21 @@ def to_hex(a):
         return "[ ]"
     return "[ " + ", ".join([f"0x{v:02x}" for v in a]) + " ]"
 
+################################################################################
+# Classes
+################################################################################
+
+class WPTimeout(Exception):
+    pass
+
 class Fixture:
     """
-    Note this script is currently coded to ENG-0120 BLE API rev 7.
+    This script is currently coded to ENG-0120 BLE API rev 10.
 
-    @todo It appears notifications don't work on Windows?!?
+    Note that due to a Bleak issue, notifications (and hence most spectrometer 
+    functionality) do not currently work under Parallels VM with a MacOS host
+    and Windows guest OS. (It DOES work from native MacOS, and on Windows with
+    native Intel hardware.)
     """
     VERSION = "1.1.0"
 
@@ -101,15 +115,16 @@ class Fixture:
         #                  Name                        Lvl  Set   Get Size
         self.generics = Generics()
         self.generics.add("LASER_TEC_MODE",             0, 0x84, 0x85, 1)
-        self.generics.add("GAIN_DB",                    0, 0xb7, 0xc5, 2, epsilon=0.01)
+        self.generics.add("GAIN_DB",                    0, 0xb7, 0xc5, 2, data_type="funky_float", epsilon=0.01)
         self.generics.add("INTEGRATION_TIME_MS",        0, 0xb2, 0xbf, 3)
         self.generics.add("LASER_WARNING_DELAY_SEC",    0, 0x8a, 0x8b, 1)
-        self.generics.add("EEPROM_DATA",                1, None, 0x01, 1)
+        self.generics.add("EEPROM_DATA",                1, None, 0x01, 1, data_type="raw_data")
         self.generics.add("START_LINE",                 1, 0x21, 0x22, 2)
         self.generics.add("STOP_LINE",                  1, 0x23, 0x24, 2)
         self.generics.add("AMBIENT_TEMPERATURE_DEG_C",  1, None, 0x2a, 1)
         self.generics.add("POWER_WATCHDOG_SEC",         1, 0x30, 0x31, 2)
         self.generics.add("SCANS_TO_AVERAGE",           1, 0x62, 0x63, 2)
+        self.generics.add("AUTO_RAMAN_PARAMS",          0, 0x95, 0x98, 23, data_type="raw_data")
 
         self.parse_args()
 
@@ -138,6 +153,7 @@ class Fixture:
         group.add_argument("--delay-ms",                type=int,            help="intra-spectra delay", default=0)
         group.add_argument("--timeout-ms",              type=int,            help="override timeout (ms)")
         group.add_argument("--keep-waiting",            action="store_true", help="don't timeout")
+        group.add_argument("--loop-forever",            action="store_true", help="repeat measurement until killed with ctrl-C")
                                                          
         group = parser.add_argument_group('Acquisition Parameters')
         group.add_argument("--integration-time-ms",     type=int,            help="set integration time")
@@ -145,6 +161,22 @@ class Fixture:
         group.add_argument("--scans-to-average",        type=int,            help="set scan averaging")
         group.add_argument("--start-line",              type=int,            help="set vertical ROI start line")
         group.add_argument("--stop-line",               type=int,            help="set vertical ROI stop line")
+
+        group = parser.add_argument_group('Auto-Raman Parameters')
+        group.add_argument("--ar-max-ms",               type=int,            help="maximum measurement time (start to finish)", default=10_000)
+        group.add_argument("--ar-start-integ-ms",       type=int,            help="initial integration time", default=100)
+        group.add_argument("--ar-start-gain-db",        type=int,            help="initial gain", default=0)
+        group.add_argument("--ar-max-integ-ms",         type=int,            help="max integration time", default=2000)
+        group.add_argument("--ar-min-integ-ms",         type=int,            help="min integration time", default=10)
+        group.add_argument("--ar-max-gain-db",          type=int,            help="max gain", default=30)
+        group.add_argument("--ar-min-gain-db",          type=int,            help="min gain", default=0)
+        group.add_argument("--ar-target-counts",        type=int,            help="optimization target intensity", default=45_000)
+        group.add_argument("--ar-max-counts",           type=int,            help="max intensity", default=50_000)
+        group.add_argument("--ar-min-counts",           type=int,            help="min intensity", default=40_000)
+        group.add_argument("--ar-max-factor",           type=int,            help="how quickly to scale up in optimization", default=5)
+        group.add_argument("--ar-drop-factor",          type=float,          help="how quickly to scale down in optimization", default=0.5)
+        group.add_argument("--ar-saturation",           type=int,            help="how high is way too high", default=65_000)
+        group.add_argument("--ar-max-avg",              type=int,            help="how much averaging to allow", default=100)
 
         group = parser.add_argument_group('Laser Control')
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
@@ -270,10 +302,15 @@ class Fixture:
         # grab device information
         await self.load_device_information()
 
-        # warn on old firmware
-        if self.vercmp(self.device_info["Software Revision String"], "4.10.7") < 0:
-            print("\nWARNING: this script is intended for use with BLE FW 4.10.7 or higher, " +
-                  "supporting the 0xff0b SPECTRA Characteristic.\n")
+        # check for old firmware
+        ble_fw = self.device_info["Software Revision String"]
+        if self.vercmp(ble_fw, "4.10.7") < 0:
+            print("\nWARNING: this script is intended for use with BLE FW 4.10.7 or higher, supporting the 0xff0b SPECTRA Characteristic.\n")
+        if self.vercmp(ble_fw, "4.12.9") < 0:
+            self.max_eeprom_pages = 8
+            print("\nWARNING: older FW can only read first 8 EEPROM pages.\n")
+        else:
+            self.max_eeprom_pages = 9
 
         # get Characteristic information
         await self.load_characteristics()
@@ -324,8 +361,8 @@ class Fixture:
         self.keep_scanning = False
         self.stop_scanning_event.set()
 
-    def disconnected_callback(self):
-        print("\ndisconnected")
+    def disconnected_callback(self, arg):
+        print(f"\ndisconnected (arg {arg})")
 
     async def load_device_information(self):
         """
@@ -411,7 +448,7 @@ class Fixture:
 
     def laser_state_notification(self, sender, data):
         status = self.parse_laser_state(data)
-        print(f"{datetime.now()} received LASER_STATE notification: sender {sender}, data {data}: {status}")
+        print(f"{datetime.now()} received LASER_STATE notification: with data {data}: {status}")
 
     async def read_char(self, name, min_len=None, quiet=False):
         uuid = self.get_uuid_by_name(name)
@@ -748,6 +785,51 @@ class Fixture:
     # Spectra
     ############################################################################
 
+    def serialize_auto_raman_params(self):
+        drop_factor_msb = int(self.args.ar_drop_factor)
+        drop_factor_lsb = int((self.args.ar_drop_factor - drop_factor_msb) * 256)
+
+        debug("Packing AUTO_RAMAN_PARAMS:")
+    
+        for arg in [ "max_ms",
+                     "start_integ_ms",
+                     "start_gain_db",
+                     "max_integ_ms",
+                     "min_integ_ms",
+                     "max_gain_db",
+                     "min_gain_db",
+                     "target_counts",
+                     "max_counts",
+                     "min_counts",
+                     "max_factor",
+                     "drop_factor",
+                     "saturation",
+                     "max_avg" ]:
+            value = getattr(self.args, f"ar_{arg}")
+            debug(f"  {arg} = {value}")
+
+        buf = []
+        buf.extend([self.args.ar_max_ms           & 0xff, (self.args.ar_max_ms        >> 8) & 0xff])
+        buf.extend([self.args.ar_start_integ_ms   & 0xff, (self.args.ar_start_integ_ms>> 8) & 0xff])
+        buf.extend([self.args.ar_start_gain_db    & 0xff                                          ])
+        buf.extend([self.args.ar_max_integ_ms     & 0xff, (self.args.ar_max_integ_ms  >> 8) & 0xff])
+        buf.extend([self.args.ar_min_integ_ms     & 0xff, (self.args.ar_min_integ_ms  >> 8) & 0xff])
+        buf.extend([self.args.ar_max_gain_db      & 0xff                                          ])
+        buf.extend([self.args.ar_min_gain_db      & 0xff                                          ])
+        buf.extend([self.args.ar_target_counts    & 0xff, (self.args.ar_target_counts >> 8) & 0xff])
+        buf.extend([self.args.ar_max_counts       & 0xff, (self.args.ar_max_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_min_counts       & 0xff, (self.args.ar_min_counts    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_factor       & 0xff                                          ])
+        buf.extend([drop_factor_msb               & 0xff, drop_factor_lsb                   & 0xff])
+        buf.extend([self.args.ar_saturation       & 0xff, (self.args.ar_saturation    >> 8) & 0xff])
+        buf.extend([self.args.ar_max_avg          & 0xff                                          ]) 
+        return buf
+
+    async def set_auto_raman_params(self):
+        data = self.serialize_auto_raman_params()
+        print(f"setting Auto-Raman params {to_hex(data)}")
+        await self.write_char("GENERIC", self.generics.generate_write_request("AUTO_RAMAN_PARAMS", data))
+
     async def perform_collection(self):
         # init outfile
         if self.args.outfile:
@@ -765,6 +847,10 @@ class Fixture:
         # init ramps
         self.init_ramps()
 
+        # init auto-raman
+        if self.args.auto_raman:
+            await self.set_auto_raman_params()
+
         try:
             # collect however many spectra were requested
             collection = []
@@ -776,7 +862,14 @@ class Fixture:
                 spectra = []
                 for repeat in range(repeats):
                     start_time = datetime.now()
-                    spectrum = await self.get_spectrum()
+                    try:
+                        spectrum = await self.get_spectrum()
+                    except WPTimeout as wpt:
+                        if self.args.keep_waiting:
+                            print("ignoring timeout, retrying after 5sec...")
+                            sleep(5)
+                        else:
+                            raise(wpt)
 
                     # compute total start-to-start period
                     now = datetime.now()
@@ -844,7 +937,7 @@ class Fixture:
             # if totalSteps > 1:
             msg += f" (step {currentStep+1}/{totalSteps})" 
 
-        self.debug(f"parse_qcquire_status: converted status {status}, payload {payload} -> {msg}")
+        self.debug(f"parse_acquire_status: converted status {status}, payload {payload} -> {msg}")
         return msg
     
     def acquire_notification(self, sender, data):
@@ -917,7 +1010,9 @@ class Fixture:
         await self.write_char("ACQUIRE", [arg]) # , quiet=True)
 
         # compute timeout
-        if self.args.timeout_ms:
+        if self.args.auto_raman:
+            timeout_ms = self.args.ar_max_ms + 5_000
+        elif self.args.timeout_ms:
             timeout_ms = self.args.timeout_ms
         else:
             timeout_ms = 4 * max(self.last_integration_time_ms, self.integration_time_ms) * self.scans_to_average + 6000 # 4sec latency + 2sec buffer
@@ -927,7 +1022,7 @@ class Fixture:
         start_time = datetime.now()
         while self.pixels_read < self.pixels:
             if not self.args.keep_waiting and (datetime.now() - start_time).total_seconds() * 1000 > timeout_ms:
-                raise RuntimeError(f"failed to read spectrum within timeout {timeout_ms}ms")
+                raise WPTimeout(f"failed to read spectrum within timeout {timeout_ms}ms")
 
             # self.debug(f"still waiting for spectra ({self.pixels_read}/{self.pixels} read)")
             await asyncio.sleep(0.2)
@@ -1000,8 +1095,9 @@ class Fixture:
         self.pages = []
 
         name = "EEPROM_DATA"
-        for page in range(MAX_EEPROM_PAGES):
+        for page in range(self.max_eeprom_pages):
             buf = bytearray()
+            self.debug(f"read_eeprom_pages: reading page {page} of {self.max_eeprom_pages}")
             while len(buf) < 64:
                 
                 offset = len(buf)
@@ -1053,6 +1149,9 @@ class Fixture:
                 if c == 0:
                     break
                 unpack_result += chr(c)
+        elif data_type == "*":
+            # non-standard Wasatch extension
+            unpack_result = buf[start_byte:end_byte]
         else:
             unpack_result = 0 
             try:
@@ -1186,22 +1285,27 @@ class Fixture:
 
 class Generic:
     """ encapsulates paired setter and getter accessors for a single attribute """
-    def __init__(self, name, tier, setter, getter, size, epsilon):
-        self.name    = name
-        self.tier    = tier # 0, 1 or 2
-        self.setter  = setter
-        self.getter  = getter
-        self.size    = size
-        self.epsilon = epsilon
+    def __init__(self, name, tier, setter, getter, size, epsilon=0, data_type=None):
+        self.name      = name
+        self.tier      = tier # 0, 1 or 2
+        self.setter    = setter
+        self.getter    = getter
+        self.size      = size
+        self.epsilon   = epsilon
+        self.data_type = data_type
 
         self.value = None
         self.event = asyncio.Event()
     
     def serialize(self, value):
         data = []
-        if self.name == "GAIN_DB":
+        if value is None:
+            pass
+        elif self.data_type == "funky_float":
             data.append(int(value) & 0xff)
             data.append(int((value - int(value)) * 256) & 0xff)
+        elif self.data_type == "raw_data":
+            data = value # for writing EEPROM, AUTO_RAMAN_PARAMS etc
         else: 
             # assume big-endian uint[size]            
             for i in range(self.size):
@@ -1209,10 +1313,11 @@ class Generic:
         return data
 
     def deserialize(self, data):
-        # STEP SIXTEEN: deserialize the returned Generic response payload according to the attribute type
-        if self.name == "GAIN_DB":
+        # STEP SIXTEEN: deserialize the returned Generic response payload 
+        #               according to the attribute type
+        if self.data_type == "funky_float":
             return data[0] + data[1] / 256.0
-        elif self.name == "EEPROM_DATA":
+        elif self.data_type == "raw_data":
             return data
         else:
             # by default, treat as big-endian uint
@@ -1265,8 +1370,8 @@ class Generics:
         # probably an uncaught acknowledgement from a generic setter like SET_INTEGRATION_TIME_MS
         debug(f"get_callback: seq {seq} not found in callbacks")
 
-    def add(self, name, tier, setter, getter, size, epsilon=0):
-        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon)
+    def add(self, name, tier, setter, getter, size, epsilon=0, data_type=None):
+        self.generics[name] = Generic(name, tier, setter, getter, size, epsilon=epsilon, data_type=data_type)
 
     def generate_write_request(self, name, value):
         return self.generics[name].generate_write_request(value)
@@ -1305,7 +1410,7 @@ class Generics:
     async def notification_callback(self, sender, data):
         # STEP EIGHT: we have received a response notification from the Generic Characteristic
 
-        debug(f"received GENERIC notification from sender {sender}, data {to_hex(data)}")
+        debug(f"received GENERIC notification with data {to_hex(data)}")
 
         # STEP NINE: extract the sequence number from the notification response
         result = None
@@ -1348,6 +1453,10 @@ class Generics:
         epsilon = self.generics[name].epsilon
         delta   = abs(actual - expected)
         return delta <= epsilon
+
+################################################################################
+# Main
+################################################################################
 
 if __name__ == "__main__":
     fixture = Fixture()

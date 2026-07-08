@@ -76,10 +76,30 @@ def get_tec_wd_tmo():
     val += data[0]
     print("TEC watchdog timeout is {} secs".format(val))
 
+def get_laser_wd_tmo():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x17, 0, 2, TIMEOUT_MS)
+    val = data[1]
+    val = val << 8
+    val += data[0]
+    print("LASER watchdog timeout is {} secs".format(val))
 
+def get_laser_warn_dly():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0x8b, 0x00, 0, 1, TIMEOUT_MS)
+    val = data[0]
+    print("LASER warn delay is {} secs".format(val))
+
+def get_batt_laser_shut_off_th_val():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0xb1, 0, 1, TIMEOUT_MS)
+    val_byte = int.to_bytes(data[0]) 
+    val_s_int = int.from_bytes(val_byte, 'big', signed=True)
+    print("Battery LASER shut off threshold is {} deg C".format(val_s_int))
+
+get_batt_laser_shut_off_th_val()
+get_laser_wd_tmo()
+get_laser_warn_dly()
 get_laser_activation_state()
 get_laser_firing_state()
-#get_tec_mode()
+get_tec_mode()
 get_tec_state()
 get_tec_wd_tmo()
-#get_tec_dac_state()
+# get_tec_dac_state()

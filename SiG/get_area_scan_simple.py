@@ -43,9 +43,9 @@ if os.path.exists(CSVFILE):
 # initialize PNG
 image = [[0 for _ in range(PIXELS)] for _ in range(LINES)]
 
+print("sending ACQUIRE")
+dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
 for i in range(LINES):
-    print("sending ACQUIRE")
-    dev.ctrl_transfer(HOST_TO_DEVICE, 0xad, 0, 0, BUF, TIMEOUT_MS)
 
     print(f"reading {PIXELS} from bulk endpoint")
     data = dev.read(0x82, PIXELS * 2) 

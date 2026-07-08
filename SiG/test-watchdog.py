@@ -46,9 +46,14 @@ class TestFixture:
         # sec = self.get_laser_watchdog()
         # print(f"laser watchdog is {sec} sec")
 
-        self.test_laser("before setting watchdog")
+
+        # self.test_laser("before setting watchdog")
         self.set_laser_watchdog(self.args.watchdog_sec)
-        self.test_laser("after setting watchdog")
+        sec = self.get_laser_watchdog()
+        print(f"laser watchdog is {sec} sec")
+        # self.test_laser("after setting watchdog")
+        
+        return
 
     def test_laser(self, msg):
         print(f"About to run test: {msg}")
@@ -73,8 +78,8 @@ class TestFixture:
             print("GET_LASER_WATCHDOG returned NULL!")
             return -1
 
-        msb = result[0] # big-endian
-        lsb = result[1]
+        msb = result[1] # little-endian
+        lsb = result[0]
         sec = (msb << 8) | lsb
 
         print("get_laser_watchdog: %d sec (msb 0x%02x, lsb 0x%02x)" % (sec, msb, lsb))

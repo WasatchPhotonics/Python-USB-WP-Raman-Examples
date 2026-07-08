@@ -44,6 +44,11 @@ def get_string(bRequest, wValue, wIndex=0, length=32):
         s += chr(c)
     return s
 
+def get_ble_radio_state():
+    data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x2f, 0, 1, TIMEOUT_MS)
+    print(data)
+    print(data[0])
+
 def get_battery():
     data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xff, 0x13, 0, 3, TIMEOUT_MS)
     perc = data[1] + (1.0 * data[0] / 256.0)
@@ -67,7 +72,8 @@ def get_fpga_version():
 #data = dev.ctrl_transfer(DEVICE_TO_HOST, 0xf9, 0, 0, 1, TIMEOUT_MS)
 #print("FX2 EEPROM Dual Byte Addr Support:", data)
 
-print(get_fpga_version())
+#print(get_fpga_version())
+get_ble_radio_state()
 
 
 

@@ -256,4 +256,7 @@ class Fixture:
 
 fixture = Fixture()
 if fixture.dev:
-    fixture.run()
+    fixture.set_mod_enable(True)
+    fixture.send_cmd(0xc7, 1000, label="SET_MOD_PERIOD") # period_us
+    fixture.send_cmd(0xdb, 400, label="SET_MOD_WIDTH") 
+    # fixture.run()

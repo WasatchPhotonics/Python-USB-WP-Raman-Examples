@@ -147,6 +147,10 @@ class Fixture(object):
         group.add_argument("--charging",            action=argparse.BooleanOptionalAction, help="configure battery charging")
         group.add_argument("--shutdown",            action="store_true", help="turn off spectrometer")
 
+        group = parser.add_argument_group("OEM Accessory Connector")
+        group.add_argument("--set-acc-state",       type=str, help="hex uint16 (0x0003 would enable GPIO and ACC_5V_OUT)")
+        group.add_argument("--set-gpio-state",      type=str, help="hex uint16 (0x0602 would set GPIO2 to b0000_0110, i.e. manual|output|high)")
+
         return parser.parse_args()
 
     def filter_by_serial(self):
@@ -250,6 +254,13 @@ class Fixture(object):
             for dev in self.devices:
                 self.set_detector_offset(dev, self.args.detector_offset)
 
+        if self.args.set_acc_state is not None:
+            for dev in self.devices:
+                self.set_acc_state(dev, self.args.set_acc_state)
+        if self.args.set_gpio_state is not None:
+            for dev in self.devices:
+                self.set_gpio_state(dev, self.args.set_gpio_state)
+            
         if self.args.laser_enable:
             [self.set_laser_enable(dev, 1) for dev in self.devices]
 
@@ -502,6 +513,61 @@ class Fixture(object):
         count = self.get_cmd(dev, 0xe4, lsb_len=2)
         print(f"frame count = {count} (0x{count:04x})")
 
+    def set_acc_state(self, dev, s):
+        s = s.lower()
+        if not re.match(r'^0x[0-9a-f]{4}$', s):
+            print(f"ERROR: --set-acc-state requires uint16 in hex (0x0000): received {s}")
+            return
+        s = s.removeprefix("0x")
+        value = int(s, 16)
+
+        # for debug
+        gpio_enable = 0 != value & 0x0001
+        acc_5v_out  = 0 != value & 0x0002
+        print(f"setting ACC_STATE to 0x{s} (gpio_enable {gpio_enable}, acc_5v_out {acc_5v_out})")
+
+        self.send_cmd(dev, 0xff, 0xa8, value)
+
+    def set_gpio_state(self, dev, s):
+        s = s.lower()
+        if not re.match(r'^0x[0-9a-f]{4}$', s):
+            print(f"ERROR: --set-acc-state requires uint16 in hex (0x0000): received {s}")
+            return
+        s = s.removeprefix("0x")
+        value = int(s, 16)
+
+        # for debug
+        num = value & 0xff
+        control   = "function" if (value >> 8) & 0x01 else "manual"
+        direction = "output"   if (value >> 8) & 0x02 else "input"
+        ttl       = "high"     if (value >> 8) & 0x04 else "low"
+        function  = (value >> 12) & 0x0f
+        print(f"setting GPIO {num} to 0x{s} (control {control}, direction {direction}, value {ttl}, function {function})")
+
+        self.send_cmd(dev, 0xff, 0xaa, value)
+
+    """
+    SET_GPIO_PIN_STATE 0xff:0xaa 2 bytes uint8[2]
+        byte 0: GPIO_ID (0=GPIO1, 1=GPIO2, other values ignored)
+        byte 1: PIN_STATE bitmask
+        bit 0: control mode (0=Manual, 1=Function)
+        bit 1: direction (0=Input, 1=Output)
+        bit 2: output value (ignored if input)
+        bit 3: reserved
+        bit 4-7: selected function (ignored if Manual)
+    GET_GPIO_PIN_STATE 0xff:0xab 1 byte 
+        input parameter: uint8 (0=GPIO0, 1=GPIO2, other values ignored)
+        Returns a single byte, where the 8 bits match the PIN_STATE bitmask above with the following difference:
+        bit 2: current input level value 0/1 if configured as a GPIO input. Ignore otherwise.
+    SET_CONT_STROBE_PERIOD_US 0xff:0xac 4 bytes uint32 (max 71min)
+    SET_CONT_STROBE_WIDTH_US 0xff:0xad 4 bytes uint32 (max 71min)
+    SET_CONT_STROBE_DELAY_US 0xff:0xae 4 bytes uint32 (max 71min)
+    SET_CONT_STROBE_REPEAT_COUNT 0xff:0xaf 2 bytes uint16 (max 65K, 0 to disable)
+    GET_CONT_STROBE_PERIOD_US 0xff:0x94 4 bytes uint32 (max 71min)
+    GET_CONT_STROBE_WIDTH_US 0xff:0x95 4 bytes uint32 (max 71min)
+    GET_CONT_STROBE_DELAY_US 0xff:0x96 4 bytes uint32 (max 71min)
+    GET_CONT_STROBE_REPEAT_COUNT 0xff:0x97 2 bytes uint16 (max 65K, 0 is disabled)
+    """
     def dump_fpga_options(self, dev):
         word = self.get_cmd(dev, 0xff, 0x04, label="READ_COMPILATION_OPTIONS", lsb_len=2)
 
