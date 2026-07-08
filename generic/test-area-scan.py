@@ -20,6 +20,7 @@ def process_cmd_args():
     parser.add_argument("--debug",               action="store_true", help="verbose output")
     parser.add_argument("--perpetual",           action="store_true", help="run until stopped")
     parser.add_argument("--randomize",           action="store_true", help="randomize line step")
+    parser.add_argument("--single-acquire",      action="store_true", help="firmware only requires a single ACQUIRE to stream endless area-scan data")
     parser.add_argument("--count",               type=int,            help="how many LINES of spectra to read", default=20)
     parser.add_argument("--integration-time-ms", type=int,            help="integration time (ms)", default=10)
     parser.add_argument("--pid",                 type=str,            help="USB PID in hex", default="4000", choices=["1000", "2000", "4000"])
@@ -95,8 +96,9 @@ image = [[0 for _ in range(args.pixels)] for _ in range(args.lines)]
 if not args.perpetual:
     print("Looping over %d spectra (lines)" % args.count)
 
-print("Sending single ACQUIRE")
-send_code(0xad)
+if args.single_acquire:
+    print("Sending single ACQUIRE")
+    send_code(0xad)
 
 lines_read = 0
 last_index = -1
@@ -108,13 +110,18 @@ while True:
     delay_ms = random.randint(1, 100) if args.randomize else 0
     time.sleep(delay_ms / 1000.0)
     elapsed_ms = int((datetime.datetime.now() - start_time).total_seconds() * 1000)
+
+    if not args.single_acquire:
+        send_code(0xad)
         
     # read next line
     try:
         data = dev.read(0x82, args.pixels*2)
     except usb.core.USBError as usb_err:
-        print(f"\nERROR: dropped line, sending another ACQUIRE (elapsed {elapsed_ms}ms)\n")
-        send_code(0xad)
+        print(f"ERROR: dropped line, sending another ACQUIRE (elapsed {elapsed_ms}ms)")
+        time.sleep(0.1)
+        if args.single_acquire:
+            send_code(0xad)
         continue
 
     # deserialize to pixels
@@ -125,7 +132,7 @@ while True:
     # extract line index
     index = spectrum[0] 
 
-    dup = "DUP" if index == last_index else ""
+    dup = "DUP" if index == last_index else index
     last_index = index
 
     print("%s spectrum %4d (%3dms, %3s): %s ..." % (datetime.datetime.now(), lines_read + 1, delay_ms, dup, spectrum[:10]))
