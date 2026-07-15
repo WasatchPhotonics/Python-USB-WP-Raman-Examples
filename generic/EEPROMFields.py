@@ -118,7 +118,7 @@ EEPROM_FIELDS = [
     ((8, 40, 20), "s", "usb_manufacturer_name"),
     ((8, 60,  1), "B", "aux_button_function"),
     ((8, 61,  1), "B", "aux_button_param"),
-    # reserved
+    ((8, 62,  1), "B", "laser_firing_delay_sec"),
     ((8, 63,  1), "B", "latched_hardware_failures"),
 ]
 

@@ -85,6 +85,7 @@ class Fixture(object):
     def parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         parser.add_argument("--debug",               action="store_true", help="debug output")
+        parser.add_argument("--dump-log",            action="store_true", help="debug firmware")
 
         group = parser.add_argument_group("Connection")
         group.add_argument("--list",                action="store_true", help="list all spectrometers")
@@ -194,8 +195,8 @@ class Fixture(object):
     ############################################################################
 
     def run(self):
-        if len(self.devices) > 0:
-            dev = self.devices[0]
+        for dev in self.devices:
+            self.dump_log(dev, "start")
 
         if self.args.list:
             self.list()
@@ -295,6 +296,9 @@ class Fixture(object):
             print("Press return to exit...", end='')
             foo = input()
 
+        for dev in self.devices:
+            self.dump_log(dev, "done")
+
     def list(self):
         header = "%-6s %-16s %-16s %3s %6s %-10s %-10s" % ("PID", "Model", "Serial", "Fmt", "Pixels", "FW", "FPGA")
         if self.args.ble:
@@ -337,7 +341,7 @@ class Fixture(object):
     ############################################################################
 
     def get_battery_level(self, dev):
-        raw = self.get_cmd(dev, 0xff, 0x13, length=3)
+        raw = self.get_cmd(dev, 0xff, 0x13, length=5)
         percentage = raw[1] + (1.0 * raw[0] / 256.0)
         charging = raw[2] != 0
         return (raw, percentage, charging)
@@ -396,6 +400,7 @@ class Fixture(object):
     def set_laser_enable(self, dev, flag):
         self.debug("setting laserEnable to %s" % ("on" if flag else "off"))
         self.send_cmd(dev, 0xbe, 1 if flag else 0)
+        self.dump_log(dev, f"laser_enable {flag}")
 
     def set_trigger_source(self, dev, n):
         sn = dev.eeprom["serial_number"]
@@ -585,6 +590,31 @@ class Fixture(object):
         for k, v in opts.items():
             print(f"  {k} = {v}")
 
+    def dump_log(self, dev, label=None):
+        if not self.args.dump_log:
+            return
+
+        if dev.idProduct != 0x4000:
+            return
+
+        header = f"LOG [{label}]"
+        line = "-" * len(header)
+        print(line)
+        print(header)
+        print(line)
+
+        while True:
+            raw = self.get_cmd(dev, 0x81, value=0, index=0, length=64, label="GET_LOG")
+            len_ = raw[0]
+            if len_ == 0:
+                return
+            s = ""
+            for i in raw[1:]:
+                if i == 0:
+                    break
+                s += chr(i)
+            print(s)
+
     def do_eeprom_load_test(self):
         """
         When validating a new source of EEPROM chips, or FX2 FW responsible for 
@@ -693,6 +723,8 @@ class Fixture(object):
 
             start = None
             for dev in self.devices:
+                self.dump_log(dev, f"spectrum {i}")
+
                 for j in range(self.args.continuous_count):
                     # send a software trigger on the FIRST of a continuous burst, unless hardware triggering enabled
                     send_trigger = (j == 0) and not self.args.hardware_trigger

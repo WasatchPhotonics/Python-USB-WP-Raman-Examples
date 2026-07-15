@@ -417,7 +417,8 @@ class Fixture(object):
             print("%30s %s" % (field, self.fields[field]))
 
         EEPROMFields.dump_feature_mask(self.fields['feature_mask'])
-        EEPROMFields.dump_feature_mask_xs(self.fields['feature_mask_xs'])
+        if 'feature_mask_xs' in self.fields:
+            EEPROMFields.dump_feature_mask_xs(self.fields['feature_mask_xs'])
 
     ############################################################################
     # Utility Methods
