@@ -173,7 +173,7 @@ def unpack(address, data_type, field, pages):
                 break
             unpack_result += chr(c)
     elif data_type == "*":
-        unpack_result = buf[start_byte:end_byte]
+        unpack_result = list(buf[start_byte:end_byte])
     else:
         unpack_result = 0 
         try:

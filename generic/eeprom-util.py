@@ -42,7 +42,7 @@ class Fixture(object):
         parser.add_argument("--noparse",        action="store_true",    help="don't parse EEPROM fields")
         parser.add_argument("--restore",        type=str,               help="restore an EEPROM from text file")
         parser.add_argument("--set",            action="append",        help="set a name=value pair")
-        parser.add_argument("--max-pages",      type=int,               help="override standard max pages (default 8)", default=8)
+        parser.add_argument("--max-pages",      type=int,               help="override standard max pages")
         parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with --pattern, then populates minimal defaults")
         parser.add_argument("--verify",         action="store_true",    help="verifies EEPROM contents match the specified pattern and not immutable string")
         parser.add_argument("--pixels",         type=int,               help="active_pixels_horizontal when reprogramming", default=1024)
@@ -62,12 +62,22 @@ class Fixture(object):
             if self.dev:
                 self.pid = pid
                 break
+
         if self.dev:
             print(f"Found spectrometer with PID 0x{self.pid:04x}")
         else:
             print("No spectrometers found")
 
+
+
     def run(self):
+
+        if self.args.max_pages is None:
+            if self.dev.idProduct == 0x4000:
+                self.args.max_pages = 9
+            else:
+                self.args.max_pages = 8
+
         self.read_revs()
         self.read_eeprom()
 
@@ -254,7 +264,7 @@ class Fixture(object):
             self.pack((page, i, 1), "B", values[i])
 
     def read_eeprom(self):
-        print("Reading EEPROM")
+        print(f"Reading EEPROM ({self.args.max_pages} pages)")
         self.eeprom_pages = []
         for page in range(self.args.max_pages):
             buf = self.get_cmd(cmd=0xff, value=0x01, index=page, length=PAGE_SIZE)
@@ -471,7 +481,7 @@ class Fixture(object):
                     break
                 unpack_result += chr(c)
         elif data_type == "*":
-            unpack_result = buf[start_byte:end_byte]
+            unpack_result = list(buf[start_byte:end_byte])
         else:
             unpack_result = 0 
             try:
