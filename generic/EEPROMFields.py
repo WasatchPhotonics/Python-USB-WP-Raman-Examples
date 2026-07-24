@@ -118,7 +118,7 @@ EEPROM_FIELDS = [
     ((8, 40, 20), "s", "usb_manufacturer_name"),
     ((8, 60,  1), "B", "aux_button_function"),
     ((8, 61,  1), "B", "aux_button_param"),
-    # reserved
+    ((8, 62,  1), "B", "laser_firing_delay_sec"),
     ((8, 63,  1), "B", "latched_hardware_failures"),
 ]
 
@@ -173,7 +173,7 @@ def unpack(address, data_type, field, pages):
                 break
             unpack_result += chr(c)
     elif data_type == "*":
-        unpack_result = buf[start_byte:end_byte]
+        unpack_result = list(buf[start_byte:end_byte])
     else:
         unpack_result = 0 
         try:
