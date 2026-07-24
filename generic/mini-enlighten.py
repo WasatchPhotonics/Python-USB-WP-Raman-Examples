@@ -40,6 +40,7 @@ class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
         self.subformat = None
+        self.eeprom = None
 
         self.spectrum_count = 0
         self.timeouts = 0
@@ -149,7 +150,7 @@ class Fixture(object):
     def is_ingaas(self):
         if self.pid == 0x2000:
             return True
-        if self.eeprom["detector"].lower().startswith("g"):
+        if self.eeprom and self.eeprom["detector"].lower().startswith("g"):
             return True
 
     def run(self):
