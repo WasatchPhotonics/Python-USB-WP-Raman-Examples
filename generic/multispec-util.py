@@ -534,6 +534,10 @@ class Fixture(object):
         self.send_cmd(dev, 0xff, 0xa8, value)
 
     def set_gpio_state(self, dev, s):
+        """
+        0x0602 = set GPIO2 to MANUAL, OUTPUT, HIGH
+        0x3102 = set GPIO2 to FUNCTION, LASER_MIRROR
+        """
         s = s.lower()
         if not re.match(r'^0x[0-9a-f]{4}$', s):
             print(f"ERROR: --set-acc-state requires uint16 in hex (0x0000): received {s}")
@@ -553,7 +557,7 @@ class Fixture(object):
 
     """
     SET_GPIO_PIN_STATE 0xff:0xaa 2 bytes uint8[2]
-        byte 0: GPIO_ID (0=GPIO1, 1=GPIO2, other values ignored)
+        byte 0: GPIO_ID (1=GPIO1, 2=GPIO2, other values ignored)
         byte 1: PIN_STATE bitmask
         bit 0: control mode (0=Manual, 1=Function)
         bit 1: direction (0=Input, 1=Output)
