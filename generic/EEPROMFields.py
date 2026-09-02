@@ -120,6 +120,8 @@ EEPROM_FIELDS = [
     ((8, 61,  1), "B", "aux_button_param"),
     ((8, 62,  1), "B", "laser_firing_delay_sec"),
     ((8, 63,  1), "B", "latched_hardware_failures"),
+    ((9,  0,  2), "H", "battery_capacity_mah"),
+    ((9,  2,  2), "H", "battery_charge_current_ma"),
 ]
 
 def get_eeprom_fields():
@@ -130,7 +132,7 @@ def get_eeprom_fields():
     return fields
 
 def parse_eeprom_pages(pages):
-    """ @param pages char[8][64] """
+    """ @param pages char[][64] """
     fields = get_eeprom_fields()
     eeprom = {}
     for name, field in fields.items():

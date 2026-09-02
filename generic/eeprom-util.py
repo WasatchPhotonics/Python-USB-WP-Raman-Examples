@@ -74,7 +74,7 @@ class Fixture(object):
 
         if self.args.max_pages is None:
             if self.dev.idProduct == 0x4000:
-                self.args.max_pages = 9
+                self.args.max_pages = 10 
             else:
                 self.args.max_pages = 8
 
@@ -249,7 +249,7 @@ class Fixture(object):
                 self.debug(f"parsed and packed page {page}")
 
     def pack_page(self, page, values):
-        if not (0 <= page <= self.args.max_pages):
+        if not (0 <= page < self.args.max_pages):
             raise Exception(f"invalid page: {page}")
 
         length = len(values)
