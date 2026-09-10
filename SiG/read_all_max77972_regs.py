@@ -27,6 +27,20 @@ TIMEOUT_MS = 1000
 
 regAddr = 0xffff
 
+def Get_Cmd(cmd, value=0, index=0, length=64, lsb_len=None, msb_len=None, label=None):
+    result = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, value, index, length, TIMEOUT_MS)
+    value = 0
+    if msb_len is not None:
+        for i in range(msb_len):
+            value = value << 8 | result[i]
+        return value
+    elif lsb_len is not None:
+        for i in range(lsb_len):
+            value = (result[i] << (8 * i)) | value
+        return value
+    else:
+        return result
+
 def Get_Value(Command, command2, ByteCount, regAddr, index=0):
     return dev.ctrl_transfer(DEVICE_TO_HOST, Command, command2, regAddr, 3, TIMEOUT_MS)
 
@@ -106,6 +120,10 @@ skipList = [
  0x4f,
  0x50
 ]
+
+result = Get_Cmd(0xc0)
+if result is not None and len(result) >= 4:
+    print("Firmware %d.%d.%d.%d" % (result[3], result[2], result[1], result[0]))
 
 for regAddr in range(83):
     if regAddr in skipList:
