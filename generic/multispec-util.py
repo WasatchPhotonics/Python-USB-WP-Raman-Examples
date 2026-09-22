@@ -281,7 +281,7 @@ class Fixture(object):
             while True:
                 for dev in self.devices:
                     (raw, percentage, charging) = self.get_battery_level(dev)
-                    print(f"{datetime.now()} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
+                    print(f"{datetime.now()} {dev.eeprom['serial_number']} battery {percentage:5.2f}% {raw} {'charging' if charging else 'NOT charging'}")
                 sleep(1)
 
         # disable laser on shutdown
