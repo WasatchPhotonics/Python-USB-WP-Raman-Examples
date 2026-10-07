@@ -15,7 +15,7 @@ DEVICE_TO_HOST = 0xC0
 BUFFER_SIZE = 8
 Z = [0] * BUFFER_SIZE
 TIMEOUT_MS = 1000
-SC_GET_POWER_WATCHDOG_SEC = 0x30
+SC_SET_POWER_WATCHDOG_SEC = 0x30
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--time", type=int, help="power watchdog timeout in seconds (1 to 65535, 0 to disable)")
@@ -33,19 +33,16 @@ else:
       print("specify timeout in seconds (1 - 65535, 0 to disable) !!")
       quit()
 
-
 def set_pwr_watchdog_tmo(time):
     cmd = 0xff
-    subCmd = SC_GET_POWER_WATCHDOG_SEC
+    subCmd = SC_SET_POWER_WATCHDOG_SEC
     value = time
-    index = 0
     length = 1
     resp = dev.ctrl_transfer(DEVICE_TO_HOST, cmd, subCmd, value, length, TIMEOUT_MS)
     print("resp is ", resp)
     if resp[0] == 0:
-       print("laser warn delay set to {} secs".format(time))
+       print("power watchdog set to {} secs".format(time))
     else:
-       print("failed to set laser warn delay - error code {}".format(resp[0]))
-
+       print("failed to set power watchdog - error code {}".format(resp[0]))
 
 set_pwr_watchdog_tmo(timeSecs)
