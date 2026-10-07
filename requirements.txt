@@ -1,0 +1,9 @@
+numpy
+pyusb 
+libusb 
+bleak 
+pyftdi 
+adafruit-blinka
+crcmod
+matplotlib
+pyserial
