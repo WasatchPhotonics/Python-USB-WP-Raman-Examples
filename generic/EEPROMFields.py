@@ -10,6 +10,9 @@ class EEPROMField:
         self.offset     = pos[1]
         self.length     = pos[2]
 
+    def __repr__(self):
+        return f"EEPROMField < pos {self.pos}, data_type {self.data_type}, name {self.name}, page {self.page}, offset {self.offset}, length {self.length} >"
+
 FEATURE_MASK_FLAGS = [ 
     (0x0001, "invert_x_axis"),
     (0x0002, "horiz_binning_enabled"),
@@ -32,6 +35,7 @@ FEATURE_MASK_XS_FLAGS = [
     (0x0000_0004, "aux_button_laser_enable"),
     (0x0000_0008, "disable_laser_sub_sys"),
     (0x0000_0010, "leave_acc_5v_out_powered"),
+    (0x0000_0020, "disable_detector"),
 ]
 
 EEPROM_FIELDS = [

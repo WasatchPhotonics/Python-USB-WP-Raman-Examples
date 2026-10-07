@@ -29,7 +29,7 @@ PAGE_SIZE = 64
 class Fixture(object):
     def __init__(self):
         self.eeprom_pages = None
-        self.fields = {}
+        self.field_values = {}
         self.field_names = []
         self.pattern_count = 0
 
@@ -150,8 +150,8 @@ class Fixture(object):
         # (close enough to be compatible for our purposes)
         doc = {}
         doc["buffers"] = str(self.eeprom_pages) # <-- this is what we actually parse in load_json
-        for name in self.fields:                # <-- just for convenience
-            doc[name] = self.fields[name]
+        for name in self.field_values:                # <-- just for convenience
+            doc[name] = self.field_values[name]
         with open(self.args.save_file, "w") as f:
             s = json.dumps(doc, indent=2, sort_keys=True)
             f.write(s)
@@ -319,27 +319,29 @@ class Fixture(object):
 
             # check for FeatureMask bitfield
             if not set_something:
+                # print(f"looking for {name} in FEATURE_MASK_FLAGS")
                 for bit, label in EEPROMFields.FEATURE_MASK_FLAGS:
                     if name == label:
                         field = self.eeprom_fields['feature_mask']
-                        old_mask = self.fields['feature_mask']
+                        old_mask = self.field_values['feature_mask']
                         flag = value.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH', 'YES']
                         if flag:
                             new_mask = old_mask | bit
                         else:
                             new_mask = old_mask & (bit ^ 0xffff)
 
-                        print(f"setting FeatureMask.{label} {flag}: 0x{old_mask:04x} -> 0x{new_mask:04x}")
+                        print(f"setting FeatureMask.{label} {flag}: 0x{old_mask:04x} -> 0x{new_mask:04x}") # (field {field})
                         self.pack(field.pos, field.data_type, new_mask)
-                        self.eeprom_fields['feature_mask'] = new_mask
+                        self.field_values['feature_mask'] = new_mask
                         set_something = True
 
             # check for FeatureMaskXS bitfield
             if not set_something:
+                # print(f"looking for {name} in FEATURE_MASK_XS_FLAGS")
                 for bit, label in EEPROMFields.FEATURE_MASK_XS_FLAGS:
                     if name == label:
                         field = self.eeprom_fields['feature_mask_xs']
-                        old_mask = self.fields['feature_mask_xs']
+                        old_mask = self.field_values['feature_mask_xs']
                         flag = value.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH', 'YES']
                         if flag:
                             new_mask = old_mask | bit
@@ -348,7 +350,7 @@ class Fixture(object):
 
                         print(f"setting FeatureMaskXS.{label} {flag}: 0x{old_mask:08x} -> 0x{new_mask:08x}")
                         self.pack(field.pos, field.data_type, new_mask)
-                        self.eeprom_fields['feature_mask_xs'] = new_mask
+                        self.field_values['feature_mask_xs'] = new_mask
                         set_something = True
 
             if not set_something:
@@ -424,11 +426,11 @@ class Fixture(object):
             self.unpack(field.pos, field.data_type, name)
 
         for field in self.field_names:
-            print("%30s %s" % (field, self.fields[field]))
+            print("%30s %s" % (field, self.field_values[field]))
 
-        EEPROMFields.dump_feature_mask(self.fields['feature_mask'])
-        if 'feature_mask_xs' in self.fields:
-            EEPROMFields.dump_feature_mask_xs(self.fields['feature_mask_xs'])
+        EEPROMFields.dump_feature_mask(self.field_values['feature_mask'])
+        if 'feature_mask_xs' in self.field_values:
+            EEPROMFields.dump_feature_mask_xs(self.field_values['feature_mask_xs'])
 
     ############################################################################
     # Utility Methods
@@ -494,7 +496,7 @@ class Fixture(object):
         self.debug(f"Unpacked page {page:02d}, offset {start_byte:02d}, len {length:02d}, datatype {data_type}: {unpack_result} {extra}")
 
         self.field_names.append(field)
-        self.fields[field] = unpack_result
+        self.field_values[field] = unpack_result
 
         return unpack_result
 
