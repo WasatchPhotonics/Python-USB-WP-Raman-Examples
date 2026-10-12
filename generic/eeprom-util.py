@@ -133,7 +133,7 @@ class Fixture(object):
         
     def do_erase(self):
         print("Erasing buffers")
-        pages = [self.args.pattern_page] if self.args.pattern_page is not None else list(range(self.eeprom_pages))
+        pages = [self.args.pattern_page] if self.args.pattern_page is not None else list(range(self.args.max_pages))
         for page in pages:
             for i in range(PAGE_SIZE):
                 value = self.pattern_generator()
