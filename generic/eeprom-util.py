@@ -518,6 +518,7 @@ class Fixture(object):
 
         if data_type.lower() in ["h", "i", "b", "l", "q"]:
             if isinstance(value, str) and value.startswith("0x"):
+                value.replace("_", "") # allow hex to include underscore separators
                 value.removeprefix("0x")
                 value = int(value, 16)
             else:
