@@ -298,7 +298,7 @@ class Fixture(object):
 
         changes = []
         for pair in self.args.set:
-            tok = pair.split("=")
+            tok = pair.split("=") # seems to work for blanks, e.g. "usb_manufacturer_name="
             if len(tok) != 2:
                 print(f"skipping pair {pair}")
                 continue
@@ -500,6 +500,13 @@ class Fixture(object):
 
         return unpack_result
 
+    def clean_hex(self, value):
+        """ convert 0x1234 to 1234, 0xaa_bb_cc_dd to aabbccdd and 12_34_56 to 123456 """
+        if isinstance(value, str):
+            value = value.replace("_", "") # allow hex to include underscore separators
+            value = value.removeprefix("0x")
+        return value
+
     ## 
     # Marshall or serialize a single field at a given buffer offset of the given datatype.
     #
@@ -516,10 +523,11 @@ class Fixture(object):
             raise Exception("error packing EEPROM page %d, offset %d, len %d as %s: invalid page (label %s)" % (
                 page, start_byte, length, data_type, label))
 
+        self.debug(f"pack label {label}, data_type {data_type} address {address} -> value {value}")
+
         if data_type.lower() in ["h", "i", "b", "l", "q"]:
             if isinstance(value, str) and value.startswith("0x"):
-                value.replace("_", "") # allow hex to include underscore separators
-                value.removeprefix("0x")
+                value = self.clean_hex(value)
                 value = int(value, 16)
             else:
                 value = int(value)
@@ -549,7 +557,7 @@ class Fixture(object):
                 buf[i] = 0
             if isinstance(value, str):
                 # convert from hex
-                value = value.removeprefix("0x")
+                value = self.clean_hex(value)
                 self.debug(f"value now {value}")
                 new_value = []
                 for i in range(len(value) // 2):
