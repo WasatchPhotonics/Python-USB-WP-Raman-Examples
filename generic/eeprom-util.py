@@ -426,7 +426,10 @@ class Fixture(object):
             self.unpack(field.pos, field.data_type, name)
 
         for field in self.field_names:
-            print("%30s %s" % (field, self.field_values[field]))
+            try:
+                print("%30s %s" % (field, self.field_values[field]))
+            except:
+                print(f"ERROR: gave up on field '{name}'")
 
         EEPROMFields.dump_feature_mask(self.field_values['feature_mask'])
         if 'feature_mask_xs' in self.field_values:
