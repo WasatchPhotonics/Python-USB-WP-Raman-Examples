@@ -5,4 +5,8 @@
 *.err
 *.bak
 *.zip
+*.diff
+*.log
+*.swp
+*.txt
 .DS_Store

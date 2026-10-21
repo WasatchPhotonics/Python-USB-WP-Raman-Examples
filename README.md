@@ -42,16 +42,16 @@ software products:
 
 ## Git Installation
 
-Download the latesst 64 bit version of Git for Windows.
+Download the latest 64 bit version of Git for Windows.
 
 [https://git-scm.com/download/win](https://git-scm.com/download/win)
 
-After installation, open a Git Command shell, change
+After installation, open a Git Bash or Command shell, change
 into whatever directory holds your source code projects, and type (HTTPS
 example shown):
 
-    C:> git clone https://github.com/WasatchPhotonics/Python-USB-WP-Raman-Examples.git
-    C:> cd Python-USB-WP-Raman-Examples
+    $ git clone https://github.com/WasatchPhotonics/Python-USB-WP-Raman-Examples.git
+    $ cd Python-USB-WP-Raman-Examples
 
 _TODO: add example for creating SSH keys and adding to GitHub profile_
 
@@ -62,26 +62,29 @@ You can get Python from Python.org here:
 - https://www.python.org/downloads/windows/
 
 We recommend the latest "stable / released" 64-bit version, currently
-3.10 or 3.11 by platform.
+3.14 or 3.15 by platform.
 
-The Python.org distribution will install into /Users/username/AppData/Local/Programs/Python/Python311,
-and will not add a program "python.exe" to your path.
+The Python.org distribution should install into something like this:
 
-However, it will add a "py.exe" to your path, which you should be able to confirm
-by opening Command Prompt or Git Cmd shell and typing:
+    /c/Users/mzieg/AppData/Local/Programs/Python/Python314
 
-    C:> where py
-    C:\Windows\py.exe
-    
-    C:> py --version
-    Python 3.11.4
+Add that path to your .bash_profile or environment, and verify like this:
+
+    $ which python
+    /c/Users/FOO/AppData/Local/Programs/Python/Python314/python
+
+    $ python --version
+    Python 3.14
 
 ## Python Libraries
 
 The following pip modules should allow you to run the majority of scripts
 in the repository:
 
-    C:> py -m pip install pyusb libusb matplotlib numpy
+    $ cd Python-USB-WP-Raman-Examples
+    $ python -m venv venv
+    $ . venv/Scripts/activate
+    (venv) $ pip install -r requirements.txt
 
 ## libusb-win32 .inf files
 
