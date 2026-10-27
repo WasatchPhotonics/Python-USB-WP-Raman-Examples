@@ -118,7 +118,7 @@ EEPROM_FIELDS = [
     ((8, 32,  4), "I", "acc_cont_strobe_delay_us"),
     ((8, 36,  2), "H", "acc_cont_strobe_count"),
     ((8, 38,  1), "b", "max_battery_temp_deg_c"),
-    ((8, 39,  1), "b", "pixel_calibration_type"),
+    ((8, 39,  1), "b", "pixel_correction_type"),
     ((8, 40, 20), "s", "usb_manufacturer_name"),
     ((8, 60,  1), "B", "aux_button_function"),
     ((8, 61,  1), "B", "aux_button_param"),
