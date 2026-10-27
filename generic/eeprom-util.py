@@ -44,7 +44,7 @@ class Fixture(object):
         parser.add_argument("--set",            action="append",        help="set a name=value pair")
         parser.add_argument("--max-pages",      type=int,               help="override standard max pages")
         parser.add_argument("--reprogram",      action="store_true",    help="overwrites first 8 pages with --pattern, then populates minimal defaults")
-        parser.add_argument("--verify",         action="store_true",    help="verifies EEPROM contents match the specified pattern and not immutable string")
+        parser.add_argument("--verify",         action="append",        help="verifies a name=value pair")
         parser.add_argument("--pixels",         type=int,               help="active_pixels_horizontal when reprogramming", default=1024)
         parser.add_argument("--pattern",        type=str,               help="for reprogram or erase, use this base pattern", default="zeros", choices=["zeros", "ones", "random", "ramp", "ramp-all"])
         parser.add_argument("--pattern-page",   type=int,               help="only erase with pattern on this page")
@@ -53,7 +53,6 @@ class Fixture(object):
 
         if not (self.args.dump or \
                 self.args.erase or \
-                self.args.verify or \
                 self.args.restore):
             self.args.dump = True
 
@@ -362,26 +361,47 @@ class Fixture(object):
                 return
             self.write_eeprom()
 
+    def do_verify(self):
+        if self.args.verify is None:
+            return
+
+        for pair in self.args.verify:
+            tok = pair.split("=") # seems to work for blanks, e.g. "usb_manufacturer_name="
+            if len(tok) != 2:
+                print(f"skipping pair {pair}")
+                continue
+
+            name, expected = tok
+            flag = expected.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH', 'YES']
+
+            # check for ordinary field
+            if name in self.field_values:
+                actual = self.field_values[name]
+                if expected == actual:
+                    print(f"verified: {name} == {expected}")
+                else:
+                    print(f"ERROR: {name} {actual} != {expected}")
+                break
+
+            # check in bitfields
+            found = False
+            for mask_name, mask_flags in ( ("feature_mask",    EEPROMFields.FEATURE_MASK_FLAGS),
+                                           ("feature_mask_xs", EEPROMFields.FEATURE_MASK_XS_FLAGS) ):
+                for mask, label in mask_flags:
+                    if name == label:
+                        found = True
+                        if flag == (0 != mask & self.field_values[mask_name]):
+                            print(f"verified: {name} == {expected} ({mask_name})")
+                        else:
+                            print(f"ERROR: {name} != {expected} ({mask_name})")
+                    
+            if not found:
+                print(f"unsupported EEPROM field name: {name}")
+
     def confirm(self, msg):
         print(msg)
         cont = input("\n\nContinue? (y/N) ")
         return "y" in cont.lower()
-
-    def do_verify(self):
-        IMMUTABLE = r"c2 47 05 31 21 00 00 04 00 03 00 00 02 31 a5 00 03 00 33 02 39 0f 00 03 00 43 02 2f 00 00 03 00 " \
-                  +  "4b 02 2b 23 00 03 00 53 02 2f 00 03 ff 01 00 90 e6 78 e0 54 10 ff c4 54 0f 44 50 f5 09 13 e4"
-        for page in range(self.args.max_pages):
-            buf = self.eeprom_pages[page] 
-            s = " ".join([f"{v:02x}" for v in buf])
-            if s == IMMUTABLE:
-                print(f"ERROR: page {page} matches immutable")
-                continue
-            
-            for i in range(len(buf)):
-                expected = self.pattern_generator()
-                if buf[i] != expected:
-                    print(f"ERROR: page {page} did not match {self.args.pattern}: {s}")
-                    break
 
     def do_reprogram(self):
         if not self.confirm("*** HAZARDOUS OPERATION ***\n" +
