@@ -373,18 +373,18 @@ class Fixture(object):
 
             name, expected = tok
             flag = expected.upper() in ['TRUE', 'ON', 'SET', 'HI', 'HIGH', 'YES']
+            found = False
 
             # check for ordinary field
             if name in self.field_values:
                 actual = self.field_values[name]
-                if expected == actual:
+                if str(expected) == str(actual):
                     print(f"verified: {name} == {expected}")
                 else:
-                    print(f"ERROR: {name} {actual} != {expected}")
-                break
+                    print(f"ERROR: {name} [{actual}] != [{expected}]")
+                found = True
 
             # check in bitfields
-            found = False
             for mask_name, mask_flags in ( ("feature_mask",    EEPROMFields.FEATURE_MASK_FLAGS),
                                            ("feature_mask_xs", EEPROMFields.FEATURE_MASK_XS_FLAGS) ):
                 for mask, label in mask_flags:
