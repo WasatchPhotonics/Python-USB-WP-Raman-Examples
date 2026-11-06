@@ -182,6 +182,7 @@ class Fixture:
         group.add_argument("--laser-enable",            action="store_true", help="fire the laser (disables laser watchdog)")
         group.add_argument("--laser-tec-mode",          type=str,            help="laser TEC mode", choices=self.LASER_TEC_MODES)
         group.add_argument("--laser-warning-delay-sec", type=int,            help="set laser warning delay (sec)")
+        group.add_argument("--laser-power-perc",        type=int,            help="set laser power in duty cycle percentage (PWM)", default=100)
 
         group = parser.add_argument_group('Post-Processing')
         group.add_argument("--bin-2x2",                 action="store_true", help="apply 2x2 horizontal binning")
@@ -552,14 +553,17 @@ class Fixture:
     async def sync_laser_state(self):
         # kludge for BLE FW <4.8.9
         laser_warning_delay_ms = self.laser_warning_delay_sec * 1000
+        power_perc = max(1, min(100, self.args.laser_power_perc))
 
-        data = [ 0x00,                   # mode
-                 0x00,                   # type
-                 0x01 if self.laser_enable else 0x00, 
-                 0x00,                   # laser watchdog (DISABLE)
-                 (laser_warning_delay_ms >> 8) & 0xff,
-                 (laser_warning_delay_ms     ) & 0xff ]
-               # 0xff                    # status mask
+        data = [ 0x00,                                  # byte 0: mode
+                 0x00,                                  # byte 1: type
+                 0x01 if self.laser_enable else 0x00,   # byte 2: enable
+                 0x00,                                  # byte 3-4: laser watchdog sec
+                 0x00,                                  # byte 3-4: laser watchdog sec
+                 0x00, # (laser_warning_delay_ms >> 8) & 0xff,  # byte 5-6: laser warning delay msec (RESERVED)
+                 0x00, # (laser_warning_delay_ms     ) & 0xff,  # byte 5-6: laser warning delay msec (RESERVED)
+                 0xff,                                  # byte 7: status mask
+                 power_perc ]                           # byte 8: PWM (100%)
         await self.write_char("LASER_STATE", data)
 
     def parse_laser_state(self, data):
@@ -568,12 +572,15 @@ class Fixture:
         #if size > 0: result['mode']              = data[0]
         #if size > 1: result['type']              = data[1]
         if size > 2: result['laser_enable']       = data[2] != 0
-        if size > 3: result['laser_watchdog_sec'] = data[3]
-        # ignore bytes 4-5 (reserved)
-        if size > 6: 
-            result['status_mask']                 = data[6]
-            result['interlock_closed']            = data[6] & 0x01 != 0
-            result['laser_firing']                = data[6] & 0x02 != 0
+        if size > 4: result['laser_watchdog_sec'] = (data[3] >> 8) | data[4]
+        #if size> 6: result['laser_warning_delay_ms'] = (data[5] >> 8) | data[6]
+        if size > 7: 
+            result['status_mask']                 = data[7]
+            result['interlock_closed']            = data[7] & 0x01 != 0
+            result['laser_firing']                = data[7] & 0x02 != 0
+        if size > 8: 
+            result['power_perc']                  = data[8]
+    
         return result
 
     async def set_laser_tec_mode(self, mode: str):
@@ -648,11 +655,11 @@ class Fixture:
 
     async def get_laser_state(self):
         retval = {}
-        for k in [ 'mode', 'type', 'enable', 'watchdog_sec', 'mask', 'interlock_closed', 'laser_firing' ]:
+        for k in [ 'mode', 'type', 'enable', 'watchdog_sec', 'mask', 'interlock_closed', 'laser_firing', 'power_perc' ]:
             retval[k] = 'UNKNOWN'
             
-        buf = await self.read_char("LASER_STATE", 7)
-        # print(f"parsing LASER_STATE buf {buf}")
+        buf = await self.read_char("LASER_STATE", 9)
+        print(f"parsing LASER_STATE buf {buf}")
         if len(buf) >= 4:
             retval.update({
                 'mode':            buf[0],
@@ -662,15 +669,16 @@ class Fixture:
 
         # skip bytes 5 and 6 reserved (used to be laser_warning_delay_ms)
 
-        if len(buf) >= 7: 
+        if len(buf) >= 8: 
             retval.update({
                 'mask':            buf[7],          # the whole mask
                 'interlock_closed':buf[7] & 0x01,
-                'laser_firing':    buf[7] & 0x02 })
+                'laser_firing':    buf[7] & 0x02})
 
-        # byte 8 will be laser PWM
+        if len(buf) >= 9:
+            retval.update({'power_perc': buf[8]})
 
-        # print(f"returning LASER_STATE {retval}")
+        print(f"returning LASER_STATE {retval}")
         return retval
 
     async def get_status(self):
@@ -684,7 +692,7 @@ class Fixture:
         amb_temp = await self.get_generic_value("AMBIENT_TEMPERATURE_DEG_C")
 
         return (f"Battery <Perc {battery_perc}, {battery_charging}, temp {battery_state['batt_temp']}°C, IC {battery_state['chg_temp']}°C>, " +
-                f"Laser <Enabled {laser_state['enable']}, Interlock {interlock_closed}, Watchdog {laser_state['watchdog_sec']}sec>, " +
+                f"Laser <Enabled {laser_state['enable']}, Interlock {interlock_closed}, Watchdog {laser_state['watchdog_sec']}sec, power {laser_state['power_perc']}%>, " +
                 f"Amb {amb_temp}°C")
 
     async def monitor(self):
